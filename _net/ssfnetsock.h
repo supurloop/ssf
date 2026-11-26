@@ -42,26 +42,6 @@ extern "C" {
 #include "ssfnet.h"
 
 /* --------------------------------------------------------------------------------------------- */
-/* Design                                                                                        */
-/* --------------------------------------------------------------------------------------------- */
-/* - Plaintext TCP, no TLS, no authentication. For hosted builds (Windows, Linux, macOS)         */
-/*   and as the reference for porting the transport to an embedded IP stack.                     */
-/* - IPv4 only (ssfnet.h). A literal IPv4 address is parsed in open(); an IPv6 literal is        */
-/*   refused. A host name is resolved to IPv4 addresses only, so a dual-stack host never         */
-/*   connects over IPv6.                                                                         */
-/* - No call blocks, name resolution included. A host name is resolved with the OS asynchronous  */
-/*   resolver and polled by pollOpen():                                                          */
-/*   GetAddrInfoExW with an event on Windows, DNSServiceGetAddrInfo on macOS, getaddrinfo_a on   */
-/*   glibc. Elsewhere only literal addresses are accepted and open() of a name returns false.    */
-/* - Up to SSF_NETSOCK_CONFIG_MAX_ADDRS resolved addresses are tried in order; a failed connect  */
-/*   moves on to the next.                                                                       */
-/* - close() during a lookup returns at once. A lookup the OS cannot cancel keeps its slot until */
-/*   it finishes and is reclaimed by a later call; SSF_NETSOCK_CONFIG_MAX_LOOKUPS bounds them.   */
-/* - One socket per instance. The instance must outlive the client that holds its transport.     */
-/* - On Windows, Winsock is started by the first Init() and stopped once the last instance is    */
-/*   deinitialized and no abandoned lookup remains.                                              */
-
-/* --------------------------------------------------------------------------------------------- */
 /* Defines and typedefs                                                                          */
 /* --------------------------------------------------------------------------------------------- */
 #ifdef _WIN32

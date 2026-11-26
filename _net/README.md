@@ -10,7 +10,7 @@ Network protocol clients and the byte stream transport interface they run on.
 | ssfmqttc | MQTT 3.1.1 client, QoS 0 and 1, single connection | ssfmqttc.c, ssfmqttc.h | [ssfmqttc.md](ssfmqttc.md) |
 | ssfmqttpkt | MQTT 3.1.1 control packet framing, encoding and decoding | ssfmqttpkt.c, ssfmqttpkt.h | — |
 | ssfnet | Non-blocking byte stream transport interface | ssfnet.h | [below](#ssfnet-transport-interface) |
-| ssfnetsock | Plaintext TCP transport over BSD sockets or Winsock, with non-blocking name resolution | ssfnetsock.c, ssfnetsock.h | — |
+| ssfnetsock | Plaintext TCP transport over BSD sockets or Winsock, with non-blocking name resolution | ssfnetsock.c, ssfnetsock.h | [below](#ssfnetsock-tcp-transport) |
 | ssftlsc | TLS 1.3 client transport (RFC 8446) over another transport; carries MQTT over TLS | ssftlsc.c, ssftlsc.h | [below](#ssftlsc-tls-13-client) |
 | ssfnetws | WebSocket client transport (RFC 6455) over another transport: ws:// on ssfnetsock, wss:// on ssftlsc; carries MQTT over WebSockets | ssfnetws.c, ssfnetws.h | [ssfnetws.md](ssfnetws.md) |
 
@@ -47,7 +47,22 @@ Network protocol clients and the byte stream transport interface they run on.
 | `shutdown(t)` | Delivers every byte `send()` accepted and ends this side of the stream (for TLS, close_notify). `SUCCESS` when done; `WANT_WRITE` while bytes remain (retry when writable); `CLOSED` or `ERROR` if they cannot be delivered. A transport whose accepted bytes are already committed (a socket) returns `SUCCESS` at once. Repeating it after `SUCCESS` returns `SUCCESS`. |
 | `close(t)` | Ends the connection or attempt and releases its resources. Never waits; see `shutdown()`. |
 
-ssfnetsock, the BSD socket transport, is configured in `_opt/ssfnetsock_opt.h`:
+## ssfnetsock TCP Transport
+
+- Plaintext TCP: no TLS, no authentication. For hosted builds (Windows, Linux, macOS) and as the
+  reference for porting the transport to an embedded IP stack.
+- A literal IPv4 address is parsed in `open()`. Because names resolve to IPv4 addresses only, a
+  dual-stack host never connects over IPv6.
+- A host name is resolved with the OS asynchronous resolver and polled by `pollOpen()`:
+  `GetAddrInfoExW` with an event on Windows, `DNSServiceGetAddrInfo` on macOS, `getaddrinfo_a` on
+  glibc. Elsewhere only literal addresses are accepted and `open()` of a name returns false.
+- `close()` during a lookup returns at once. A lookup the OS cannot cancel keeps its slot until it
+  finishes and is reclaimed by a later call.
+- One socket per instance. The instance must outlive the client that holds its transport.
+- On Windows, Winsock is started by the first `SSFNetSockInit()` and stopped once the last instance
+  is deinitialized and no abandoned lookup remains.
+
+ssfnetsock is configured in `_opt/ssfnetsock_opt.h`:
 
 - `SSF_NETSOCK_CONFIG_MAX_HOST_SIZE` bounds the host string, NUL included (2..256). A DNS name is
   at most 253 characters; a longer host makes `open()` return false.

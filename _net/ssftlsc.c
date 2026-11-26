@@ -1260,8 +1260,9 @@ bool _SSFTLSCParseServerHelloExForTest(SSFTLSCSession_t *session, const uint8_t 
     p384Pub[0] = 0x04u;
     shares[0].group = SSF_TLS_GROUP_X25519; shares[0].pub = x25519Pub; shares[0].len = 32u;
     shares[1].group = SSF_TLS_GROUP_SECP384R1; shares[1].pub = p384Pub; shares[1].len = 97u;
-    SSF_REQUIRE(_SSFTLSCBuildClientHello(session, random, sid, (uint8_t)sizeof(sid), shares, 2u,
-                                         NULL, 0u));
+    ok = _SSFTLSCBuildClientHello(session, random, sid, (uint8_t)sizeof(sid), shares, 2u, NULL,
+                                  0u);
+    SSF_ASSERT(ok);
     session->hrrDone = (hrrGroup != 0u);
     session->hrrGroup = hrrGroup;
     session->hrrSuite = hrrSuite;
@@ -1348,10 +1349,11 @@ static bool _SSFTLSCDeriveHandshakeKeys(SSFTLSCSession_t *s,
 
     /* Hash("") for deriving the "derived" secret */
     {
-        SSFTLSTranscript_t tmp;
+        SSFTLSTranscript_t tmp = { 0 };
 
         SSFTLSTranscriptInit(&tmp, s->hash);
         SSFTLSTranscriptHash(&tmp, emptyHash, sizeof(emptyHash));
+        SSFTLSTranscriptDeInit(&tmp);
     }
 
     /* Early Secret = HKDF-Extract(0, 0), no PSK */
@@ -1426,10 +1428,11 @@ static bool _SSFTLSCDeriveAppKeys(SSFTLSCSession_t *s, const uint8_t *handshakeS
 
     /* Hash("") */
     {
-        SSFTLSTranscript_t tmp;
+        SSFTLSTranscript_t tmp = { 0 };
 
         SSFTLSTranscriptInit(&tmp, s->hash);
         SSFTLSTranscriptHash(&tmp, emptyHash, sizeof(emptyHash));
+        SSFTLSTranscriptDeInit(&tmp);
     }
 
     /* derived = Derive-Secret(handshake_secret, "derived", Hash("")) */
@@ -1772,12 +1775,13 @@ static SSFTLSIOResult_t _SSFTLSCHandleSendCH(SSFTLSCSession_t *session)
                     if (hrrHash != SSF_HMAC_HASH_SHA256)
                     {
                         /* Yes, rehash ClientHello1 with it */
-                        SSFTLSTranscript_t tmpT;
+                        SSFTLSTranscript_t tmpT = { 0 };
 
                         SSFTLSTranscriptInit(&tmpT, hrrHash);
                         SSFTLSTranscriptUpdate(&tmpT, session->hsScratch.clientHello,
                                                session->hsScratchLen);
                         SSFTLSTranscriptHash(&tmpT, ch1Hash, sizeof(ch1Hash));
+                        SSFTLSTranscriptDeInit(&tmpT);
                     }
                     else
                     {
@@ -1789,6 +1793,7 @@ static SSFTLSIOResult_t _SSFTLSCHandleSendCH(SSFTLSCSession_t *session)
                     _SSFTLSCPut24(&synthMsg[1], hLen);
                     memcpy(&synthMsg[4], ch1Hash, hLen);
 
+                    SSFTLSTranscriptDeInit(&session->transcript);
                     SSFTLSTranscriptInit(&session->transcript, hrrHash);
                     session->hashLen = hLen;
                     SSFTLSTranscriptUpdate(&session->transcript, synthMsg, 4u + hLen);
@@ -1882,6 +1887,7 @@ static SSFTLSIOResult_t _SSFTLSCHandleSendCH(SSFTLSCSession_t *session)
                 { SSF_TLS_TRACE_HS_ERROR(&session->trace,
                                          "ERROR: ClientHello was not saved (too large for buffer)");
                   return SSF_TLS_IO_ERROR; }
+                SSFTLSTranscriptDeInit(&session->transcript);
                 SSFTLSTranscriptInit(&session->transcript, SSF_HMAC_HASH_SHA384);
                 SSFTLSTranscriptUpdate(&session->transcript,
                                        session->hsScratch.clientHello, session->hsScratchLen);

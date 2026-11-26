@@ -159,7 +159,7 @@ and no algorithm flags enabled sets `SSF_BN_CONFIG_MAX_BITS` to `(1024u)` and
 | Macro | Default | Description |
 |-------|---------|-------------|
 | <a id="ssf-bn-config-max-bits"></a>`SSF_BN_CONFIG_MAX_BITS` | auto | Maximum big-number width in bits. **Auto-derived in `ssfbn.h`** as `2 × largest enabled operand` from [`SSF_EC_CONFIG_ENABLE_P256/P384`](ssfec.md#configuration) and [`SSF_RSA_CONFIG_ENABLE_2048/3072/4096`](ssfrsa.md#configuration). The doubling is mandatory: multiplication produces a `2N`-limb intermediate, and `SSFBNMul` / `SSFBNModMul` / `SSFBNModMulNIST` / `SSFBNModInvExt` all gate on `2N <= MAX_LIMBS`. Resulting values: `512` for P-256-only, `768` for P-256+P-384, `4096` for RSA-2048, `6144` for RSA-3072, `8192` for RSA-4096 — the maximum across all enabled algorithms wins; `256` when none is enabled. Override in [`_opt/ssfbn_opt.h`](../_opt/ssfbn_opt.h) only when an out-of-tree consumer needs a wider cap; the in-tree consumers self-size correctly. |
-| <a id="ssf-bn-max-mod-limbs"></a>`SSF_BN_MAX_MOD_LIMBS` | `(SSF_BN_MAX_LIMBS + 1) / 2` | Upper bound on `SSFBNMont_t::len` — the cap needed to hold a Montgomery residue (mod `m`). The `2N` derivation of `SSF_BN_CONFIG_MAX_BITS` makes `MAX_LIMBS / 2` exactly the largest possible modulus for any enabled algorithm; per-algo static asserts in `ssfbn.h` enforce this. [`SSFBNMontInit`](#montinit) rejects a wider modulus (`SSF_REQUIRE`), so every Montgomery buffer is sized at this width: [`SSFBNModExpMont`](#modexpmont)'s 16-entry window table and residue locals, the `SSFBNMontMul` / `SSFBNMontSquare` scratch, the `SSFBNModExp` / `SSFBNModExpPub` contexts, `SSFBNMontConvertOut` and `SSFBNIsProbablePrime` (OPTIMIZE RSA-STK). Sizing them at `SSF_BN_MAX_LIMBS` would double their stack without ever using the extra capacity. Override in [`_opt/ssfbn_opt.h`](../_opt/ssfbn_opt.h) only when pinning `SSF_BN_CONFIG_MAX_BITS` to a non-`2N` value (no algorithm flags enabled, or an out-of-tree modulus wider than `MAX_LIMBS / 2`). |
+| <a id="ssf-bn-max-mod-limbs"></a>`SSF_BN_MAX_MOD_LIMBS` | `(SSF_BN_MAX_LIMBS + 1) / 2` | Upper bound on `SSFBNMont_t::len` — the cap needed to hold a Montgomery residue (mod `m`). The `2N` derivation of `SSF_BN_CONFIG_MAX_BITS` makes `MAX_LIMBS / 2` exactly the largest possible modulus for any enabled algorithm; per-algo static asserts in `ssfbn.h` enforce this. [`SSFBNMontInit`](#montinit) rejects a wider modulus (`SSF_REQUIRE`), so every Montgomery buffer is sized at this width: [`SSFBNModExpMont`](#modexpmont)'s 16-entry window table and residue locals, the `SSFBNMontMul` / `SSFBNMontSquare` scratch, the `SSFBNModExp` / `SSFBNModExpPub` contexts, `SSFBNMontConvertOut` and `SSFBNIsProbablePrime`. Sizing them at `SSF_BN_MAX_LIMBS` would double their stack without ever using the extra capacity. Override in [`_opt/ssfbn_opt.h`](../_opt/ssfbn_opt.h) only when pinning `SSF_BN_CONFIG_MAX_BITS` to a non-`2N` value (no algorithm flags enabled, or an out-of-tree modulus wider than `MAX_LIMBS / 2`). |
 | <a id="ssf-bn-karatsuba-threshold-opt"></a>`SSF_BN_KARATSUBA_THRESHOLD` | `32` | `SSFBNMul` limb count at or above which same-length, even-length operands take one-level Karatsuba; schoolbook is used below. Both code paths always link; the threshold only steers the runtime dispatch. The default is the RSA-1024 boundary; the `SSF_CRYPT_PROFILE_MAX_PERF` profile lowers it to `16` so RSA-2048 multiplies enter Karatsuba sooner. Must be `>= 4` (compile-time `#error` otherwise). |
 | <a id="ssf-bn-modexp-win-k"></a>`SSF_BN_MODEXP_WIN_K` | `4` | `SSFBNModExp` fixed-window size in bits, `1` to `8` (compile-time `#error` otherwise). The constant-time Montgomery exponentiation precomputes a `2^k`-entry table of Montgomery powers, then squares and multiplies through the exponent in `k`-bit windows; the top window may be partial. Each step of `k` halves or doubles the stack-resident table. Measured for RSA at the 4096 cap (Cortex-M4 `-Os` stack; host `-O2` time, RSA-2048 / 4096 sign): `k = 2`: keygen peak -6.2 KB, sign peak -1.1 KB, sign +16 to +19%; `k = 3` (`SSF_CRYPT_PROFILE_MIN_MEMORY`): keygen peak -4.2 KB, sign peak -1.1 KB, sign +5%; `k = 4`: the default; `k = 5` (`SSF_CRYPT_PROFILE_MAX_PERF`): keygen peak +8.3 KB, sign peak +4.2 KB, sign 0 to -3%. |
 
@@ -566,9 +566,8 @@ void SSFBNSquare(SSFBN_t *r, const SSFBN_t *a);
 Computes `r = a²`. Faster than `SSFBNMul(r, a, a)` because the off-diagonal partial products
 are computed once and doubled rather than computed twice. `r->len` is set to `2 × a->len`;
 that must be `≤ SSF_BN_MAX_LIMBS` and `≤ r->cap`. `r` must not alias `a`. **Constant-time:**
-the diagonal terms are added in one fixed pass with a running carry. Before 2026-11-19 a
-`while (carry != 0)` propagation made the step count depend on the operand, so
-`SSFBNModSquare` was not constant-time on Miller-Rabin's secret candidate (SQ-CT audit).
+the diagonal terms are added in one fixed pass with a running carry, so the step count does
+not depend on the operand.
 
 <a id="ex-arith"></a>
 
@@ -612,8 +611,8 @@ void SSFBNMod(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
 depends only on the parity and length of `m`, which are public:
 
 - **Odd `m` of at most [`SSF_BN_MAX_MOD_LIMBS`](#ssf-bn-max-mod-limbs) limbs** (RSA's `n`,
-  `p`, `q`; prime candidates; curve primes and orders): **constant-time** Montgomery reduction
-  (OPTIMIZE BN-O7). `a` is split as `hi × R + lo` with `R = 2^(32 × m->len)`; a context built
+  `p`, `q`; prime candidates; curve primes and orders): **constant-time** Montgomery reduction.
+  `a` is split as `hi × R + lo` with `R = 2^(32 × m->len)`; a context built
   for the call gives `a × R = MontMul(hi × R, R²) + lo × R (mod m)`, and one conversion out
   returns `a mod m`. Every product is exact because each chunk is `< R` and `R² mod m < m`.
   The work depends only on `a->len`, `m->len` and the bit length of `m` (through
@@ -663,8 +662,8 @@ are secret (e.g., RSA's blinding and CRT recombination). The algorithm depends o
 parity of `m`, which is public:
 
 - **Odd `m`**: `MontMul(MontMul(a, b), R²)` through a Montgomery context built for the call,
-  exact because `a × b < m × R` when one operand is `< m` (OPTIMIZE BN-O4, about 7× faster than
-  the fallback at 2048 bits). Its intermediate and context are wiped.
+  exact because `a × b < m × R` when one operand is `< m` (about 7× faster than the even-`m`
+  path at 2048 bits). Its intermediate and context are wiped.
 - **Even `m`**: schoolbook multiply (already CT) followed by a fixed-iteration
   shift-and-subtract reduction with branchless mask-conditional commits; the iteration count
   and per-iteration work depend only on the limb count of `m`.
@@ -673,7 +672,7 @@ parity of `m`, which is public:
 (`SSF_REQUIRE`). Every in-tree caller uses it (RSA's blinding, CRT recombination and unblinding
 over `n` / `p`, and [`SSFBNModInv`](#modinv)'s check), so with `--gc-sections` the
 shift-and-subtract path and its 3 KB frame (at the RSA-4096 cap) are linked only for an
-application that calls `SSFBNModMulCT` (OPTIMIZE BN-15).
+application that calls `SSFBNModMulCT`.
 
 <a id="ssfbnmodsquare"></a>
 ```c
@@ -681,8 +680,7 @@ void SSFBNModSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
 ```
 `r = a² mod m` using `SSFBNSquare` followed by `SSFBNMod`. `r` may alias `a`. Inherits
 `SSFBNMod`'s timing: constant-time for an odd `m` of at most `SSF_BN_MAX_MOD_LIMBS` limbs,
-variable-time otherwise. No in-tree module calls it (Miller-Rabin squares in Montgomery form,
-OPTIMIZE BN-14).
+variable-time otherwise. No in-tree module calls it (Miller-Rabin squares in Montgomery form).
 
 <a id="ex-modmul"></a>
 
@@ -712,8 +710,8 @@ sequence of adds and subtracts — significantly faster on a microcontroller. Th
 value as `r + c × 2^w` with a small signed net carry `c`; since `2^w mod p` is sparse (P-256:
 `2^224 − 2^192 − 2^96 + 1`, P-384: `2^128 + 2^96 − 2^32 + 1`), the correction folds `c` back
 in with one limb pass, folds the resulting −1/0/+1 carry once more (it cannot carry again),
-and finishes with one masked conditional subtraction: three fixed passes, where the original
-ran 23 sized for worst-case carries (OPTIMIZE EC-O4, about 2.3× faster per multiply). The
+and finishes with one masked conditional subtraction: three fixed passes rather
+than a pass count sized for worst-case carries. The
 reduction is **constant-time** in the operand values (choosing the path compares only the
 public modulus). Any other modulus falls back to [`SSFBNModMul()`](#ssfbnmodmul), constant-time
 for an odd modulus of at most `SSF_BN_MAX_MOD_LIMBS` limbs and variable-time otherwise. The NIST
@@ -725,8 +723,7 @@ fallback's does.
 same single recognition of the prime, and an `SSF_REQUIRE` that `m` is the P-256 or P-384
 prime. ssfec and ssfecdsa call it for every field multiply, so an EC build with
 `--gc-sections` does not link `SSFBNModMul` and its Barrett / Montgomery chain (about 1 KB
-on Cortex-M4), and a static call graph of the EC operations no longer reaches that chain
-(OPTIMIZE BN-08). Both entry points tail-call one shared reduction, so neither adds a frame.
+on Cortex-M4), and a static call graph of the EC operations does not reach that chain. Both entry points tail-call one shared reduction, so neither adds a frame.
 
 <a id="modinv"></a>
 ```c
@@ -740,8 +737,7 @@ bool SSFBNModInvOdd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
   [`SSFBNModExp`](#modexp), then verifies the result satisfies `a · r ≡ 1 (mod m)` with the
   constant-time [`SSFBNModMulCTOdd`](#ssfbnmodmulct) (`r < m` meets its precondition) and
   returns `false` if not. **Constant-time on the success path** for prime `m`: neither step
-  depends on the value of `a` (before 2026-11-19 the check used the variable-time
-  `SSFBNModMul`, whose run time tracked the bit length of `a · r`). An even `m`
+  depends on the value of `a`. An even `m`
   returns `false` immediately (the Montgomery exponentiation needs an odd modulus; `m` is
   treated as public). For odd non-prime `m` (or when `gcd(a, m) ≠ 1`) the verification check
   fails and the function returns `false`, so it is safe to call on any modulus, but it is only
@@ -749,23 +745,23 @@ bool SSFBNModInvOdd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
   whenever `m` is a curve order, a field prime, or a Diffie-Hellman group order. `m->len`
   must not exceed [`SSF_BN_MAX_MOD_LIMBS`](#ssf-bn-max-mod-limbs). Its one working value
   (`m − 2`, then the check product) is held at that width and wiped before it returns from
-  either outcome of the check, since `m` can be secret (RSA keygen's `q⁻¹ mod p`; OPTIMIZE
-  BN-10: a 544 B frame at the RSA-4096 cap instead of 2,088 B).
+  either outcome of the check, since `m` can be secret (RSA keygen's `q⁻¹ mod p`). The frame is 544 B at the
+  RSA-4096 cap.
 - [`SSFBNModInvExt`](#modinv) works for any coprime `a` and `m`. For odd `m` and
-  `0 < a < m` it runs the binary extended GCD (halvings and subtractions only; OPTIMIZE BN-O5,
-  about 6× faster at 2048 bits); for even `m` or an unreduced `a` it runs extended Euclid.
+  `0 < a < m` it runs the binary extended GCD (halvings and subtractions only;
+  about 6× faster than extended Euclid at 2048 bits); for even `m` or an unreduced `a` it runs extended Euclid.
   **Variable-time** in both paths — do not use on long-term secrets. No in-tree module calls
-  it (RSA keygen derives `d` without a general inverse, OPTIMIZE BN-07), so with
+  it (RSA keygen derives `d` without a general inverse), so with
   `--gc-sections` extended Euclid is linked only when an application calls it.
 - [`SSFBNModInvOdd`](#modinv) is the binary path alone: `m` must be odd and `a < m`
   (`SSF_REQUIRE`); `a = 0` or a shared factor returns `false`. Same result and timing as
   `SSFBNModInvExt` on those inputs, without linking extended Euclid. RSA signing uses it for
-  the per-signature blinding inverse `r⁻¹ mod n` of a fresh random `r`, the timing exposure
-  accepted in AUDIT RSA-9; the binary path's intermediates are wiped.
+  the per-signature blinding inverse `r⁻¹ mod n` of a fresh random `r`, whose timing exposure is
+  described in [ssfrsa](ssfrsa.md); the binary path's intermediates are wiped.
   `m->len` must not exceed [`SSF_BN_MAX_MOD_LIMBS`](#ssf-bn-max-mod-limbs) (`SSF_REQUIRE`;
-  a wider modulus never worked, because the final `a · r` check needs `2 · m->len` limbs).
+  the final `a · r` check needs `2 · m->len` limbs).
   Extended Euclid holds its values at that width and only its quotient product at
-  `SSF_BN_MAX_LIMBS` (OPTIMIZE BN-05: 5.2 KB instead of 9.3 KB of stack at the RSA-4096 cap).
+  `SSF_BN_MAX_LIMBS` (5.2 KB of stack at the RSA-4096 cap).
 
 <a id="modinvsmall"></a>
 ```c
@@ -779,7 +775,7 @@ builds narrower than that). Their working storage is sized by that constant rath
 stack of the full-width routines: on Cortex-M4 (default RSA-4096 cap) the call chain under
 `SSFBNModInvSmall` peaks at about 4.4 KB, against about 16.8 KB under `SSFBNModInv` →
 `SSFBNModExp` → `SSFBNModExpMont`. ssfec and ssfecdsa use them for every inverse and mod-n
-product (OPTIMIZE EC-O3).
+product.
 
 - `SSFBNModInvSmall` computes `a^(m-2) mod m` in Montgomery form with 4-bit windows. The
   exponent `m - 2` is public, so the sequence of squares and table reads depends only on `m`
@@ -801,8 +797,9 @@ void SSFBNGcd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b);
 ```
 Binary-GCD (Stein's algorithm) producing `r = gcd(a, b)`. Variable-time. `a` and `b` must
 have the same `len`; `r` may alias either. The two working copies trade roles by pointer when
-they swap, rather than through a third full-width copy (OPTIMIZE BN-12). They are not wiped:
-in RSA key generation they hold `p − 1` and `q − 1` (see SAFE-05 in the optimization audit).
+they swap, rather than through a third full-width copy. They are not wiped:
+in RSA key generation they hold `p − 1` and `q − 1`, which the RSA entry points' stack scrub
+covers (see [ssfrsa](ssfrsa.md)).
 
 ---
 
@@ -832,8 +829,7 @@ doubling count depends only on `L` and `len`, which are public for RSA moduli an
 key size for their primes. Every step is constant-time. `m` may carry leading zero limbs (it
 then takes more doublings), and `m == 1` gives `rr == 0`. `R²` is built in `ctx->rr` itself
 (Montgomery squaring reads `mod` and `mp`, never `rr`), so no key-derived copy is left on the
-stack and the frame is a few dozen bytes (OPTIMIZE BN-09; before, a 2N-limb local, about 1 KB
-at the RSA-4096 cap). After copying `m` into `ctx->mod` only that copy is read, so `m` may be
+stack and the frame is a few dozen bytes. After copying `m` into `ctx->mod` only that copy is read, so `m` may be
 `&ctx->rr` or `&ctx->mod`.
 
 <a id="montmul"></a>
@@ -843,8 +839,8 @@ void SSFBNMontMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBNMon
 `r = a × b × R⁻¹ mod m`. Both `a` and `b` must already be in Montgomery form; the result is
 also in Montgomery form. Constant-time. `r` may alias `a` or `b`. CIOS, with the one-word
 shift of each row folded into its reduction pass. The `t` scratch, which ends holding the
-unreduced result, is zeroized before returning: during RSA key generation it held `p − 1` and
-`q⁻¹ mod p`, which a stack scan found left behind (OPTIMIZE RSA-STK audit).
+unreduced result, is zeroized before returning, since during RSA key generation it holds `p − 1` and
+`q⁻¹ mod p`.
 
 <a id="montsquare"></a>
 ```c
@@ -922,8 +918,7 @@ void SSFBNModExpHalf(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN
 1. Convert `a` into Montgomery form, straight into `table[1]`.
 2. Build the rest of the 16-entry table of Montgomery powers — `table[0] = Mont(1)`
    (converted in place), `table[i] = table[i-1] · table[1]` for `i = 2..15`. Besides the
-   table, the only working values are the running result and the scan's `picked` entry
-   (OPTIMIZE BN-04).
+   table, the only working values are the running result and the scan's `picked` entry.
 3. For each 4-bit window of `e` from MSB to LSB: square the running result four times,
    decode the window value `w`, fetch `table[w]` via a constant-time scan that walks all
    16 entries with `SSFBNCondCopy`, and multiply.
@@ -949,7 +944,7 @@ DH key exchange, and `SSFBNModInv` (via Fermat) rely on for side-channel resista
   working values and context sized at that width: about half the stack (5.9 KB instead of
   11.6 KB on Cortex-M4 -Os at the RSA-4096 cap, counting the shared core). It runs the same
   algorithm and gives the same result, and also wipes its context, which holds `m`. RSA's CRT
-  private operation uses it for both prime-width exponentiations (OPTIMIZE BN-01). The
+  private operation uses it for both prime-width exponentiations. The
   exponent may be longer than the modulus (RSA's blinded CRT exponents are two limbs longer).
 - All three share one implementation and wipe the table and working values before returning.
 
@@ -966,7 +961,7 @@ Variable-time `r = aᵉ mod m` via left-to-right binary square-and-multiply; lik
 `SSFBNModExp`, `e == 0` gives `1 mod m` (`0` when `m == 1`). Every iteration
 squares; the multiply step runs only when the current bit of `e` is `1`. The top bit of `e`
 is always `1`, so the running value starts at `a` (in Montgomery form) and an `L`-bit
-exponent costs `L − 1` squares; the two working residues are modulus-width (OPTIMIZE BN-02).
+exponent costs `L − 1` squares; the two working residues are modulus-width.
 Typical 2–3×
 faster than `SSFBNModExp` for low-Hamming-weight exponents (e.g., RSA's `e = 65537 =
 0x10001` has only two set bits out of 17). As with `SSFBNModExp`, `m->len` (or
@@ -1024,7 +1019,7 @@ the relatively expensive Miller-Rabin test. On 32-bit targets, where a
 64-bit remainder is a library routine (`__aeabi_uldivmod` / `__udivmoddi4` on Cortex-M, about
 800 B), it uses an internal remainder in two 16-bit steps per limb instead, which needs only
 32-bit divides (a hardware `udiv` on Cortex-M3/M4), so keygen builds do not link that routine
-(OPTIMIZE BN-13: -860 B linked on Cortex-M4, -552 B on M0+).
+(860 B less linked code on Cortex-M4, 552 B on M0+).
 
 <a id="ssfbnrandom"></a>
 ```c
@@ -1060,9 +1055,8 @@ then for each round picks a random witness `a ∈ [2, n − 2]` (via `SSFBNRando
 post-mask), computes `x = aᵈ mod n` via `SSFBNModExpMont` (the precomputed Montgomery
 context is reused across rounds), and applies the standard Miller-Rabin inner loop, squaring
 `x` in Montgomery form with that same context and converting each result out for the
-comparisons with `1` and `n − 1` (OPTIMIZE BN-14; it used `SSFBNModSquare`, which builds a new
-context per squaring: about 4× slower when `s` is large, and 484 B more linked keygen code on
-Cortex-M4). Every
+comparisons with `1` and `n − 1` (`SSFBNModSquare` would build a new context per squaring:
+about 4× slower when `s` is large, and 484 B more linked keygen code on Cortex-M4). Every
 working value derived from `n` (`n − 1`, `d`, the witness, `x`, `n − 3` and the Montgomery
 context) is zeroized before the function returns, since `n` is typically a secret RSA prime
 candidate.
@@ -1075,11 +1069,11 @@ Generate a random prime of exactly `bitLen` bits (any `bitLen` in range, not jus
 of 8). Bits `bitLen − 1` and `bitLen − 2` are forced high and any higher bits cleared (so the
 product of two such primes has the full `2 · bitLen` bit length), the low bit is forced to
 make the candidate odd, the candidate is trial-divided by the 254 odd primes 3 to 1613 (a
-254 B table of one-byte half-gaps between them, OPTIMIZE BN-16), and survivors go through
+254 B table of one-byte half-gaps between them), and survivors go through
 `rounds` Miller-Rabin rounds. Returns `false` if no prime is found within an internal
 attempt cap (50000). Each candidate is drawn straight into `p`'s limbs with
 [`SSFBNRandom()`](#ssfbnrandom) and shaped there, so no stack copy of a candidate exists
-(OPTIMIZE BN-11: a 56 B frame instead of 1 KB at the RSA-4096 cap); on the failure return `p`
+(a 56 B frame at the RSA-4096 cap); on the failure return `p`
 is zeroized. `p` must hold `⌈bitLen / 32⌉` limbs (`SSF_REQUIRE`).
 
 `bitLen` must be `≥ 16`, `≤ SSF_BN_CONFIG_MAX_BITS / 2` and `≤ SSF_BN_MAX_MOD_LIMBS × 32`

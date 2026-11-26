@@ -184,10 +184,12 @@ already call `SSFHKDFExpand`; only the Finished computation calls HMAC directly.
 
 ## [↑](#ssftls--tls-13-core-building-blocks) Configuration
 
-Options live in [`_opt/ssftls_opt.h`](../_opt/ssftls_opt.h). Apart from
-`SSF_TLS_CONFIG_MAX_ALPN_LEN` (used by the TLS client) and `SSF_TLS_CONFIG_ENABLE_TRACE`, none
-of them currently affect compiled behaviour (see the last note above); they are reserved for a
-future handshake / transport layer.
+Options live in [`_opt/ssftls_opt.h`](../_opt/ssftls_opt.h). Two of them affect compiled
+behaviour: `SSF_TLS_CONFIG_MAX_ALPN_LEN` (the TLS client's ALPN limit, checked at compile time in
+`ssftlsc.c`) and `SSF_TLS_CONFIG_ENABLE_TRACE` (the `_SSF_TLS_TRACE` macro in `ssftls.h`, used
+by ssfx509, ssfcms and the TLS client). The other three, `SSF_TLS_CONFIG_MAX_TRUSTED_CAS`,
+`SSF_TLS_CONFIG_PSK_ENABLE` and `SSF_TLS_CONFIG_TICKET_LIFETIME_SEC`, are referenced by no
+code; they are reserved for a future handshake / transport layer.
 
 | Macro | Default | Description |
 |-------|---------|-------------|
@@ -224,7 +226,7 @@ driving the handshake themselves will need. Grouped logically:
 | Symbol | Kind | Description |
 |--------|------|-------------|
 | <a id="ssftlsrecordstate-t"></a>`SSFTLSRecordState_t` | Struct | Per-direction record state: AEAD key, static IV, 64-bit sequence number, cipher-suite selector, and an init-once `magic` guard. Zero the struct before the first [`SSFTLSRecordStateInit`](#ssftlsrecordstateinit); wipe it with [`SSFTLSRecordStateDeInit`](#ssftlsrecordstatedeinit) on close or before a re-key. |
-| <a id="ssftlstranscript-t"></a>`SSFTLSTranscript_t` | Struct | Running transcript hash (union of `SSFSHA2_32Context_t` / `SSFSHA2_64Context_t`) plus the active hash length and `SSFHMACHash_t` selector. |
+| <a id="ssftlstranscript-t"></a>`SSFTLSTranscript_t` | Struct | Running transcript hash (union of `SSFSHA2_32Context_t` / `SSFSHA2_64Context_t`) plus the active hash length, `SSFHMACHash_t` selector, and an init-once `magic` guard. Zero the struct before the first [`SSFTLSTranscriptInit`](#ssftlstranscriptinit); wipe it with [`SSFTLSTranscriptDeInit`](#ssftlstranscriptdeinit) before re-initializing it. |
 | `SSFTLSIOResult_t` | Enum | Reserved I/O result codes (`SUCCESS`, `WANT_READ`, `WANT_WRITE`, `ERROR`) for a future non-blocking transport layer; not used by any currently-exposed function. |
 | `SSFTLSTraceLevel_t` / `SSFTLSTraceCategory_t` | Enum | Severity (`ERROR` / `WARN` / `INFO` / `DEBUG`) and category (`HANDSHAKE` / `RECORD` / `CRYPTO` / `CERT` / `ALERT`) for trace callback dispatch. |
 | `SSFTLSTraceFn_t` | Typedef | Callback signature: `void (*)(level, category, msg, userCtx)`. |
@@ -250,6 +252,7 @@ driving the handshake themselves will need. Grouped logically:
 | [e.g.](#ex-transcript) | [`void SSFTLSTranscriptInit(t, hash)`](#ssftlstranscriptinit) | Initialise a running transcript hash for the selected `SSFHMACHash_t` |
 | [e.g.](#ex-transcript) | [`void SSFTLSTranscriptUpdate(t, data, dataLen)`](#ssftlstranscriptupdate) | Append handshake bytes |
 | [e.g.](#ex-transcript) | [`void SSFTLSTranscriptHash(t, out, outSize)`](#ssftlstranscripthash) | Snapshot the current transcript hash without consuming the context |
+| [e.g.](#ex-transcript) | [`void SSFTLSTranscriptDeInit(t)`](#ssftlstranscriptdeinit) | Wipe an initialized transcript so it may be initialized again |
 
 **[Record layer](#record-layer)**
 
@@ -383,6 +386,16 @@ Initialise `t` for the active cipher suite's transcript hash. Pass `SSF_HMAC_HAS
 for any `SHA256` suite, `SSF_HMAC_HASH_SHA384` for `AES_256_GCM_SHA384`. Must be called
 before the first `Update`.
 
+**Init-once contract.** `SSFTLSTranscript_t` carries a `magic` field set last by
+`SSFTLSTranscriptInit`. Init `SSF_REQUIRE`s that `magic` is not already the active
+sentinel, so the struct must be zeroed (e.g. `SSFTLSTranscript_t t = { 0 };`) before its
+first Init, and an active transcript must be passed to
+[`SSFTLSTranscriptDeInit`](#ssftlstranscriptdeinit) before it is re-initialized (for
+example when a HelloRetryRequest or a SHA-384 suite restarts the transcript).
+[`SSFTLSTranscriptUpdate`](#ssftlstranscriptupdate),
+[`SSFTLSTranscriptHash`](#ssftlstranscripthash) and `SSFTLSTranscriptDeInit` all
+`SSF_REQUIRE` `magic` to be the active sentinel.
+
 <a id="ssftlstranscriptupdate"></a>
 ```c
 void SSFTLSTranscriptUpdate(SSFTLSTranscript_t *t, const uint8_t *data, size_t dataLen);
@@ -404,12 +417,20 @@ schedule needs — e.g., the transcript hash through ServerHello is one input, t
 transcript hash through EncryptedExtensions is another, all the way up to the final
 Finished, without rebuilding the hash from scratch each time.
 
+<a id="ssftlstranscriptdeinit"></a>
+```c
+void SSFTLSTranscriptDeInit(SSFTLSTranscript_t *t);
+```
+Wipe the whole transcript context, `magic` included, via `SSFCryptSecureZero`.
+`SSF_REQUIRE`s that `t` was initialized; afterwards `t` is again eligible for a fresh
+[`SSFTLSTranscriptInit`](#ssftlstranscriptinit).
+
 <a id="ex-transcript"></a>
 
 **Example:**
 
 ```c
-SSFTLSTranscript_t t;
+SSFTLSTranscript_t t = { 0 };
 uint8_t            thHash[32];
 
 SSFTLSTranscriptInit(&t, SSF_HMAC_HASH_SHA256);
@@ -424,6 +445,9 @@ SSFTLSTranscriptHash(&t, thHash, sizeof(thHash));
 
 SSFTLSTranscriptUpdate(&t, encExtBytes, encExtLen);
 /* ... and so on. */
+
+/* Done with the transcript, or about to restart it. */
+SSFTLSTranscriptDeInit(&t);
 ```
 
 ---

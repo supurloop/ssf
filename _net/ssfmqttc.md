@@ -719,7 +719,7 @@ static void OnEvent(void *ctx, SSFMQTTCEvent_t event, SSFMQTTCReason_t reason)
 - **Non-transient failures are retried.** CONNACK refusals other than `SERVER_UNAVAILABLE`, and
   `SUBSCRIBE_QOS_EXCEEDED`, are retried at the backoff rate like any other failure. Bad
   credentials keep hitting the broker until the application calls `SSFMQTTCStop()`. A refused
-  filter no longer fails the connection; it is retried every `SSF_MQTTC_CONFIG_SUB_RETRY_TICKS`
+  filter does not fail the connection; it is retried every `SSF_MQTTC_CONFIG_SUB_RETRY_TICKS`
   for as long as the connection lasts.
 - **A refused filter is picked up only by a retry.** After the broker is fixed, a refused filter
   is granted at the next retry (up to `SSF_MQTTC_CONFIG_SUB_RETRY_TICKS` later) or the next
@@ -743,7 +743,7 @@ static void OnEvent(void *ctx, SSFMQTTCEvent_t event, SSFMQTTCReason_t reason)
 - **PUBACK order is not arrival order in every case.** PUBACKs for dropped packets
   (`RX_PUBLISH_HOLD_TIMEOUT`, `RX_PUBLISH_TOO_LARGE`, `RX_PUBLISH_TOPIC_TOO_LONG`) can go out
   ahead of those for earlier packets still waiting in the queue, which MQTT 3.1.1 4.6 does not
-  allow (MQTT-IOP-07); an owed PUBACK always precedes those of later deliveries. Every QoS 1
+  allow; an owed PUBACK always precedes those of later deliveries. Every QoS 1
   packet still gets exactly one PUBACK. Mosquitto, EMQX and HiveMQ match a PUBACK to its message
   by packet id anywhere in the in-flight window (checked in their source), so this is harmless
   with them; AWS IoT Core and Azure IoT Hub do not document either way.

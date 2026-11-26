@@ -163,7 +163,7 @@ void SSFTLSUnitTest(void)
 
     /* ---- Transcript hash: SHA-256 of empty string ---- */
     {
-        SSFTLSTranscript_t t;
+        SSFTLSTranscript_t t = { 0 };
         uint8_t hash[32];
         /* SHA-256("") = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 */
         static const uint8_t expectedEmpty[] = {
@@ -180,7 +180,7 @@ void SSFTLSUnitTest(void)
 
     /* ---- Transcript hash: snapshot preserves running state ---- */
     {
-        SSFTLSTranscript_t t;
+        SSFTLSTranscript_t t = { 0 };
         uint8_t hash1[32];
         uint8_t hash2[32];
 
@@ -198,7 +198,7 @@ void SSFTLSUnitTest(void)
 
     /* ---- Transcript hash: SHA-384 paths (used by AES_256_GCM_SHA384 cipher suite) ---- */
     {
-        SSFTLSTranscript_t t;
+        SSFTLSTranscript_t t = { 0 };
         uint8_t hash[SSF_SHA2_384_BYTE_SIZE];
         uint8_t hash2[SSF_SHA2_384_BYTE_SIZE];
         /* SHA-384("") FIPS 180-4 Appendix B. */
@@ -246,7 +246,7 @@ void SSFTLSUnitTest(void)
         {
             uint8_t emptyHash[32];
             uint8_t derived[32];
-            SSFTLSTranscript_t t;
+            SSFTLSTranscript_t t = { 0 };
 
             SSFTLSTranscriptInit(&t, SSF_HMAC_HASH_SHA256);
             SSFTLSTranscriptHash(&t, emptyHash, sizeof(emptyHash));
@@ -876,7 +876,7 @@ void SSFTLSUnitTest(void)
 
     /* SSFTLSTranscriptInit / Update / Hash: full DBC surface. */
     {
-        SSFTLSTranscript_t t;
+        SSFTLSTranscript_t t = { 0 };
         uint8_t scratchHash[48];
         uint8_t scratchData[16] = {0};
 
@@ -899,6 +899,36 @@ void SSFTLSUnitTest(void)
         SSF_ASSERT_TEST(SSFTLSTranscriptHash(&t, NULL, sizeof(scratchHash)));
         /* Hash: outSize < hashLen -- SHA-256 needs 32 */
         SSF_ASSERT_TEST(SSFTLSTranscriptHash(&t, scratchHash, 31u));
+
+        /* Init: already initialized */
+        SSF_ASSERT_TEST(SSFTLSTranscriptInit(&t, SSF_HMAC_HASH_SHA256));
+
+        /* DeInit: t NULL */
+        SSF_ASSERT_TEST(SSFTLSTranscriptDeInit(NULL));
+        SSFTLSTranscriptDeInit(&t);
+        /* DeInit: not initialized */
+        SSF_ASSERT_TEST(SSFTLSTranscriptDeInit(&t));
+        /* Update / Hash: after DeInit */
+        SSF_ASSERT_TEST(SSFTLSTranscriptUpdate(&t, scratchData, sizeof(scratchData)));
+        SSF_ASSERT_TEST(SSFTLSTranscriptHash(&t, scratchHash, sizeof(scratchHash)));
+
+        /* Init: allowed again after DeInit */
+        SSFTLSTranscriptInit(&t, SSF_HMAC_HASH_SHA384);
+        SSFTLSTranscriptHash(&t, scratchHash, sizeof(scratchHash));
+        SSFTLSTranscriptDeInit(&t);
+    }
+
+    /* SSFTLSTranscriptUpdate / Hash: a context never passed to Init traps. */
+    {
+        SSFTLSTranscript_t t;
+        uint8_t scratchHash[48];
+        uint8_t scratchData[16] = {0};
+
+        memset(&t, 0, sizeof(t));
+        t.hmac = SSF_HMAC_HASH_SHA256;
+        t.hashLen = SSF_SHA2_256_BYTE_SIZE;
+        SSF_ASSERT_TEST(SSFTLSTranscriptUpdate(&t, scratchData, sizeof(scratchData)));
+        SSF_ASSERT_TEST(SSFTLSTranscriptHash(&t, scratchHash, sizeof(scratchHash)));
     }
 
     /* SSFTLSRecordStateInit: full DBC surface. */
@@ -1193,7 +1223,7 @@ void SSFTLSUnitTest(void)
     {
         SSFTLSRecordState_t enc = { 0 };
         SSFTLSRecordState_t dec = { 0 };
-        SSFTLSTranscript_t t;
+        SSFTLSTranscript_t t = { 0 };
         uint8_t key[16];
         uint8_t iv[SSF_TLS_IV_SIZE];
         uint8_t record[5u + 64u + 1u + 16u];
@@ -1234,8 +1264,10 @@ void SSFTLSUnitTest(void)
 #if SIZE_MAX > UINT32_MAX
         SSFTLSTranscriptInit(&t, SSF_HMAC_HASH_SHA256);
         SSF_ASSERT_TEST(SSFTLSTranscriptUpdate(&t, msg, ((size_t)UINT32_MAX) + 1u));
+        SSFTLSTranscriptDeInit(&t);
         SSFTLSTranscriptInit(&t, SSF_HMAC_HASH_SHA384);
         SSF_ASSERT_TEST(SSFTLSTranscriptUpdate(&t, msg, ((size_t)UINT32_MAX) + 1u));
+        SSFTLSTranscriptDeInit(&t);
 #else
         (void)t;
 #endif

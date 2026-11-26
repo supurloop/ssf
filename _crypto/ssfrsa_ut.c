@@ -280,6 +280,7 @@ static bool _OSSLSignPSS(EVP_PKEY *pkey, const EVP_MD *md, int saltLen,
     return ok;
 }
 
+#if SSF_RSA_CONFIG_ENABLE_KEYGEN == 1
 /* Run all five PKCS#1 v1.5 / PSS round-trips for one (key, hash) pair. */
 static void _SSFRSAVerifyHashAtKey(const uint8_t *priv, size_t privLen,
                                    const uint8_t *pub,  size_t pubLen,
@@ -304,6 +305,7 @@ static void _SSFRSAVerifyHashAtKey(const uint8_t *priv, size_t privLen,
     default: SSF_ASSERT(false); return;
     }
 
+#if SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1
     /* ---- PKCS#1 v1.5 round-trip: SSF sign, OpenSSL verify ---- */
     SSF_ASSERT(SSFRSASignPKCS1(priv, privLen, ssfHash, hashVal, hLen,
                                sigSSF, sizeof(sigSSF), &sigSSFLen) == true);
@@ -316,7 +318,9 @@ static void _SSFRSAVerifyHashAtKey(const uint8_t *priv, size_t privLen,
     SSF_ASSERT(memcmp(sigSSF, sigOSSL, sigSSFLen) == 0);
     SSF_ASSERT(SSFRSAVerifyPKCS1(pub, pubLen, ssfHash, hashVal, hLen,
                                  sigOSSL, sigOSSLLen) == true);
+#endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 */
 
+#if SSF_RSA_CONFIG_ENABLE_PSS == 1
     /* ---- PSS round-trip: randomized, so only cross-verify both directions ---- */
     SSF_ASSERT(SSFRSASignPSS(priv, privLen, ssfHash, hashVal, hLen,
                              sigSSF, sizeof(sigSSF), &sigSSFLen) == true);
@@ -333,6 +337,7 @@ static void _SSFRSAVerifyHashAtKey(const uint8_t *priv, size_t privLen,
                               sigOSSL, sigOSSLLen) == false);
     SSF_ASSERT(SSFRSAVerifyPSS(pub, pubLen, ssfHash, hashVal, hLen, hLen,
                                sigOSSL, sigOSSLLen) == false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PSS */
 }
 
 /* Drive cross-checks at one key size with the supplied hash menu. */
@@ -378,6 +383,9 @@ static void _SSFRSACrossCheckAtSize(uint16_t bits,
     EVP_PKEY_free(pkeyPub);
 }
 
+#endif /* SSF_RSA_CONFIG_ENABLE_KEYGEN */
+
+#if SSF_RSA_CONFIG_ENABLE_PSS == 1
 /* PSS sign with OpenSSL on the foreign key fixtures, verify with SSF. */
 static void _SSFRSACrossCheckForeignPSS(const uint8_t *foreignPriv, size_t foreignPrivLen,
                                         const uint8_t *foreignPub,  size_t foreignPubLen)
@@ -404,6 +412,7 @@ static void _SSFRSACrossCheckForeignPSS(const uint8_t *foreignPriv, size_t forei
     EVP_PKEY_free(pkey);
     EVP_PKEY_free(pkeyPub);
 }
+#endif /* SSF_RSA_CONFIG_ENABLE_PSS */
 
 /* Accessor wrappers so the EVP_MD_get_*() functions can be passed by pointer. */
 static const EVP_MD *_OSSLSha256(void) { return EVP_sha256(); }
@@ -435,10 +444,14 @@ static void _SSFRSAVerifyAgainstOpenSSL(const uint8_t *foreignPriv, size_t forei
 
     SSF_UT_PRINTF("\n--- ssfrsa OpenSSL cross-check ---\n");
 
+#if SSF_RSA_CONFIG_ENABLE_PSS == 1
     SSF_UT_PRINTF("  foreign-key PSS round-trip (sign-OSSL / verify-SSF)... ");
     fflush(stdout);
     _SSFRSACrossCheckForeignPSS(foreignPriv, foreignPrivLen, foreignPub, foreignPubLen);
     SSF_UT_PRINTF("OK\n");
+#endif /* SSF_RSA_CONFIG_ENABLE_PSS */
+
+#if SSF_RSA_CONFIG_ENABLE_KEYGEN == 1
 
 #if SSF_RSA_CONFIG_ENABLE_2048 == 1
     SSF_UT_PRINTF("  RSA-2048 keygen + PKCS1v15(byte-match) + PSS(round-trip) @ SHA-256... ");
@@ -461,6 +474,7 @@ static void _SSFRSAVerifyAgainstOpenSSL(const uint8_t *foreignPriv, size_t forei
     _SSFRSACrossCheckAtSize(4096u, h4096, l4096, m4096, sizeof(h4096) / sizeof(h4096[0]));
     SSF_UT_PRINTF("OK\n");
 #endif
+#endif /* SSF_RSA_CONFIG_ENABLE_KEYGEN */
 
     SSF_UT_PRINTF("--- end OpenSSL cross-check ---\n");
 }
@@ -1533,6 +1547,7 @@ void SSFRSAUnitTest(void)
 #endif /* SSF_RSA_CONFIG_ENABLE_PSS == 1 */
     }
 
+#if (SSF_RSA_CONFIG_ENABLE_KEYGEN == 1) && (SSF_RSA_CONFIG_ENABLE_2048 == 1)
     /* ---- Sign / Verify reject signature-length and buffer-size mismatches ---- */
     {
         uint8_t hash[32];
@@ -1590,6 +1605,7 @@ void SSFRSAUnitTest(void)
                    false);
 #endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1 */
     }
+#endif /* SSF_RSA_CONFIG_ENABLE_KEYGEN && SSF_RSA_CONFIG_ENABLE_2048 */
 
 #if (SSF_RSA_CONFIG_ENABLE_KEYGEN == 1) && (SSF_RSA_CONFIG_ENABLE_2048 == 1) && \
     (SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1)
@@ -2423,6 +2439,7 @@ void SSFRSAUnitTest(void)
 #endif /* SSF_RSA_CONFIG_ENABLE_PSS */
     }
 
+#if SSF_RSA_CONFIG_ENABLE_KEYGEN == 1
     /* ---- OPTIMIZE RSA-STK: every enabled key size runs end to end without OpenSSL ---- */
     {
         static const uint16_t sizes[] = {
@@ -2475,8 +2492,10 @@ void SSFRSAUnitTest(void)
 #endif /* SSF_RSA_CONFIG_ENABLE_PSS */
         }
     }
+#endif /* SSF_RSA_CONFIG_ENABLE_KEYGEN */
 
-#if (SSF_CONFIG_BN_UNIT_TEST == 1) && (SSF_RSA_CONFIG_ENABLE_2048 == 1)
+#if (SSF_CONFIG_BN_UNIT_TEST == 1) && (SSF_RSA_CONFIG_ENABLE_2048 == 1) && \
+    (SSF_RSA_CONFIG_ENABLE_KEYGEN == 1)
     /* ---- OPTIMIZE BN-O4 / BN-O5: RSA signing never takes the slow ModMulCT / ModInvExt ---- */
     {
         static uint8_t privKeyDer[SSF_RSA_MAX_PRIV_KEY_DER_SIZE];
@@ -2507,7 +2526,7 @@ void SSFRSAUnitTest(void)
         /* The CRT split cB mod p, cB mod q is constant-time Montgomery, not shift-subtract */
         SSF_ASSERT(_SSFBNModShiftCalls == 0u);
     }
-#endif /* SSF_CONFIG_BN_UNIT_TEST && SSF_RSA_CONFIG_ENABLE_2048 */
+#endif /* SSF_CONFIG_BN_UNIT_TEST && SSF_RSA_CONFIG_ENABLE_2048 && KEYGEN */
 #endif /* SSF_RSA_ANY_ENABLED */
 }
 #ifdef _WIN32

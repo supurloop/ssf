@@ -112,6 +112,7 @@ static void _ECDSAOSSLCurveInfo(SSFECCurve_t curve, _ECDSAOSSLCurveInfo_t *info)
     }
 }
 
+#if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
 /* --------------------------------------------------------------------------------------------- */
 /* Random fuzz: every SSF<->OpenSSL direction on random keys and hashes per curve. */
 /* --------------------------------------------------------------------------------------------- */
@@ -219,6 +220,7 @@ static void _VerifyECDSARandomAgainstOpenSSL(SSFECCurve_t curve, uint16_t iters)
         }
     }
 }
+#endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN */
 
 /* --------------------------------------------------------------------------------------------- */
 /* ECDH cross-check: SSF and OpenSSL derive the same secret for mixed-origin keys. */
@@ -307,6 +309,7 @@ static void _VerifyECDHAgainstOpenSSL(SSFECCurve_t curve, uint16_t iters)
     }
 }
 
+#if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
 /* --------------------------------------------------------------------------------------------- */
 /* Corner cases vs OpenSSL: all-zero hash, all-0xFF hash, and the DER round-trip property. */
 /* --------------------------------------------------------------------------------------------- */
@@ -396,6 +399,7 @@ static void _VerifyECDSACornerCasesAgainstOpenSSL(SSFECCurve_t curve)
         EC_KEY_free(osslKey);
     }
 }
+#endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN */
 #endif /* SSF_ECDSA_OSSL_VERIFY */
 
 /* The audit tests that install these hooks use P-256 vectors and need signing */
@@ -2093,9 +2097,11 @@ void SSFECDSAUnitTest(void)
             privLen = (curves[ci] == SSF_EC_CURVE_P256) ? 32u : 48u;
             _SSFBNFullWidthCalls = 0u;
             SSF_ASSERT(SSFECDSAKeyGen(curves[ci], priv, privLen, pub, sizeof(pub), &pubLen));
+#if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
             SSF_ASSERT(SSFECDSASign(curves[ci], priv, privLen, hash, privLen, sig, sizeof(sig),
                                     &sigLen));
             SSF_ASSERT(SSFECDSAVerify(curves[ci], pub, pubLen, hash, privLen, sig, sigLen));
+#endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN */
             SSF_ASSERT(SSFECDHComputeSecret(curves[ci], priv, privLen, pub, pubLen, secret,
                                             sizeof(secret), &secretLen));
             SSF_ASSERT(_SSFBNFullWidthCalls == 0u);

@@ -60,9 +60,18 @@ the application run in `SSFMQTTCTask()`. Both are driven from one application lo
   completion, and drop reports. Application callbacks may therefore fire from either
   `SSFSMTask()` or `SSFMQTTCTask()`. `SSFMQTTCStop()` and `SSFMQTTCTxPublish()` may be called
   from inside any callback.
-- **No back-pressure.** The transport is always read. An inbound PUBLISH that cannot be queued is
-  dropped and reported; a dropped QoS 1 packet is still acknowledged so the broker's in-flight
-  window keeps moving.
+- **Back-pressure for QoS 1.** A QoS 1 PUBLISH that finds the rx queue full is held at the front
+  of the framing buffer and the transport is not read until the application frees a slot, so TCP
+  flow control holds the broker back and no QoS 1 message is lost to a brief burst. A hold lasts
+  at most [`SSF_MQTTC_CONFIG_RX_HOLD_MAX_TICKS`](#opt-hold); the packet is then dropped
+  (`RX_PUBLISH_HOLD_TIMEOUT`) and reading resumes. A QoS 0 PUBLISH that finds the queue full is
+  dropped at once (`RX_PUBLISH_QUEUE_FULL`), and reading goes on.
+- **A PUBACK is never skipped.** Every dropped QoS 1 PUBLISH is acknowledged so the broker's
+  in-flight window keeps moving. If no PUBACK block is free (the transport is not taking bytes),
+  the packet id is owed and reads stop until its PUBACK is queued; at most one is ever owed. A
+  delivery's PUBACK waits behind an owed one. Before CONNACK nothing is acknowledged, and once
+  `Stop()` has queued DISCONNECT nothing more is sent: inbound PUBLISH is dropped unacknowledged,
+  and a hold or owed PUBACK is abandoned (the clean session forgets it).
 - **Strings.** Every string the application supplies is NUL terminated and strictly shorter than
   its `SSF_MQTTC_CONFIG_MAX_*_SIZE` constant. Strings are validated with a bounded length scan
   against the constant, so no size argument accompanies them. An inbound PUBLISH whose topic is
@@ -109,7 +118,7 @@ READY, then eventually DISCONNECTED or STOPPED. A failed attempt yields CONNECT_
 | `CONNECT_FAILED` | An attempt ended before READY. Reported at the point of failure; the client then enters RECONNECT_WAIT. | valid |
 | `DISCONNECTED` | A READY connection was lost. Reported at the point of failure; the client then enters RECONNECT_WAIT. | valid |
 | `STOPPED` | `Stop()` complete. The client is in STOPPED. | NONE |
-| `RX_PUBLISH_DROPPED` | An inbound PUBLISH was discarded; a QoS 1 one is still acknowledged. The connection is unaffected. | `RX_PUBLISH_TIMEOUT`, `RX_PUBLISH_QUEUE_FULL`, `RX_PUBLISH_TOO_LARGE` or `RX_PUBLISH_TOPIC_TOO_LONG` |
+| `RX_PUBLISH_DROPPED` | An inbound PUBLISH was discarded; a QoS 1 one is still acknowledged. The connection is unaffected. | `RX_PUBLISH_TIMEOUT`, `RX_PUBLISH_HOLD_TIMEOUT`, `RX_PUBLISH_QUEUE_FULL`, `RX_PUBLISH_TOO_LARGE` or `RX_PUBLISH_TOPIC_TOO_LONG` |
 
 Inside a `CONNECT_FAILED` or `DISCONNECTED` callback, `SSFMQTTCGetState()` returns the state the
 connection failed in, not RECONNECT_WAIT.
@@ -133,7 +142,8 @@ connection failed in, not RECONNECT_WAIT.
 | `RX_PUBLISH_QOS2` | The broker sent a QoS 2 PUBLISH, which no subscription allows; decided by the fixed header alone. A broker bug: it recurs on every reconnect. |
 | `RX_OVERFLOW` | Inbound packet other than PUBLISH larger than `rxBlockSize`. |
 | `RX_PUBLISH_TIMEOUT` | The application deferred an inbound PUBLISH past [`SSF_MQTTC_CONFIG_RX_PUBLISH_MAX_TICKS`](#opt-maxticks). |
-| `RX_PUBLISH_QUEUE_FULL` | An inbound PUBLISH arrived with no free rx block. |
+| `RX_PUBLISH_QUEUE_FULL` | An inbound QoS 0 PUBLISH arrived with no free rx block. |
+| `RX_PUBLISH_HOLD_TIMEOUT` | An inbound QoS 1 PUBLISH waited for a free rx block longer than [`SSF_MQTTC_CONFIG_RX_HOLD_MAX_TICKS`](#opt-hold) while reads were held. |
 | `RX_PUBLISH_TOO_LARGE` | An inbound PUBLISH was larger than `rxBlockSize`. |
 | `RX_PUBLISH_TOPIC_TOO_LONG` | An inbound PUBLISH topic was not shorter than the topic constant. |
 
@@ -159,9 +169,12 @@ direction cannot block the other, and application traffic cannot block the proto
   `txBlocks` must be at least 1.
 - `rxBlockSize` must hold the largest inbound packet the application wants, including the fixed
   header. A PUBLISH that does not fit is dropped (`RX_PUBLISH_TOO_LARGE`); any other packet that
-  does not fit ends the connection (`RX_OVERFLOW`). One rx block is permanently the framing buffer
-  so the transport can always be read; the rest hold inbound PUBLISH packets awaiting the
-  application. A PUBLISH arriving with no free rx block is dropped.
+  does not fit ends the connection (`RX_OVERFLOW`). One rx block is permanently the framing buffer;
+  the rest hold inbound PUBLISH packets awaiting the application. A QoS 1 PUBLISH arriving with no
+  free rx block waits in the framing buffer while reads are held; a QoS 0 one is dropped.
+- At most 2 × queue depth + 2 inbound QoS 1 packets are ever unacknowledged as the broker sees
+  them: the queue, one held, one owed, and up to queue depth PUBACKs queued but not yet written.
+  The ctl pool reserves its other blocks for PINGREQ and DISCONNECT.
 - Both block sizes must be at least 4.
 
 <a id="callbacks"></a>
@@ -239,7 +252,8 @@ Options live in [`_opt/ssfmqttc_opt.h`](../_opt/ssfmqttc_opt.h) (aggregated into
 | `SSF_MQTTC_CONFIG_MAX_SUBSCRIPTIONS` | `8` | Maximum entries in the subscription set. |
 | <a id="opt-depth"></a>`SSF_MQTTC_CONFIG_RX_PUBLISH_QUEUE_DEPTH` | `4` | Inbound PUBLISH packets held for the application. Sizes the rx pool and the PUBACK capacity. |
 | <a id="opt-retry"></a>`SSF_MQTTC_CONFIG_RX_PUBLISH_RETRY_TICKS` | 1 s | Re-offer interval for a deferred inbound PUBLISH. |
-| <a id="opt-maxticks"></a>`SSF_MQTTC_CONFIG_RX_PUBLISH_MAX_TICKS` | 30 s | A deferred inbound PUBLISH is dropped this long after its first offer. |
+| <a id="opt-maxticks"></a>`SSF_MQTTC_CONFIG_RX_PUBLISH_MAX_TICKS` | 30 s (5 s in the ssfmqttc unit test build) | A deferred inbound PUBLISH is dropped this long after its first offer. Override with `-D`. |
+| <a id="opt-hold"></a>`SSF_MQTTC_CONFIG_RX_HOLD_MAX_TICKS` | 10 s (400 ms in the ssfmqttc unit test build) | Longest a QoS 1 PUBLISH is held, with reads suspended, waiting for queue space. Everything behind it waits too, so `txPublishTimeout` and `subscribeTimeout` should exceed it. Override with `-D`. |
 | <a id="opt-openpoll"></a>`SSF_MQTTC_CONFIG_OPEN_POLL_TICKS` | 10 ms | Longest `SSFMQTTCTask()` lets the app loop sleep while the transport resolves the host and connects. |
 | <a id="opt-pingresp"></a>`SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT` | 30 s (250 ms in the ssfmqttc unit test build) | Connection is dropped if PINGRESP does not follow PINGREQ within this time. Bounds the minimum `keepAliveSec` at four times this value. Override with `-D`. |
 
@@ -560,6 +574,19 @@ macros are shorthand over this.
   `SSFMQTTCStop()`. The event carries no per-filter detail, and one refused filter fails the whole
   set even if the others were granted. A later revision could stop the client
   itself and report the reason through the STOPPED event, or expose per-filter SUBACK results.
+- **A hold blocks everything behind it.** The stream is ordered, so while a QoS 1 PUBLISH is held
+  the PINGRESP, PUBACKs for the application's own publishes and SUBACK behind it wait too, each
+  hold for up to `SSF_MQTTC_CONFIG_RX_HOLD_MAX_TICKS`. Keep-alive allows for this: a PINGRESP
+  timeout that falls while reads are held for the application waits again, since a whole packet
+  arrived. It does not while reads are stopped for an owed PUBACK, which means writes are blocked,
+  so a dead uplink is still detected. Under a sustained flood an application slower than one
+  message per hold can chain holds; outbound QoS 1 completion and SUBACK can then be delayed past
+  their timeouts. While reads are held, a broker that closes the connection is noticed only once
+  reading resumes or a write fails. A broker whose socket to the client stays full applies its
+  own slow-consumer policy (queue limits, dropping, or disconnecting).
+- **PUBACK order is not arrival order in every case.** PUBACKs for dropped packets can go out
+  ahead of those for earlier packets still waiting in the queue (MQTT-IOP-07); an owed PUBACK
+  always precedes those of later deliveries.
 - **IPv4 only.** SSF is not designed for an IPv6 stack ([`ssfnet.h`](ssfnet.h)): `host` is a
   DNS name or a dotted IPv4 address, names resolve to IPv4 addresses only, and an IPv6 literal
   fails every attempt with `TRANSPORT_ERROR`. A broker with no IPv4 address cannot be reached.

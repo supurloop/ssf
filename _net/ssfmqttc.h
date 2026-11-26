@@ -100,11 +100,11 @@ typedef enum
                                          /* filters                                              */
     SSF_MQTTC_REASON_KEEPALIVE,          /* No PINGRESP within SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT */
     SSF_MQTTC_REASON_TX_PUBLISH_TIMEOUT, /* A txPublish did not complete within txPublishTimeout */
-    SSF_MQTTC_REASON_PROTOCOL,           /* Malformed or unexpected packet                        */
+    SSF_MQTTC_REASON_PROTOCOL,           /* Malformed or unexpected packet                       */
     SSF_MQTTC_REASON_RX_OVERFLOW,        /* Inbound packet other than PUBLISH larger than        */
                                          /* rxBlockSize                                          */
     SSF_MQTTC_REASON_RX_PUBLISH_TIMEOUT, /* App deferred an rxPublish past RX_PUBLISH_MAX_TICKS  */
-    SSF_MQTTC_REASON_RX_PUBLISH_QUEUE_FULL, /* rxPublish queue full                              */
+    SSF_MQTTC_REASON_RX_PUBLISH_QUEUE_FULL, /* rxPublish queue full (QoS 0; QoS 1 is held)       */
     SSF_MQTTC_REASON_RX_PUBLISH_TOO_LARGE,  /* Inbound PUBLISH larger than rxBlockSize           */
     SSF_MQTTC_REASON_RX_PUBLISH_TOPIC_TOO_LONG, /* Inbound PUBLISH topic length >=               */
                                          /* SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE                      */
@@ -114,6 +114,8 @@ typedef enum
                                          /* for one or more declared filters                     */
     SSF_MQTTC_REASON_RX_PUBLISH_QOS2,    /* Broker sent a QoS 2 PUBLISH, which no subscription   */
                                          /* allows (QoS 2 is not supported)                      */
+    SSF_MQTTC_REASON_RX_PUBLISH_HOLD_TIMEOUT, /* A QoS 1 PUBLISH waited for queue space longer  */
+                                         /* than SSF_MQTTC_CONFIG_RX_HOLD_MAX_TICKS              */
     SSF_MQTTC_REASON_MAX
 } SSFMQTTCReason_t;
 
@@ -132,10 +134,10 @@ typedef enum
                                      /* RECONNECT_WAIT and will try again.                      */
     SSF_MQTTC_EVENT_STOPPED,         /* SSFMQTTCStop() complete; client is in STOPPED           */
     SSF_MQTTC_EVENT_RX_PUBLISH_DROPPED, /* An rxPublish was discarded; reason is                 */
-                                     /* RX_PUBLISH_TIMEOUT, RX_PUBLISH_QUEUE_FULL,              */
-                                     /* RX_PUBLISH_TOO_LARGE or RX_PUBLISH_TOPIC_TOO_LONG. A    */
-                                     /* QoS 1 packet is still acknowledged. Connection is       */
-                                     /* unaffected.                                             */
+                                     /* RX_PUBLISH_TIMEOUT, RX_PUBLISH_HOLD_TIMEOUT,            */
+                                     /* RX_PUBLISH_QUEUE_FULL, RX_PUBLISH_TOO_LARGE or          */
+                                     /* RX_PUBLISH_TOPIC_TOO_LONG. A QoS 1 packet is still      */
+                                     /* acknowledged. Connection is unaffected.                 */
     SSF_MQTTC_EVENT_MAX
 } SSFMQTTCEvent_t;
 

@@ -104,6 +104,7 @@ typedef struct
     bool isOpen;
     uint32_t openCount;
     uint32_t closeCount;
+    uint32_t recvCount;               /* recv() calls, to see reads suspended by back-pressure */
     char host[SSF_MQTTC_CONFIG_MAX_HOST_SIZE];
     uint16_t port;
     uint8_t tx[SSF_MQTTC_UT_MOCK_BUF_SIZE];
@@ -205,6 +206,7 @@ static SSFNetIOResult_t _SSFMQTTCUTMockRecv(SSFNetTransport_t *t, uint8_t *buf, 
     SSF_REQUIRE(gotOut != NULL);
     SSF_REQUIRE(m->isOpen);
 
+    m->recvCount++;
     *gotOut = 0;
     if ((m->recvChunk > 0) && (size > m->recvChunk)) size = m->recvChunk;
     if ((m->rxPadLeft > 0) && (m->rxPos == m->rxPadPos))
@@ -330,6 +332,8 @@ static SSFMQTTCRxPublish_t _utRx;             /* Last offer; topic/payload copie
 static char _utRxTopic[SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE];
 static uint8_t _utRxPayload[SSF_MQTTC_UT_RX_BLOCK_SIZE];
 static uint32_t _utRxPublishCount;
+static char _utRxTaken[64];                   /* First topic byte of each accepted PUBLISH */
+static uint32_t _utRxTakenCount;
 static bool _utRxAccept;                      /* What the rxPublish callback returns */
 static uint32_t _utRxPublishCtx;
 
@@ -346,6 +350,8 @@ static void _SSFMQTTCUTRecordReset(void)
     _utEventCount = 0;
     memset(&_utRx, 0, sizeof(_utRx));
     _utRxPublishCount = 0;
+    memset(_utRxTaken, 0, sizeof(_utRxTaken));
+    _utRxTakenCount = 0;
     _utRxAccept = true;
     _utTxDoneCount = 0;
     _utTxDoneTrueCount = 0;
@@ -371,6 +377,8 @@ static bool _SSFMQTTCUTRxPublish(void *ctx, const SSFMQTTCRxPublish_t *rxPublish
     if (rxPublish->payloadLen > 0) memcpy(_utRxPayload, rxPublish->payload, rxPublish->payloadLen);
     _utRx.topic = _utRxTopic;
     _utRx.payload = _utRxPayload;
+    if (_utRxAccept && (_utRxTakenCount < (sizeof(_utRxTaken) - 1u)))
+    { _utRxTaken[_utRxTakenCount++] = rxPublish->topic[0]; }
     return _utRxAccept;
 }
 
@@ -951,8 +959,15 @@ static void _SSFMQTTCUTScenarioRxDefer(void)
     SSF_ASSERT(_utRxPublishCount == 1);
 
     _utRxAccept = true;
-    _SSFMQTTCUTPumpFor(SSF_MQTTC_CONFIG_RX_PUBLISH_RETRY_TICKS + SSF_MQTTC_UT_SLACK_TICKS);
-    SSF_ASSERT(_utRxPublishCount == 3);             /* A re-offered and taken, then B */
+    {
+        SSFPortTick_t end = SSFPortGetTick64() + SSF_MQTTC_CONFIG_RX_PUBLISH_RETRY_TICKS +
+                            (4u * SSF_MQTTC_UT_LOAD_TICKS);
+
+        while ((_utRxTakenCount < 2) && (SSFPortGetTick64() < end)) _SSFMQTTCUTPump();
+        _SSFMQTTCUTPump();
+    }
+    SSF_ASSERT(strcmp(_utRxTaken, "ab") == 0);      /* A re-offered and taken, then B */
+    SSF_ASSERT(_utRxPublishCount >= 3);             /* A loaded host may re-offer A once more */
     SSF_ASSERT(strcmp(_utRxTopic, "b") == 0);
     _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(ackA));
     SSF_ASSERT(_utEventCount == 0);
@@ -960,13 +975,18 @@ static void _SSFMQTTCUTScenarioRxDefer(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Tests that an inbound PUBLISH beyond the queue depth is dropped, reported and acknowledged.   */
+/* Tests that a QoS 0 PUBLISH finding the queue full is dropped and reported, unacknowledged,   */
+/* and that reading goes on: QoS 0 never causes back-pressure.                                   */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTScenarioRxQueueFull(void)
 {
     static const uint8_t in[] = { 0x32, 0x05, 0x00, 0x01, 'q', 0x00, 0x01 };
+    static const uint8_t in0[] = { 0x30, 0x03, 0x00, 0x01, 'z' };
     static const SSFMQTTCUTEventRec_t dropped[] =
-    { { SSF_MQTTC_EVENT_RX_PUBLISH_DROPPED, SSF_MQTTC_REASON_RX_PUBLISH_QUEUE_FULL } };
+    {
+        { SSF_MQTTC_EVENT_RX_PUBLISH_DROPPED, SSF_MQTTC_REASON_RX_PUBLISH_QUEUE_FULL },
+        { SSF_MQTTC_EVENT_RX_PUBLISH_DROPPED, SSF_MQTTC_REASON_RX_PUBLISH_QUEUE_FULL },
+    };
     uint8_t pkt[sizeof(in)];
     uint32_t i;
     SSFMQTTCOpts_t opts;
@@ -977,16 +997,18 @@ static void _SSFMQTTCUTScenarioRxQueueFull(void)
 
     _utRxAccept = false;                            /* Head is deferred; queue fills behind it */
     memcpy(pkt, in, sizeof(pkt));
-    for (i = 0; i < SSF_MQTTC_CONFIG_RX_PUBLISH_QUEUE_DEPTH + 1; i++)
+    for (i = 0; i < SSF_MQTTC_CONFIG_RX_PUBLISH_QUEUE_DEPTH; i++)
     {
-        pkt[sizeof(pkt) - 1] = (uint8_t)(i + 1);    /* Distinct packet ids 1..depth+1 */
+        pkt[sizeof(pkt) - 1] = (uint8_t)(i + 1);    /* Distinct packet ids 1..depth */
         _SSFMQTTCUTInject(pkt, sizeof(pkt));
     }
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(in0));
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(in0));
     _SSFMQTTCUTPump();
     SSF_ASSERT(_utRxPublishCount == 1);
-    _SSFMQTTCUTExpectEvents(dropped, 1);
-    pkt[0] = 0x40; pkt[1] = 0x02; pkt[2] = 0x00; pkt[3] = (uint8_t)(SSF_MQTTC_CONFIG_RX_PUBLISH_QUEUE_DEPTH + 1);
-    _SSFMQTTCUTExpectTx(pkt, 4);                    /* PUBACK for the dropped one only */
+    SSF_ASSERT(_utMock.rxPos == _utMock.rxLen);    /* Everything read */
+    _SSFMQTTCUTExpectEvents(dropped, 2);
+    _SSFMQTTCUTExpectTx(NULL, 0);                   /* No PUBACK for QoS 0 */
 
     /* Teardown discards the queued packets without further offers; stop flushes nothing else */
     _SSFMQTTCUTEnd();
@@ -1996,6 +2018,847 @@ static void _SSFMQTTCUTScenarioKeepAliveUnsolicitedPingResp(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Back-pressure scaffolding                                                                     */
+/* --------------------------------------------------------------------------------------------- */
+static const uint8_t _utPktSubscribeId2[] =
+{ 0x82, 0x08, 0x00, 0x02, 0x00, 0x03, 'a', '/', 'b', 0x01 };
+static const uint8_t _utPktSubAckOkId2[] = { 0x90, 0x03, 0x00, 0x02, 0x01 };
+
+/* --------------------------------------------------------------------------------------------- */
+/* Writes a 7-byte QoS 1 PUBLISH with a one-character topic and packetId to pkt.                 */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTPub1(uint8_t pkt[7], char topic, uint16_t packetId)
+{
+    pkt[0] = 0x32; pkt[1] = 0x05; pkt[2] = 0x00; pkt[3] = 0x01; pkt[4] = (uint8_t)topic;
+    pkt[5] = (uint8_t)(packetId >> 8); pkt[6] = (uint8_t)packetId;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Appends the PUBACK for packetId to buf at *lenInOut.                                          */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTAppendAck(uint8_t *buf, size_t size, size_t *lenInOut, uint16_t packetId)
+{
+    SSF_ASSERT((*lenInOut + 4u) <= size);
+    buf[(*lenInOut)++] = 0x40; buf[(*lenInOut)++] = 0x02;
+    buf[(*lenInOut)++] = (uint8_t)(packetId >> 8); buf[(*lenInOut)++] = (uint8_t)packetId;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Pumps until count events are logged, asserting if that takes more than ticks.                 */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTPumpUntilEvents(uint32_t count, SSFPortTick_t ticks)
+{
+    SSFPortTick_t end = SSFPortGetTick64() + ticks;
+
+    for (;;)
+    {
+        bool isLate = (SSFPortGetTick64() > end);  /* Sampled before the tasks run */
+
+        (void)SSFSMTask(NULL);
+        (void)SSFMQTTCTask(NULL);
+        if (_utEventCount >= count) break;
+        SSF_ASSERT(isLate == false);
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Pumps until count inbound PUBLISH packets were accepted, asserting if that takes more than    */
+/* ticks.                                                                                        */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTPumpUntilTaken(uint32_t count, SSFPortTick_t ticks)
+{
+    SSFPortTick_t end = SSFPortGetTick64() + ticks;
+
+    for (;;)
+    {
+        bool isLate = (SSFPortGetTick64() > end);  /* Sampled before the tasks run */
+
+        (void)SSFSMTask(NULL);
+        (void)SSFMQTTCTask(NULL);
+        if (_utRxTakenCount >= count) break;
+        SSF_ASSERT(isLate == false);
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if more than budget ticks passed since since. Keep-alive scenarios use it to     */
+/* judge only runs the host did not stall: on a heavily loaded host a pump can overrun a 250 ms  */
+/* PINGRESP timeout several times, and keep-alive then rightly ends the connection.              */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFMQTTCUTIsStalled(SSFPortTick_t since, SSFPortTick_t budget)
+{
+    return (SSFPortGetTick64() - since) > budget;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Asserts the connection is up with only the hold-timeout drop logged, unless the host stalled  */
+/* past budget since since, in which case only that the drop came first.                         */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTExpectHeldUp(SSFPortTick_t since, SSFPortTick_t budget)
+{
+    static const SSFMQTTCUTEventRec_t held[] =
+    { { SSF_MQTTC_EVENT_RX_PUBLISH_DROPPED, SSF_MQTTC_REASON_RX_PUBLISH_HOLD_TIMEOUT } };
+
+    if (_SSFMQTTCUTIsStalled(since, budget))
+    {
+        /* Either the hold ended first, or keep-alive fired before the hold could start */
+        SSF_ASSERT(_utEventCount >= 1);
+        SSF_ASSERT((_utEvents[0].reason == held[0].reason) ||
+                   (_utEvents[0].reason == SSF_MQTTC_REASON_KEEPALIVE));
+        _utEventCount = 0;
+        return;
+    }
+    /* The deferred head may also have timed out if the host stalled earlier in the scenario */
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTED);
+    while ((_utEventCount > 1) &&
+           (_utEvents[_utEventCount - 1u].reason == SSF_MQTTC_REASON_RX_PUBLISH_TIMEOUT))
+    { _utEventCount--; }
+    _SSFMQTTCUTExpectEvents(held, 1);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Tests back-pressure: with the transport blocked, delivered messages' PUBACKs use up the ctl   */
+/* blocks, later messages wait in the queue, and the QoS 1 PUBLISH that then finds it full is    */
+/* held while reading stops. Once the transport drains, the held packet is queued, reading       */
+/* resumes, and every message is delivered once, in order, and acknowledged in order.            */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTScenarioRxBackPressure(void)
+{
+    uint8_t pkt[7];
+    uint8_t acks[64];
+    size_t acksLen = 0;
+    char expected[16];
+    uint32_t total = (2u * SSF_MQTTC_CONFIG_RX_PUBLISH_QUEUE_DEPTH) + 2u;
+    uint32_t i;
+    uint32_t n;
+    size_t base;
+    SSFPortTick_t to;
+    SSFMQTTCOpts_t opts;
+
+    SSF_ASSERT(total < sizeof(expected));
+    _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+    _SSFMQTTCUTOptsInit(&opts);
+    _SSFMQTTCUTGoReady(&opts);
+    _utMock.recvChunk = sizeof(pkt);                /* One packet per read */
+    _utMock.sendResult = SSF_NET_IO_WANT_WRITE;
+    base = _utMock.rxPos;
+    for (i = 0; i < total; i++)
+    {
+        _SSFMQTTCUTPub1(pkt, (char)('a' + i), (uint16_t)(i + 1u));
+        _SSFMQTTCUTInject(pkt, sizeof(pkt));
+        expected[i] = (char)('a' + i);
+        _SSFMQTTCUTAppendAck(acks, sizeof(acks), &acksLen, (uint16_t)(i + 1u));
+    }
+    expected[total] = 0;
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(_utRxTakenCount == SSF_MQTTC_CONFIG_RX_PUBLISH_QUEUE_DEPTH);  /* PUBACKs stuck */
+    SSF_ASSERT((_utMock.rxPos - base) == ((total - 1u) * sizeof(pkt)));   /* Last one unread */
+    n = _utMock.recvCount;
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(_utMock.recvCount == n);             /* Reads suspended */
+    SSF_ASSERT(_utEventCount == 0);
+    SSF_ASSERT(_utMock.txLen == 0);
+    to = SSF_MAX_NEXT_TIMEOUT;
+    (void)SSFMQTTCTask(&to);
+    SSF_ASSERT(to <= SSF_MQTTC_CONFIG_RX_HOLD_MAX_TICKS);
+
+    /* The transport drains */
+    _utMock.sendResult = SSF_NET_IO_SUCCESS;
+    _SSFMQTTCUTPumpUntilTaken(total, SSF_MQTTC_UT_LOAD_TICKS);
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(strcmp(_utRxTaken, expected) == 0);
+    SSF_ASSERT(_utMock.rxPos == _utMock.rxLen);
+    _SSFMQTTCUTExpectTx(acks, acksLen);
+    SSF_ASSERT(_utEventCount == 0);
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTED);
+    _SSFMQTTCUTEnd();
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Tests the hold cap: a held QoS 1 PUBLISH is dropped and acknowledged after                    */
+/* RX_HOLD_MAX_TICKS, reading resumes, and a QoS 0 PUBLISH that was waiting behind it is then    */
+/* dropped as queue full. The connection stays up.                                               */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTScenarioRxHoldTimeout(void)
+{
+    static const uint8_t in0[] = { 0x30, 0x03, 0x00, 0x01, 'z' };
+    static const SSFMQTTCUTEventRec_t expected[] =
+    {
+        { SSF_MQTTC_EVENT_RX_PUBLISH_DROPPED, SSF_MQTTC_REASON_RX_PUBLISH_HOLD_TIMEOUT },
+        { SSF_MQTTC_EVENT_RX_PUBLISH_DROPPED, SSF_MQTTC_REASON_RX_PUBLISH_QUEUE_FULL },
+    };
+    uint8_t pkt[7];
+    uint8_t ack[4];
+    size_t ackLen = 0;
+    uint32_t i;
+    SSFPortTick_t start;
+    SSFMQTTCOpts_t opts;
+
+    _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+    _SSFMQTTCUTOptsInit(&opts);
+    _SSFMQTTCUTGoReady(&opts);
+    _utMock.recvChunk = sizeof(pkt);
+    _utRxAccept = false;
+    for (i = 0; i <= SSF_MQTTC_CONFIG_RX_PUBLISH_QUEUE_DEPTH; i++)
+    {
+        _SSFMQTTCUTPub1(pkt, (char)('a' + i), (uint16_t)(i + 1u));
+        _SSFMQTTCUTInject(pkt, sizeof(pkt));
+    }
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(in0));
+    _SSFMQTTCUTAppendAck(ack, sizeof(ack), &ackLen,
+                         (uint16_t)(SSF_MQTTC_CONFIG_RX_PUBLISH_QUEUE_DEPTH + 1u));
+    start = SSFPortGetTick64();
+    _SSFMQTTCUTPumpUntilEvents(1, SSF_MQTTC_CONFIG_RX_HOLD_MAX_TICKS + SSF_MQTTC_UT_LOAD_TICKS);
+    SSF_ASSERT((SSFPortGetTick64() - start) >= SSF_MQTTC_CONFIG_RX_HOLD_MAX_TICKS);
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectEvents(expected, 2);
+    _SSFMQTTCUTExpectTx(ack, ackLen);
+    SSF_ASSERT(_utMock.rxPos == _utMock.rxLen);
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTED);
+    _SSFMQTTCUTEnd();
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Tests keep-alive across back-pressure: a PINGRESP stuck behind a held packet past its timeout */
+/* does not end the connection; but with reads stopped for an owed PUBACK on a dead uplink,      */
+/* keep-alive still does.                                                                        */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTScenarioRxHoldKeepAlive(void)
+{
+    static const uint8_t pingReq[] = { 0xC0, 0x00 };
+    static const uint8_t pingResp[] = { 0xD0, 0x00 };
+    static const SSFMQTTCUTEventRec_t dead[] =
+    {
+        { SSF_MQTTC_EVENT_RX_PUBLISH_DROPPED, SSF_MQTTC_REASON_RX_PUBLISH_TOPIC_TOO_LONG },
+        { SSF_MQTTC_EVENT_DISCONNECTED, SSF_MQTTC_REASON_KEEPALIVE },
+    };
+    uint8_t pkt[7];
+    uint8_t big[512];
+    size_t len;
+    size_t hdrLen;
+    uint32_t i;
+    SSFPortTick_t start;
+
+    SSF_ASSERT(SSF_MQTTC_CONFIG_RX_HOLD_MAX_TICKS > SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT);
+
+    /* Hold right after a PINGREQ, with its PINGRESP queued behind the held packet */
+    _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+    _SSFMQTTCUTGoReadyKeepAlive(1);
+    (void)_SSFMQTTCUTPumpUntilTx(sizeof(pingReq), (2u * SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT) +
+                                                  SSF_MQTTC_UT_LOAD_TICKS);
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(pingReq));
+    _utMock.recvChunk = sizeof(pkt);
+    _utRxAccept = false;
+    for (i = 0; i <= SSF_MQTTC_CONFIG_RX_PUBLISH_QUEUE_DEPTH; i++)
+    {
+        _SSFMQTTCUTPub1(pkt, (char)('a' + i), (uint16_t)(i + 1u));
+        _SSFMQTTCUTInject(pkt, sizeof(pkt));
+    }
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(pingResp));
+    start = SSFPortGetTick64();
+    _SSFMQTTCUTPumpUntilEvents(1, SSF_MQTTC_CONFIG_RX_HOLD_MAX_TICKS +
+                                  (4u * SSF_MQTTC_UT_LOAD_TICKS));
+    _SSFMQTTCUTPump();                              /* The PINGRESP is read now */
+    _SSFMQTTCUTExpectHeldUp(start, SSF_MQTTC_CONFIG_RX_HOLD_MAX_TICKS +
+                                   SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT);
+    _utMock.txLen = 0;
+    _SSFMQTTCUTEnd();
+
+    /* A hold that ends just before the PINGRESP deadline: the PINGRESP, arriving only after   */
+    /* that deadline, still gets a full timeout from the end of the hold                        */
+    _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+    _SSFMQTTCUTGoReadyKeepAlive(1);
+    (void)_SSFMQTTCUTPumpUntilTx(sizeof(pingReq), (2u * SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT) +
+                                                  SSF_MQTTC_UT_LOAD_TICKS);
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(pingReq));
+    _utMock.recvChunk = sizeof(pkt);
+    _utRxAccept = false;
+    for (i = 0; i <= SSF_MQTTC_CONFIG_RX_PUBLISH_QUEUE_DEPTH; i++)
+    {
+        _SSFMQTTCUTPub1(pkt, (char)('a' + i), (uint16_t)(i + 1u));
+        _SSFMQTTCUTInject(pkt, sizeof(pkt));
+    }
+    _SSFMQTTCUTPumpUntilEvents(1, SSF_MQTTC_CONFIG_RX_HOLD_MAX_TICKS +
+                                  (4u * SSF_MQTTC_UT_LOAD_TICKS));
+    start = SSFPortGetTick64();                     /* The hold just ended */
+    _SSFMQTTCUTPumpFor((SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT * 3u) / 5u);   /* Past the deadline */
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(pingResp));
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectHeldUp(start, SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT);
+    _utMock.txLen = 0;
+    _SSFMQTTCUTEnd();
+
+    /* A hold, then no PINGRESP ever (dead downlink): the deadline is extended once at most,   */
+    /* and keep-alive still ends the connection                                                  */
+    _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+    _SSFMQTTCUTGoReadyKeepAlive(1);
+    (void)_SSFMQTTCUTPumpUntilTx(sizeof(pingReq), (2u * SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT) +
+                                                  SSF_MQTTC_UT_LOAD_TICKS);
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(pingReq));
+    _utMock.recvChunk = sizeof(pkt);
+    _utRxAccept = false;
+    for (i = 0; i <= SSF_MQTTC_CONFIG_RX_PUBLISH_QUEUE_DEPTH; i++)
+    {
+        _SSFMQTTCUTPub1(pkt, (char)('a' + i), (uint16_t)(i + 1u));
+        _SSFMQTTCUTInject(pkt, sizeof(pkt));
+    }
+    _SSFMQTTCUTPumpUntilState(SSF_MQTTC_STATE_RECONNECT_WAIT,
+                              SSF_MQTTC_CONFIG_RX_HOLD_MAX_TICKS +
+                              (4u * SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT) +
+                              (8u * SSF_MQTTC_UT_LOAD_TICKS));   /* Several timer phases */
+    SSF_ASSERT(_utEventCount >= 1u);
+    SSF_ASSERT(_utEvents[_utEventCount - 1u].event == SSF_MQTTC_EVENT_DISCONNECTED);
+    SSF_ASSERT(_utEvents[_utEventCount - 1u].reason == SSF_MQTTC_REASON_KEEPALIVE);
+    _utEventCount = 0;
+    _utMock.txLen = 0;
+    _SSFMQTTCUTEnd();
+
+    /* Owed PUBACK on a dead uplink: reads stop, PINGREQ cannot be sent, keep-alive ends it */
+    _SSFMQTTCUTBeginRx(SSF_MQTTC_UT_TX_BLOCKS, sizeof(big));
+    _SSFMQTTCUTGoReadyKeepAlive(1);
+    _utMock.sendResult = SSF_NET_IO_WANT_WRITE;
+    for (i = 0; i < SSF_MQTTC_CONFIG_RX_PUBLISH_QUEUE_DEPTH; i++)
+    {
+        _SSFMQTTCUTPub1(pkt, (char)('a' + i), (uint16_t)(i + 1u));
+        _SSFMQTTCUTInject(pkt, sizeof(pkt));
+    }
+    _SSFMQTTCUTPump();                              /* Delivered; their PUBACKs use the blocks */
+    SSF_ASSERT(_utRxTakenCount == SSF_MQTTC_CONFIG_RX_PUBLISH_QUEUE_DEPTH);
+    len = _SSFMQTTCUTBuildPublish(big, sizeof(big), 0x32, SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE, 9, 1, 1,
+                                  &hdrLen);
+    _SSFMQTTCUTInject(big, len);                    /* Its PUBACK is owed */
+    _SSFMQTTCUTPumpUntilState(SSF_MQTTC_STATE_RECONNECT_WAIT,
+                              (4u * SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT) +
+                              (8u * SSF_MQTTC_UT_LOAD_TICKS));   /* Two timer phases */
+    _SSFMQTTCUTExpectEvents(dead, 2);
+    _utMock.sendResult = SSF_NET_IO_SUCCESS;
+    _utMock.txLen = 0;
+    _SSFMQTTCUTEnd();
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Tests the owed PUBACK: each drop path that finds no PUBACK block owes the id and stops reads  */
+/* until the PUBACK is queued; it goes out before the PUBACK of any later delivery.              */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTScenarioRxPubAckOwed(void)
+{
+    static const SSFMQTTCUTEventRec_t tooLong[] =
+    { { SSF_MQTTC_EVENT_RX_PUBLISH_DROPPED, SSF_MQTTC_REASON_RX_PUBLISH_TOPIC_TOO_LONG } };
+    static const SSFMQTTCUTEventRec_t tooLarge[] =
+    { { SSF_MQTTC_EVENT_RX_PUBLISH_DROPPED, SSF_MQTTC_REASON_RX_PUBLISH_TOO_LARGE } };
+    static const SSFMQTTCUTEventRec_t timedOut[] =
+    { { SSF_MQTTC_EVENT_RX_PUBLISH_DROPPED, SSF_MQTTC_REASON_RX_PUBLISH_TIMEOUT } };
+    static const SSFMQTTCUTEventRec_t held[] =
+    { { SSF_MQTTC_EVENT_RX_PUBLISH_DROPPED, SSF_MQTTC_REASON_RX_PUBLISH_HOLD_TIMEOUT } };
+    const uint32_t depth = SSF_MQTTC_CONFIG_RX_PUBLISH_QUEUE_DEPTH;
+    uint8_t pkt[7];
+    uint8_t big[512];
+    uint8_t acks[128];
+    size_t acksLen;
+    size_t len;
+    size_t hdrLen;
+    uint32_t i;
+    uint32_t kind;
+    uint32_t n;
+    SSFMQTTCOpts_t opts;
+
+    /* Kinds 0 and 1: a topic too long, a packet too large, after depth deliveries whose        */
+    /* PUBACKs are stuck behind a blocked transport                                             */
+    for (kind = 0; kind < 2u; kind++)
+    {
+        acksLen = 0;
+        _SSFMQTTCUTBeginRx(SSF_MQTTC_UT_TX_BLOCKS, (kind == 0) ? sizeof(big) :
+                                                                 SSF_MQTTC_UT_RX_BLOCK_SIZE);
+        _SSFMQTTCUTOptsInit(&opts);
+        _SSFMQTTCUTGoReady(&opts);
+        _utMock.sendResult = SSF_NET_IO_WANT_WRITE;
+        for (i = 0; i < depth; i++)
+        {
+            _SSFMQTTCUTPub1(pkt, (char)('a' + i), (uint16_t)(i + 1u));
+            _SSFMQTTCUTInject(pkt, sizeof(pkt));
+            _SSFMQTTCUTAppendAck(acks, sizeof(acks), &acksLen, (uint16_t)(i + 1u));
+        }
+        _SSFMQTTCUTPump();
+        SSF_ASSERT(_utRxTakenCount == depth);
+        if (kind == 0)
+        {
+            len = _SSFMQTTCUTBuildPublish(big, sizeof(big), 0x32, SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE,
+                                          0x0109, 1, 1, &hdrLen);
+        }
+        else len = _SSFMQTTCUTBuildPublish(big, sizeof(big), 0x32, 1, 0x0109, 200, 200, &hdrLen);
+        _SSFMQTTCUTInject(big, len);
+        _SSFMQTTCUTAppendAck(acks, sizeof(acks), &acksLen, 0x0109);
+        if (kind == 0)
+        {
+            /* A second one in the same read waits behind the owed PUBACK, unprocessed */
+            big[len - 3u] = 0x02;                   /* Packet id 0x0109 -> 0x0209 */
+            _SSFMQTTCUTInject(big, len);
+            _SSFMQTTCUTAppendAck(acks, sizeof(acks), &acksLen, 0x0209);
+        }
+        _SSFMQTTCUTPump();
+        _SSFMQTTCUTExpectEvents((kind == 0) ? tooLong : tooLarge, 1);
+        _SSFMQTTCUTPub1(pkt, 'n', 10);
+        _SSFMQTTCUTInject(pkt, sizeof(pkt));
+        _SSFMQTTCUTAppendAck(acks, sizeof(acks), &acksLen, 10);
+        n = _utMock.recvCount;
+        _SSFMQTTCUTPump();
+        SSF_ASSERT(_utMock.recvCount == n);         /* Reads suspended while the id is owed */
+        SSF_ASSERT(_utRxTakenCount == depth);
+        _SSFMQTTCUTExpectTx(NULL, 0);
+
+        _utMock.sendResult = SSF_NET_IO_SUCCESS;
+        _SSFMQTTCUTPumpUntilTaken(depth + 1u, SSF_MQTTC_UT_LOAD_TICKS);
+        _SSFMQTTCUTPump();
+        _SSFMQTTCUTExpectTx(acks, acksLen);         /* Owed one before the later delivery's */
+        if (kind == 0) { _SSFMQTTCUTExpectEvents(tooLong, 1); }   /* The second drop */
+        SSF_ASSERT(_utEventCount == 0);
+        _SSFMQTTCUTEnd();
+    }
+
+    /* Kind 2: a deferred head times out after drops have used up the PUBACK blocks */
+    acksLen = 0;
+    _SSFMQTTCUTBeginRx(SSF_MQTTC_UT_TX_BLOCKS, sizeof(big));
+    _SSFMQTTCUTOptsInit(&opts);
+    _SSFMQTTCUTGoReady(&opts);
+    _utMock.sendResult = SSF_NET_IO_WANT_WRITE;
+    _utRxAccept = false;
+    _SSFMQTTCUTPub1(pkt, 'e', 5);
+    _SSFMQTTCUTInject(pkt, sizeof(pkt));
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(_utRxPublishCount == 1);             /* Offered and deferred */
+    for (i = 0; i < depth; i++)
+    {
+        len = _SSFMQTTCUTBuildPublish(big, sizeof(big), 0x32, SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE,
+                                      (uint16_t)(11u + i), 1, 1, &hdrLen);
+        _SSFMQTTCUTInject(big, len);
+        _SSFMQTTCUTAppendAck(acks, sizeof(acks), &acksLen, (uint16_t)(11u + i));
+    }
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(_utEventCount == depth);
+    _utEventCount = 0;
+    _SSFMQTTCUTPumpUntilEvents(1, SSF_MQTTC_CONFIG_RX_PUBLISH_MAX_TICKS +
+                                  SSF_MQTTC_CONFIG_RX_PUBLISH_RETRY_TICKS +
+                                  SSF_MQTTC_UT_LOAD_TICKS);
+    _SSFMQTTCUTExpectEvents(timedOut, 1);
+    _SSFMQTTCUTAppendAck(acks, sizeof(acks), &acksLen, 5);
+    _SSFMQTTCUTPub1(pkt, 'n', 6);
+    _SSFMQTTCUTInject(pkt, sizeof(pkt));
+    _SSFMQTTCUTAppendAck(acks, sizeof(acks), &acksLen, 6);
+    n = _utMock.recvCount;
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(_utMock.recvCount == n);
+    _utRxAccept = true;
+    _utMock.sendResult = SSF_NET_IO_SUCCESS;
+    _SSFMQTTCUTPumpUntilTaken(1, SSF_MQTTC_UT_LOAD_TICKS);
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(_utRxTaken[0] == 'n');
+    _SSFMQTTCUTExpectTx(acks, acksLen);
+    SSF_ASSERT(_utEventCount == 0);
+    _SSFMQTTCUTEnd();
+
+    /* Kind 2b: a deferred head times out while another PUBACK is already owed: it waits its    */
+    /* turn rather than owing a second, and its PUBACK follows the owed one                      */
+    acksLen = 0;
+    _SSFMQTTCUTBeginRx(SSF_MQTTC_UT_TX_BLOCKS, sizeof(big));
+    _SSFMQTTCUTOptsInit(&opts);
+    _SSFMQTTCUTGoReady(&opts);
+    _utMock.sendResult = SSF_NET_IO_WANT_WRITE;
+    _utRxAccept = false;
+    _SSFMQTTCUTPub1(pkt, 'e', 5);
+    _SSFMQTTCUTInject(pkt, sizeof(pkt));
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(_utRxPublishCount == 1);
+    for (i = 0; i <= depth; i++)                    /* depth acknowledged, the last one owed */
+    {
+        len = _SSFMQTTCUTBuildPublish(big, sizeof(big), 0x32, SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE,
+                                      (uint16_t)(11u + i), 1, 1, &hdrLen);
+        _SSFMQTTCUTInject(big, len);
+        _SSFMQTTCUTAppendAck(acks, sizeof(acks), &acksLen, (uint16_t)(11u + i));
+    }
+    _SSFMQTTCUTAppendAck(acks, sizeof(acks), &acksLen, 5);
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(_utEventCount == (depth + 1u));
+    _utEventCount = 0;
+    _SSFMQTTCUTPumpFor(SSF_MQTTC_CONFIG_RX_PUBLISH_MAX_TICKS +
+                       SSF_MQTTC_CONFIG_RX_PUBLISH_RETRY_TICKS);
+    SSF_ASSERT(_utEventCount == 0);                 /* Due, but waiting for the owed PUBACK */
+    _utMock.sendResult = SSF_NET_IO_SUCCESS;
+    _SSFMQTTCUTPumpUntilEvents(1, SSF_MQTTC_CONFIG_RX_PUBLISH_RETRY_TICKS +
+                                  SSF_MQTTC_UT_LOAD_TICKS);
+    _SSFMQTTCUTExpectEvents(timedOut, 1);
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectTx(acks, acksLen);
+    _SSFMQTTCUTEnd();
+
+    /* Kind 3: the hold cap expires while the PUBACK blocks are used up. The owed PUBACK goes   */
+    /* out before those of the queued messages delivered after it.                              */
+    acksLen = 0;
+    _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+    _SSFMQTTCUTOptsInit(&opts);
+    _SSFMQTTCUTGoReady(&opts);
+    _utMock.sendResult = SSF_NET_IO_WANT_WRITE;
+    _utMock.recvChunk = sizeof(pkt);
+    for (i = 0; i <= (2u * depth); i++)
+    {
+        _SSFMQTTCUTPub1(pkt, (char)('a' + i), (uint16_t)(i + 1u));
+        _SSFMQTTCUTInject(pkt, sizeof(pkt));
+    }
+    for (i = 0; i < depth; i++)
+    { _SSFMQTTCUTAppendAck(acks, sizeof(acks), &acksLen, (uint16_t)(i + 1u)); }
+    _SSFMQTTCUTAppendAck(acks, sizeof(acks), &acksLen, (uint16_t)((2u * depth) + 1u));
+    for (i = depth; i < (2u * depth); i++)
+    { _SSFMQTTCUTAppendAck(acks, sizeof(acks), &acksLen, (uint16_t)(i + 1u)); }
+    _SSFMQTTCUTPumpUntilEvents(1, SSF_MQTTC_CONFIG_RX_HOLD_MAX_TICKS + SSF_MQTTC_UT_LOAD_TICKS);
+    _SSFMQTTCUTExpectEvents(held, 1);
+    SSF_ASSERT(_utRxTakenCount == depth);
+    _utMock.sendResult = SSF_NET_IO_SUCCESS;
+    _SSFMQTTCUTPumpUntilTaken(2u * depth, SSF_MQTTC_UT_LOAD_TICKS);
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectTx(acks, acksLen);
+    SSF_ASSERT(_utEventCount == 0);
+    _SSFMQTTCUTEnd();
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Tests that a held packet and an owed PUBACK die with their connection: nothing stale is sent  */
+/* after Stop, after a link failure, or on the next session.                                     */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTScenarioRxHoldLifetime(void)
+{
+    static const SSFMQTTCUTEventRec_t failed[] =
+    {
+        { SSF_MQTTC_EVENT_RX_PUBLISH_DROPPED, SSF_MQTTC_REASON_RX_PUBLISH_TOPIC_TOO_LONG },
+        { SSF_MQTTC_EVENT_DISCONNECTED, SSF_MQTTC_REASON_TRANSPORT_ERROR },
+    };
+    uint8_t pkt[7];
+    uint8_t big[512];
+    size_t len;
+    size_t hdrLen;
+    uint32_t i;
+    SSFMQTTCOpts_t opts;
+
+    /* Held, then Stop: DISCONNECT only; then a new session sends no PUBACK */
+    _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+    _SSFMQTTCUTOptsInit(&opts);
+    _SSFMQTTCUTGoReady(&opts);
+    _utMock.recvChunk = sizeof(pkt);
+    _utRxAccept = false;
+    for (i = 0; i <= SSF_MQTTC_CONFIG_RX_PUBLISH_QUEUE_DEPTH; i++)
+    {
+        _SSFMQTTCUTPub1(pkt, (char)('a' + i), (uint16_t)(i + 1u));
+        _SSFMQTTCUTInject(pkt, sizeof(pkt));
+    }
+    _SSFMQTTCUTPump();
+    SSFMQTTCStop();
+    _SSFMQTTCUTPumpFor(SSF_MQTTC_UT_SLACK_TICKS);
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_STOPPED);
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktDisconnect));
+    _utEventCount = 0;
+    _utRxAccept = true;
+    SSFMQTTCStart(&opts);
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktConnect));
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktConnAckOk));
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktSubscribeId2));
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktSubAckOkId2));
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTED);
+    _SSFMQTTCUTPumpFor(SSF_MQTTC_CONFIG_RX_HOLD_MAX_TICKS + SSF_MQTTC_UT_SLACK_TICKS);
+    _SSFMQTTCUTExpectTx(NULL, 0);
+    _SSFMQTTCUTEnd();
+
+    /* Held, then a link failure: the next session reads normally */
+    _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+    _SSFMQTTCUTOptsInit(&opts);
+    opts.connectTimeout = SSF_TICKS_PER_SEC * 5u;
+    opts.subscribeTimeout = SSF_TICKS_PER_SEC * 5u;
+    _SSFMQTTCUTGoReady(&opts);
+    _utMock.recvChunk = sizeof(pkt);
+    _utRxAccept = false;
+    for (i = 0; i <= SSF_MQTTC_CONFIG_RX_PUBLISH_QUEUE_DEPTH; i++)
+    {
+        _SSFMQTTCUTPub1(pkt, (char)('a' + i), (uint16_t)(i + 1u));
+        _SSFMQTTCUTInject(pkt, sizeof(pkt));
+    }
+    _SSFMQTTCUTPump();
+    _utMock.sendResult = SSF_NET_IO_ERROR;
+    SSF_ASSERT(SSFMQTTCTxPublish("t", (const uint8_t *)"x", 1, SSF_MQTTC_QOS_0, NULL, NULL));
+    _SSFMQTTCUTPump();                              /* The write fails: link down */
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
+    _utMock.sendResult = SSF_NET_IO_SUCCESS;
+    _utMock.txLen = 0;
+    _utEventCount = 0;
+    _utRxAccept = true;
+    _utRxTakenCount = 0;
+    _SSFMQTTCUTPumpUntilState(SSF_MQTTC_STATE_CONNECTING,
+                              SSF_MQTTC_UT_BACKOFF_TICKS + SSF_MQTTC_UT_LOAD_TICKS);
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktConnect));
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktConnAckOk));
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktSubscribeId2));
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktSubAckOkId2));
+    _SSFMQTTCUTPub1(pkt, 'n', 0x0123);
+    _SSFMQTTCUTInject(pkt, sizeof(pkt));
+    _SSFMQTTCUTPumpUntilTaken(1, SSF_MQTTC_UT_LOAD_TICKS);   /* Reads are not suspended */
+    SSF_ASSERT(_utRxTaken[0] == 'n');
+    _utMock.txLen = 0;
+    _utEventCount = 0;
+    _SSFMQTTCUTEnd();
+
+    /* Owed, then a link failure: the next session sends no PUBACK */
+    _SSFMQTTCUTBeginRx(SSF_MQTTC_UT_TX_BLOCKS, sizeof(big));
+    _SSFMQTTCUTOptsInit(&opts);
+    opts.connectTimeout = SSF_TICKS_PER_SEC * 5u;
+    opts.subscribeTimeout = SSF_TICKS_PER_SEC * 5u;
+    _SSFMQTTCUTGoReady(&opts);
+    _utMock.sendResult = SSF_NET_IO_WANT_WRITE;
+    for (i = 0; i < SSF_MQTTC_CONFIG_RX_PUBLISH_QUEUE_DEPTH; i++)
+    {
+        _SSFMQTTCUTPub1(pkt, (char)('a' + i), (uint16_t)(i + 1u));
+        _SSFMQTTCUTInject(pkt, sizeof(pkt));
+    }
+    _SSFMQTTCUTPump();                              /* Delivered; their PUBACKs use the blocks */
+    SSF_ASSERT(_utRxTakenCount == SSF_MQTTC_CONFIG_RX_PUBLISH_QUEUE_DEPTH);
+    len = _SSFMQTTCUTBuildPublish(big, sizeof(big), 0x32, SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE, 9, 1, 1,
+                                  &hdrLen);
+    _SSFMQTTCUTInject(big, len);                    /* Its PUBACK is owed */
+    _SSFMQTTCUTPump();
+    _utMock.sendResult = SSF_NET_IO_ERROR;
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
+    _SSFMQTTCUTExpectEvents(failed, 2);
+    _utMock.sendResult = SSF_NET_IO_SUCCESS;
+    _utMock.txLen = 0;
+    _SSFMQTTCUTPumpUntilState(SSF_MQTTC_STATE_CONNECTING,
+                              SSF_MQTTC_UT_BACKOFF_TICKS + SSF_MQTTC_UT_LOAD_TICKS);
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktConnect));
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktConnAckOk));
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktSubscribeId2));
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktSubAckOkId2));
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTED);
+    _SSFMQTTCUTExpectTx(NULL, 0);
+    _SSFMQTTCUTEnd();
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Asserts SSFMQTTCTask() neither asks to be called again at once nor sets a zero timeout, a   */
+/* few times over: no busy loop.                                                                 */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTExpectIdle(void)
+{
+    uint32_t i;
+
+    for (i = 0; i < 5u; i++)
+    {
+        SSFPortTick_t to = SSF_MAX_NEXT_TIMEOUT;
+
+        (void)SSFSMTask(NULL);
+        SSF_ASSERT(SSFMQTTCTask(&to) == false);
+        SSF_ASSERT(to > 0);
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Tests back-pressure edges: no busy loop while a packet is held behind an owed PUBACK or     */
+/* while shutting down; nothing after DISCONNECT; no hold before CONNACK; an immediate wake-up  */
+/* once a slot frees under a hold.                                                               */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTScenarioRxHoldEdges(void)
+{
+    const uint32_t depth = SSF_MQTTC_CONFIG_RX_PUBLISH_QUEUE_DEPTH;
+    uint8_t pkt[7];
+    uint8_t big[512];
+    size_t len;
+    size_t hdrLen;
+    size_t base;
+    uint32_t i;
+    SSFPortTick_t to;
+    SSFPortTick_t t0;
+    SSFMQTTCOpts_t opts;
+
+    /* 1. Held behind an owed PUBACK: a deferred head times out with no PUBACK block free,     */
+    /* freeing a slot the held packet cannot take until the owed PUBACK is queued               */
+    _SSFMQTTCUTBeginRx(SSF_MQTTC_UT_TX_BLOCKS, sizeof(big));
+    _SSFMQTTCUTOptsInit(&opts);
+    _SSFMQTTCUTGoReady(&opts);
+    _utMock.sendResult = SSF_NET_IO_WANT_WRITE;
+    _utMock.recvChunk = sizeof(pkt);
+    _utRxAccept = false;
+    _SSFMQTTCUTPub1(pkt, 'e', 5);
+    _SSFMQTTCUTInject(pkt, sizeof(pkt));
+    _SSFMQTTCUTPump();
+    t0 = SSFPortGetTick64();                        /* e's first offer */
+    SSF_ASSERT(_utRxPublishCount == 1);
+    _utMock.recvChunk = 0;
+    for (i = 0; i < depth; i++)                     /* Use up the PUBACK blocks */
+    {
+        len = _SSFMQTTCUTBuildPublish(big, sizeof(big), 0x32, SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE,
+                                      (uint16_t)(11u + i), 1, 1, &hdrLen);
+        _SSFMQTTCUTInject(big, len);
+    }
+    for (i = 1; i < depth; i++)                     /* Fill the queue behind e */
+    {
+        _SSFMQTTCUTPub1(pkt, (char)('e' + i), (uint16_t)(5u + i));
+        _SSFMQTTCUTInject(pkt, sizeof(pkt));
+    }
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(_utEventCount == depth);
+    _utEventCount = 0;
+    while ((SSFPortGetTick64() - t0) <
+           (SSF_MQTTC_CONFIG_RX_PUBLISH_MAX_TICKS - (SSF_MQTTC_CONFIG_RX_HOLD_MAX_TICKS / 2u)))
+    { _SSFMQTTCUTPump(); }
+    _SSFMQTTCUTPub1(pkt, 'z', 99);                  /* Held shortly before e times out */
+    _SSFMQTTCUTInject(pkt, sizeof(pkt));
+    _SSFMQTTCUTPumpUntilEvents(1, SSF_MQTTC_CONFIG_RX_HOLD_MAX_TICKS + SSF_MQTTC_UT_LOAD_TICKS);
+    /* e's timeout owes its PUBACK; on a loaded host the hold cap may expire first and owe    */
+    /* the held packet's instead. Either way a PUBACK is owed and nothing may spin.             */
+    SSF_ASSERT((_utEvents[0].reason == SSF_MQTTC_REASON_RX_PUBLISH_TIMEOUT) ||
+               (_utEvents[0].reason == SSF_MQTTC_REASON_RX_PUBLISH_HOLD_TIMEOUT));
+    _SSFMQTTCUTExpectIdle();
+    _utMock.sendResult = SSF_NET_IO_SUCCESS;
+    _utEventCount = 0;
+    _utMock.txLen = 0;
+    _SSFMQTTCUTEnd();
+
+    /* 2. Held while shutting down: no busy loop past the hold cap */
+    _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+    _SSFMQTTCUTOptsInit(&opts);
+    opts.txPublishTimeout = SSF_TICKS_PER_SEC * 5u;  /* Bounds STOPPING */
+    _SSFMQTTCUTGoReady(&opts);
+    _utMock.recvChunk = sizeof(pkt);
+    _utRxAccept = false;
+    for (i = 0; i <= depth; i++)
+    {
+        _SSFMQTTCUTPub1(pkt, (char)('a' + i), (uint16_t)(i + 1u));
+        _SSFMQTTCUTInject(pkt, sizeof(pkt));
+    }
+    _SSFMQTTCUTPump();
+    _utMock.shutdownWants = 0xffffffffu;
+    SSFMQTTCStop();
+    _SSFMQTTCUTPumpFor(SSF_MQTTC_CONFIG_RX_HOLD_MAX_TICKS + SSF_MQTTC_UT_SLACK_TICKS);
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_STOPPING);
+    to = SSF_MAX_NEXT_TIMEOUT;
+    (void)SSFMQTTCTask(&to);
+    SSF_ASSERT(to > 0);
+    _utMock.shutdownWants = 0;
+    _SSFMQTTCUTPumpFor(SSF_MQTTC_UT_SLACK_TICKS);
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_STOPPED);
+    _utEventCount = 0;
+    _utMock.txLen = 0;
+    _SSFMQTTCUTEnd();
+
+    /* 3. Nothing after DISCONNECT: a hold, then Stop with the uplink blocked, the hold cap     */
+    /* passing and a further QoS 1 PUBLISH arriving while STOPPING, then the uplink drains      */
+    _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+    _SSFMQTTCUTOptsInit(&opts);
+    opts.txPublishTimeout = SSF_TICKS_PER_SEC * 5u;
+    _SSFMQTTCUTGoReady(&opts);
+    _utMock.recvChunk = sizeof(pkt);
+    _utRxAccept = false;
+    for (i = 0; i <= depth; i++)
+    {
+        _SSFMQTTCUTPub1(pkt, (char)('a' + i), (uint16_t)(i + 1u));
+        _SSFMQTTCUTInject(pkt, sizeof(pkt));
+    }
+    _SSFMQTTCUTPub1(pkt, 'y', 0x77);
+    _SSFMQTTCUTInject(pkt, sizeof(pkt));
+    _SSFMQTTCUTPump();
+    _utMock.sendResult = SSF_NET_IO_WANT_WRITE;
+    SSFMQTTCStop();
+    _SSFMQTTCUTPumpFor(SSF_MQTTC_CONFIG_RX_HOLD_MAX_TICKS + SSF_MQTTC_UT_SLACK_TICKS);
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_STOPPING);
+    _SSFMQTTCUTExpectIdle();                        /* Blocked, but no busy loop */
+    _utMock.sendResult = SSF_NET_IO_SUCCESS;
+    _SSFMQTTCUTPumpUntilState(SSF_MQTTC_STATE_STOPPED, SSF_MQTTC_UT_LOAD_TICKS);
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktDisconnect));   /* DISCONNECT alone, last */
+    _utEventCount = 0;
+    _SSFMQTTCUTEnd();
+
+    /* 3b. Nothing after DISCONNECT when a PUBACK is owed at Stop: the owed one is abandoned   */
+    _SSFMQTTCUTBeginRx(SSF_MQTTC_UT_TX_BLOCKS, sizeof(big));
+    _SSFMQTTCUTOptsInit(&opts);
+    opts.txPublishTimeout = SSF_TICKS_PER_SEC * 5u;
+    _SSFMQTTCUTGoReady(&opts);
+    _utMock.sendResult = SSF_NET_IO_WANT_WRITE;
+    for (i = 0; i < depth; i++)
+    {
+        _SSFMQTTCUTPub1(pkt, (char)('a' + i), (uint16_t)(i + 1u));
+        _SSFMQTTCUTInject(pkt, sizeof(pkt));
+    }
+    _SSFMQTTCUTPump();
+    len = _SSFMQTTCUTBuildPublish(big, sizeof(big), 0x32, SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE, 9, 1, 1,
+                                  &hdrLen);
+    _SSFMQTTCUTInject(big, len);
+    _SSFMQTTCUTPump();                              /* Id 9 owed */
+    SSFMQTTCStop();
+    _SSFMQTTCUTPump();
+    _utMock.sendChunk = 3;                          /* Blocks free before DISCONNECT is out */
+    _utMock.sendResult = SSF_NET_IO_SUCCESS;
+    _SSFMQTTCUTPumpUntilState(SSF_MQTTC_STATE_STOPPED, SSF_MQTTC_UT_LOAD_TICKS);
+    SSF_ASSERT(_utMock.txLen == ((depth * 4u) + sizeof(_utPktDisconnect)));
+    SSF_ASSERT(memcmp(&_utMock.tx[_utMock.txLen - 2u], _utPktDisconnect, 2) == 0);
+    _utMock.txLen = 0;
+    _utEventCount = 0;
+    _SSFMQTTCUTEnd();
+
+    /* 4. No hold before CONNACK: a hostile burst ahead of CONNACK is dropped unacknowledged and */
+    /* the CONNACK behind it is still read                                                       */
+    _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+    _SSFMQTTCUTOptsInit(&opts);
+    SSFMQTTCStart(&opts);
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktConnect));
+    _utMock.recvChunk = sizeof(pkt);
+    for (i = 0; i <= depth; i++)
+    {
+        _SSFMQTTCUTPub1(pkt, (char)('a' + i), (uint16_t)(i + 1u));
+        _SSFMQTTCUTInject(pkt, sizeof(pkt));
+    }
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktConnAckOk));
+    _SSFMQTTCUTPumpUntilState(SSF_MQTTC_STATE_SUBSCRIBING, SSF_MQTTC_UT_LOAD_TICKS);
+    SSF_ASSERT(_utMock.rxPos == _utMock.rxLen);
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktSubscribe1));   /* No PUBACK */
+    _utEventCount = 0;
+    _SSFMQTTCUTEnd();
+
+    /* 5. Wake-up: once the transport drains under a hold and a slot frees, the task asks to be  */
+    /* called again at once                                                                      */
+    _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+    _SSFMQTTCUTOptsInit(&opts);
+    _SSFMQTTCUTGoReady(&opts);
+    _utMock.recvChunk = sizeof(pkt);
+    _utMock.sendResult = SSF_NET_IO_WANT_WRITE;
+    base = _utMock.rxPos;
+    for (i = 0; i < ((2u * depth) + 1u); i++)
+    {
+        _SSFMQTTCUTPub1(pkt, (char)('a' + i), (uint16_t)(i + 1u));
+        _SSFMQTTCUTInject(pkt, sizeof(pkt));
+    }
+    _SSFMQTTCUTPump();
+    SSF_ASSERT((_utMock.rxPos - base) == (((2u * depth) + 1u) * sizeof(pkt)));
+    _utMock.sendResult = SSF_NET_IO_SUCCESS;
+    {
+        bool isWoken = false;
+
+        for (i = 0; (i < 3u) && (isWoken == false); i++)
+        {
+            to = SSF_MAX_NEXT_TIMEOUT;
+            (void)SSFSMTask(NULL);
+            if (SSFMQTTCTask(&to) || (to == 0)) isWoken = true;
+        }
+        SSF_ASSERT(isWoken);
+    }
+    _SSFMQTTCUTPumpUntilTaken((2u * depth) + 1u, SSF_MQTTC_UT_LOAD_TICKS);
+    _utMock.txLen = 0;
+    _SSFMQTTCUTEnd();
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Tests a peer close while READY.                                                               */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTScenarioPeerClosed(void)
@@ -2427,6 +3290,12 @@ void SSFMQTTCUnitTest(void)
     _SSFMQTTCUTScenarioKeepAliveTimeout();
     _SSFMQTTCUTScenarioKeepAliveAnswered();
     _SSFMQTTCUTScenarioKeepAliveUnsolicitedPingResp();
+    _SSFMQTTCUTScenarioRxBackPressure();
+    _SSFMQTTCUTScenarioRxHoldTimeout();
+    _SSFMQTTCUTScenarioRxHoldKeepAlive();
+    _SSFMQTTCUTScenarioRxPubAckOwed();
+    _SSFMQTTCUTScenarioRxHoldLifetime();
+    _SSFMQTTCUTScenarioRxHoldEdges();
     _SSFMQTTCUTScenarioPeerClosed();
     _SSFMQTTCUTScenarioConnectFailures();
     _SSFMQTTCUTScenarioSessionTimeouts();

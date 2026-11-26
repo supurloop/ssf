@@ -37,7 +37,8 @@ the application run in `SSFMQTTCTask()`. Both are driven from one application lo
   `SSFSMTask()` and `SSFMQTTCTask()`.
 - **Clean session only.** Every CONNECT requests a clean session. There is no Last Will, and
   published messages are never retained.
-- **QoS 0 and 1.** A QoS 2 packet from the broker is a protocol error and ends the connection.
+- **QoS 0 and 1.** A QoS 2 PUBLISH from the broker is a protocol error (no subscription allows
+  it) and ends the connection with `RX_PUBLISH_QOS2`, without acknowledgement or delivery.
 - **Self-healing.** Once started the client works continuously to reach and hold READY. Every
   failed attempt or lost connection is followed by a doubling backoff and a new attempt, until
   `SSFMQTTCStop()` is called. No jitter is added to the backoff; devices in a fleet desynchronize
@@ -128,7 +129,8 @@ connection failed in, not RECONNECT_WAIT.
 | `SUBSCRIBE_DOWNGRADED` | Reported with READY, not a failure: SUBACK granted a lower QoS than requested for one or more filters, and refused none. |
 | `KEEPALIVE` | No PINGRESP within [`SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT`](#opt-pingresp). |
 | `TX_PUBLISH_TIMEOUT` | A publish did not complete within `txPublishTimeout`. |
-| `PROTOCOL` | Malformed packet, QoS 2, or a packet type not valid at that point. |
+| `PROTOCOL` | Malformed packet, or a packet type not valid at that point. |
+| `RX_PUBLISH_QOS2` | The broker sent a QoS 2 PUBLISH, which no subscription allows; decided by the fixed header alone. A broker bug: it recurs on every reconnect. |
 | `RX_OVERFLOW` | Inbound packet other than PUBLISH larger than `rxBlockSize`. |
 | `RX_PUBLISH_TIMEOUT` | The application deferred an inbound PUBLISH past [`SSF_MQTTC_CONFIG_RX_PUBLISH_MAX_TICKS`](#opt-maxticks). |
 | `RX_PUBLISH_QUEUE_FULL` | An inbound PUBLISH arrived with no free rx block. |

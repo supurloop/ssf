@@ -100,7 +100,7 @@ typedef enum
                                          /* filters                                              */
     SSF_MQTTC_REASON_KEEPALIVE,          /* No PINGRESP within SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT */
     SSF_MQTTC_REASON_TX_PUBLISH_TIMEOUT, /* A txPublish did not complete within txPublishTimeout */
-    SSF_MQTTC_REASON_PROTOCOL,           /* Malformed packet, QoS 2, unexpected packet           */
+    SSF_MQTTC_REASON_PROTOCOL,           /* Malformed or unexpected packet                        */
     SSF_MQTTC_REASON_RX_OVERFLOW,        /* Inbound packet other than PUBLISH larger than        */
                                          /* rxBlockSize                                          */
     SSF_MQTTC_REASON_RX_PUBLISH_TIMEOUT, /* App deferred an rxPublish past RX_PUBLISH_MAX_TICKS  */
@@ -112,6 +112,8 @@ typedef enum
                                          /* requested for one or more declared filters           */
     SSF_MQTTC_REASON_SUBSCRIBE_QOS_EXCEEDED, /* SUBACK granted a higher QoS than requested       */
                                          /* for one or more declared filters                     */
+    SSF_MQTTC_REASON_RX_PUBLISH_QOS2,    /* Broker sent a QoS 2 PUBLISH, which no subscription   */
+                                         /* allows (QoS 2 is not supported)                      */
     SSF_MQTTC_REASON_MAX
 } SSFMQTTCReason_t;
 

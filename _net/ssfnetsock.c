@@ -30,7 +30,7 @@
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
 /* --------------------------------------------------------------------------------------------- */
 #if defined(__linux__) && !defined(_GNU_SOURCE)
-#define _GNU_SOURCE                  /* getaddrinfo_a() on glibc; must precede every system header */
+#define _GNU_SOURCE                  /* For glibc getaddrinfo_a(); precedes all system headers */
 #endif
 
 #include <stdint.h>
@@ -65,8 +65,7 @@
 #endif /* _WIN32 */
 
 #ifndef __APPLE__
-/* ssfport.h supplies its own byte order macros; drop the system ones so they are not redefined. */
-/* On macOS ssfport.h uses the system macros instead, so they stay.                              */
+/* Drop the system byte order macros so ssfport.h can define its own (macOS uses the system's).  */
 #undef htons
 #undef ntohs
 #undef htonl
@@ -136,7 +135,7 @@ typedef size_t SSFNetSockIOLen_t;
 #define SSF_NETSOCK_INIT_MAGIC       (0x4e534f43ul)   /* 'NSOC' */
 #define SSF_NETSOCK_DNSSD_MAX_READS  (8u)             /* Replies handled per pollOpen()        */
 
-/* SSF_NETSOCK_ADDR_SIZE in the header is exactly an IPv4 address (struct in_addr).            */
+/* SSF_NETSOCK_ADDR_SIZE in the header is exactly an IPv4 address (struct in_addr).              */
 typedef char _SSFNetSockAddrSizeCheck_t[(sizeof(struct in_addr) == SSF_NETSOCK_ADDR_SIZE) ? 1 : -1];
 
 typedef enum
@@ -194,11 +193,13 @@ static bool _wsaIsStarted;           /* Winsock up; stays up while any lookup sl
 /* --------------------------------------------------------------------------------------------- */
 /* Local prototypes                                                                              */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFNetSockOpen(SSFNetTransport_t *t, SSFCStrIn_t host, size_t hostSize, uint16_t port);
+static bool _SSFNetSockOpen(SSFNetTransport_t *t, SSFCStrIn_t hostStr, size_t hostSize,
+                            uint16_t port);
 static SSFNetIOResult_t _SSFNetSockPollOpen(SSFNetTransport_t *t);
-static SSFNetIOResult_t _SSFNetSockSend(SSFNetTransport_t *t, const uint8_t *buf, size_t len,
-                              size_t *sentOut);
-static SSFNetIOResult_t _SSFNetSockRecv(SSFNetTransport_t *t, uint8_t *buf, size_t size, size_t *gotOut);
+static SSFNetIOResult_t _SSFNetSockSend(SSFNetTransport_t *t, const uint8_t *buf, size_t bufLen,
+                                        size_t *sentOut);
+static SSFNetIOResult_t _SSFNetSockRecv(SSFNetTransport_t *t, uint8_t *buf, size_t bufSize,
+                                        size_t *gotOut);
 static SSFNetIOResult_t _SSFNetSockShutdown(SSFNetTransport_t *t);
 static void _SSFNetSockClose(SSFNetTransport_t *t);
 
@@ -216,8 +217,7 @@ static SSFNetSock_t *_SSFNetSockSelf(SSFNetTransport_t *t)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Appends a 4-byte IPv4 address (network byte order) to the address list; past capacity it is   */
-/* ignored.                                                                                      */
+/* Appends a 4-byte network order IPv4 address to the address list, ignored past capacity.       */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFNetSockAddIPv4(SSFNetSock_t *s, const uint8_t *ip)
 {
@@ -230,38 +230,37 @@ static void _SSFNetSockAddIPv4(SSFNetSock_t *s, const uint8_t *ip)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Appends the address of sa if it is IPv4. SSF is IPv4 only (ssfnet.h): any other family is    */
-/* ignored, so it is never connected to.                                                         */
+/* Appends the address of saOpt if it is IPv4; any other family is ignored.                      */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFNetSockAddAddr(SSFNetSock_t *s, const void *sa, size_t saLen)
+static void _SSFNetSockAddAddr(SSFNetSock_t *s, const void *saOpt, size_t saOptLen)
 {
     struct sockaddr_in sin;
 
     SSF_REQUIRE(s != NULL);
 
-    if ((sa == NULL) || (saLen < sizeof(sin))) return;
-    memcpy(&sin, sa, sizeof(sin));             /* Copy first; sa may not be aligned */
+    if ((saOpt == NULL) || (saOptLen < sizeof(sin))) return;
+    memcpy(&sin, saOpt, sizeof(sin));          /* Copy first; saOpt may not be aligned */
     if (sin.sin_family != AF_INET) return;
     _SSFNetSockAddIPv4(s, (const uint8_t *)&sin.sin_addr);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if host is a literal IPv4 address, now in the address list, else false.          */
+/* Returns true if hostStr is a literal IPv4 address, now in the address list, else false.       */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFNetSockParseLiteral(SSFNetSock_t *s, SSFCStrIn_t host)
+static bool _SSFNetSockParseLiteral(SSFNetSock_t *s, SSFCStrIn_t hostStr)
 {
     struct in_addr in;
 
     SSF_REQUIRE(s != NULL);
-    SSF_REQUIRE(host != NULL);
+    SSF_REQUIRE(hostStr != NULL);
 
-    if (inet_pton(AF_INET, host, &in) != 1) return false;
+    if (inet_pton(AF_INET, hostStr, &in) != 1) return false;
     _SSFNetSockAddIPv4(s, (const uint8_t *)&in);
     return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns the length of the sockaddr_in for address idx, written to sin with the port filled in. */
+/* Returns the length of sin, filled in with address idx and the port.                           */
 /* --------------------------------------------------------------------------------------------- */
 static SSFNetSockLen_t _SSFNetSockAddrPrepare(const SSFNetSock_t *s, uint8_t idx,
                                               struct sockaddr_in *sin)
@@ -300,7 +299,7 @@ static bool _SSFNetSockSetNonBlocking(SSFNetSockHandle_t sock)
     SSF_REQUIRE(sock != SSF_NETSOCK_INVALID);
     flags = fcntl(sock, F_GETFL, 0);
     if (flags < 0) return false;
-    return (fcntl(sock, F_SETFL, flags | O_NONBLOCK) == 0);
+    return (fcntl(sock, F_SETFL, (flags | O_NONBLOCK)) == 0);
 #endif
 }
 
@@ -316,19 +315,18 @@ static SSFNetIOResult_t _SSFNetSockMapIOError(int err, SSFNetIOResult_t wouldBlo
     if (err == EAGAIN) return wouldBlock;
     if (err == EINTR) return wouldBlock;      /* Interrupted before any data moved; retry */
 #endif
+    /* Did the peer end or reset the connection? */
     if ((err == SSF_NETSOCK_ECONNRESET) || (err == SSF_NETSOCK_ECONNABORTED) ||
         (err == SSF_NETSOCK_ESHUTDOWN))
-    { return SSF_NET_IO_CLOSED; }
+    {
+        /* Yes, report it closed */
+        return SSF_NET_IO_CLOSED;
+    }
     return SSF_NET_IO_ERROR;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Resolver backends. Each provides:                                                             */
-/*   Start(l, host, hostLen)  true if the lookup was started                                     */
-/*   Poll(l, s)               PENDING, or DONE with addresses added to s, or FAILED; DONE and    */
-/*                            FAILED release every OS resource the lookup held                   */
-/*   Cancel(l)                true if released now, false if the OS still owns the storage       */
-/*   Finished(l)              for an abandoned lookup: true once finished and released           */
+/* Resolver backends: each provides LookupStart, LookupPoll, LookupCancel, and LookupFinished.   */
 /* --------------------------------------------------------------------------------------------- */
 #if defined(SSF_NETSOCK_RESOLVER_WIN)
 
@@ -348,12 +346,12 @@ static void _SSFNetSockLookupFree(SSFNetSockLookup_t *l)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if the lookup was started, else false.                                           */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFNetSockLookupStart(SSFNetSockLookup_t *l, SSFCStrIn_t host, size_t hostLen)
+static bool _SSFNetSockLookupStart(SSFNetSockLookup_t *l, SSFCStrIn_t hostStr, size_t hostLen)
 {
     INT rc;
 
     SSF_REQUIRE(l != NULL);
-    SSF_REQUIRE(host != NULL);
+    SSF_REQUIRE(hostStr != NULL);
     SSF_REQUIRE(hostLen < SSF_NETSOCK_CONFIG_MAX_HOST_SIZE);
 
     memset(&l->ov, 0, sizeof(l->ov));
@@ -363,11 +361,12 @@ static bool _SSFNetSockLookupStart(SSFNetSockLookup_t *l, SSFCStrIn_t host, size
     l->isComplete = false;
     l->rc = NO_ERROR;
 
-    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, host, (int)hostLen + 1, l->host,
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, hostStr, ((int)hostLen + 1), l->host,
                             (int)SSF_NETSOCK_CONFIG_MAX_HOST_SIZE) <= 0)
     { return false; }
-    l->ov.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);   /* Manual reset: required with no  */
-    if (l->ov.hEvent == NULL) return false;                 /* completion routine              */
+    /* Manual reset is required when there is no completion routine */
+    l->ov.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
+    if (l->ov.hEvent == NULL) return false;
 
     l->hints.ai_family = AF_INET;              /* IPv4 only (ssfnet.h) */
     l->hints.ai_socktype = SOCK_STREAM;
@@ -375,9 +374,11 @@ static bool _SSFNetSockLookupStart(SSFNetSockLookup_t *l, SSFCStrIn_t host, size
     rc = GetAddrInfoExW(l->host, NULL, NS_DNS, NULL, &l->hints, &l->result, NULL, &l->ov, NULL,
                         &l->cancel);
     if (rc == WSA_IO_PENDING) return true;
+    /* Was the lookup answered at once? */
     if (rc == NO_ERROR)
     {
-        l->isComplete = true;                  /* Answered at once; Poll() collects it */
+        /* Yes, Poll() collects it */
+        l->isComplete = true;
         l->rc = rc;
         return true;
     }
@@ -429,8 +430,7 @@ static bool _SSFNetSockLookupCancel(SSFNetSockLookup_t *l)
 {
     SSF_REQUIRE(l != NULL);
 
-    /* Cancel signals the event with WSA_E_CANCELLED, but a provider that cannot be interrupted */
-    /* keeps running and still owns ov and result until it finishes.                           */
+    /* An uninterruptible provider keeps ov and result until it finishes despite the cancel */
     if (l->isComplete == false) (void)GetAddrInfoExCancel(&l->cancel);
     return _SSFNetSockLookupFinished(l);
 }
@@ -453,24 +453,30 @@ static void DNSSD_API _SSFNetSockDNSSDReply(DNSServiceRef ref, DNSServiceFlags f
     (void)ttl;
     SSF_REQUIRE(l != NULL);
 
+    /* Is this reply an answer? */
     if (err == kDNSServiceErr_NoError)
     {
+        /* Yes, is it an added IPv4 address with room to store it? */
         if (((flags & kDNSServiceFlagsAdd) != 0) && (address != NULL) &&
             (address->sa_family == AF_INET) && (l->addrCount < SSF_NETSOCK_CONFIG_MAX_ADDRS))
         {
             struct sockaddr_in sin;
+
+            /* Yes, store it */
 
             memcpy(&sin, address, sizeof(sin));
             memcpy(l->addrs[l->addrCount], &sin.sin_addr, SSF_NETSOCK_ADDR_SIZE);
             l->addrCount++;
         }
     }
-    /* Only IPv4 is asked for, so one negative answer means there is no address. */
+    /* No, only IPv4 is asked for, so one negative answer means there is no address */
     else if (err == kDNSServiceErr_NoSuchRecord) { l->negatives = 1u; }
     else l->isFailed = true;
 
+    /* Is this the last reply of the batch? */
     if ((flags & kDNSServiceFlagsMoreComing) == 0)
     {
+        /* Yes, decide the outcome */
         if (l->addrCount > 0) l->isDone = true;
         else if (l->negatives >= 1u) l->isFailed = true;
     }
@@ -490,10 +496,10 @@ static void _SSFNetSockLookupFree(SSFNetSockLookup_t *l)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if the lookup was started, else false.                                           */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFNetSockLookupStart(SSFNetSockLookup_t *l, SSFCStrIn_t host, size_t hostLen)
+static bool _SSFNetSockLookupStart(SSFNetSockLookup_t *l, SSFCStrIn_t hostStr, size_t hostLen)
 {
     SSF_REQUIRE(l != NULL);
-    SSF_REQUIRE(host != NULL);
+    SSF_REQUIRE(hostStr != NULL);
     SSF_REQUIRE(hostLen < SSF_NETSOCK_CONFIG_MAX_HOST_SIZE);
 
     l->ref = NULL;
@@ -502,7 +508,7 @@ static bool _SSFNetSockLookupStart(SSFNetSockLookup_t *l, SSFCStrIn_t host, size
     l->negatives = 0;
     l->addrCount = 0;
     if (DNSServiceGetAddrInfo(&l->ref, kDNSServiceFlagsReturnIntermediates, 0,
-                              kDNSServiceProtocol_IPv4, host,      /* IPv4 only (ssfnet.h) */
+                              kDNSServiceProtocol_IPv4, hostStr,   /* IPv4 only (ssfnet.h) */
                               _SSFNetSockDNSSDReply, l) != kDNSServiceErr_NoError)
     {
         l->ref = NULL;
@@ -557,6 +563,8 @@ static SSFNetSockLookupResult_t _SSFNetSockLookupPoll(SSFNetSockLookup_t *l, SSF
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFNetSockLookupCancel(SSFNetSockLookup_t *l)
 {
+    SSF_REQUIRE(l != NULL);
+
     _SSFNetSockLookupFree(l);
     return true;
 }
@@ -566,6 +574,8 @@ static bool _SSFNetSockLookupCancel(SSFNetSockLookup_t *l)
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFNetSockLookupFinished(SSFNetSockLookup_t *l)
 {
+    SSF_REQUIRE(l != NULL);
+
     _SSFNetSockLookupFree(l);
     return true;
 }
@@ -586,17 +596,17 @@ static void _SSFNetSockLookupFree(SSFNetSockLookup_t *l)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if the lookup was started, else false.                                           */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFNetSockLookupStart(SSFNetSockLookup_t *l, SSFCStrIn_t host, size_t hostLen)
+static bool _SSFNetSockLookupStart(SSFNetSockLookup_t *l, SSFCStrIn_t hostStr, size_t hostLen)
 {
     struct gaicb *list[1];
 
     SSF_REQUIRE(l != NULL);
-    SSF_REQUIRE(host != NULL);
+    SSF_REQUIRE(hostStr != NULL);
     SSF_REQUIRE(hostLen < SSF_NETSOCK_CONFIG_MAX_HOST_SIZE);
 
     memset(&l->cb, 0, sizeof(l->cb));
     memset(&l->hints, 0, sizeof(l->hints));
-    memcpy(l->host, host, hostLen + 1);        /* The resolver thread reads it until done */
+    memcpy(l->host, hostStr, (hostLen + 1));   /* The resolver thread reads it until done */
     l->hints.ai_family = AF_INET;              /* IPv4 only (ssfnet.h) */
     l->hints.ai_socktype = SOCK_STREAM;
     l->hints.ai_protocol = IPPROTO_TCP;
@@ -647,7 +657,7 @@ static bool _SSFNetSockLookupCancel(SSFNetSockLookup_t *l)
 {
     SSF_REQUIRE(l != NULL);
 
-    /* A request already being processed cannot be cancelled; it runs on and must keep its gaicb.*/
+    /* A request already being processed cannot be cancelled and must keep its gaicb */
     if (gai_cancel(&l->cb) == EAI_NOTCANCELED) return _SSFNetSockLookupFinished(l);
     _SSFNetSockLookupFree(l);
     return true;
@@ -658,10 +668,14 @@ static bool _SSFNetSockLookupCancel(SSFNetSockLookup_t *l)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns false: this platform has no asynchronous resolver, so only literal addresses work.    */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFNetSockLookupStart(SSFNetSockLookup_t *l, SSFCStrIn_t host, size_t hostLen)
+static bool _SSFNetSockLookupStart(SSFNetSockLookup_t *l, SSFCStrIn_t hostStr, size_t hostLen)
 {
+    SSF_REQUIRE(l != NULL);
+    SSF_REQUIRE(hostStr != NULL);
+    SSF_REQUIRE(hostLen < SSF_NETSOCK_CONFIG_MAX_HOST_SIZE);
+
     (void)l;
-    (void)host;
+    (void)hostStr;
     (void)hostLen;
     return false;
 }
@@ -671,6 +685,9 @@ static bool _SSFNetSockLookupStart(SSFNetSockLookup_t *l, SSFCStrIn_t host, size
 /* --------------------------------------------------------------------------------------------- */
 static SSFNetSockLookupResult_t _SSFNetSockLookupPoll(SSFNetSockLookup_t *l, SSFNetSock_t *s)
 {
+    SSF_REQUIRE(l != NULL);
+    SSF_REQUIRE(s != NULL);
+
     (void)l;
     (void)s;
     return SSF_NETSOCK_LOOKUP_FAILED;
@@ -679,8 +696,24 @@ static SSFNetSockLookupResult_t _SSFNetSockLookupPoll(SSFNetSockLookup_t *l, SSF
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true; there is never anything to release.                                             */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFNetSockLookupCancel(SSFNetSockLookup_t *l) { (void)l; return true; }
-static bool _SSFNetSockLookupFinished(SSFNetSockLookup_t *l) { (void)l; return true; }
+static bool _SSFNetSockLookupCancel(SSFNetSockLookup_t *l)
+{
+    SSF_REQUIRE(l != NULL);
+
+    (void)l;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true; there is never anything to release.                                             */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFNetSockLookupFinished(SSFNetSockLookup_t *l)
+{
+    SSF_REQUIRE(l != NULL);
+
+    (void)l;
+    return true;
+}
 
 #endif /* SSF_NETSOCK_RESOLVER_* */
 
@@ -744,10 +777,11 @@ static void _SSFNetSockLookupAbandon(uint8_t idx)
     SSF_ASSERT(l->state == SSF_NETSOCK_LOOKUP_OWNED);
 
 #if SSF_CONFIG_NETSOCK_UNIT_TEST == 1
-    /* Leave the lookup running untouched, as the OS does when it cannot cancel; reap frees it. */
+    /* Leave the lookup running untouched, as the OS does when it cannot cancel; reap frees it */
     if (_ssfNetSockUTNoCancel) { l->state = SSF_NETSOCK_LOOKUP_ABANDONED; return; }
 #endif
-    l->state = _SSFNetSockLookupCancel(l) ? SSF_NETSOCK_LOOKUP_FREE : SSF_NETSOCK_LOOKUP_ABANDONED;
+    l->state = (_SSFNetSockLookupCancel(l)) ? SSF_NETSOCK_LOOKUP_FREE :
+                                               SSF_NETSOCK_LOOKUP_ABANDONED;
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -760,14 +794,13 @@ static void _SSFNetSockRelease(SSFNetSock_t *s)
     if (s->lookup != SSF_NETSOCK_NO_LOOKUP) _SSFNetSockLookupAbandon(s->lookup);
     s->lookup = SSF_NETSOCK_NO_LOOKUP;
 
-    /* Discard whatever has already arrived so the close is an orderly FIN, not an RST that can  */
-    /* make the peer drop the last bytes sent. Non-blocking and bounded: data still in flight     */
-    /* can yet cause an RST, which is no worse than before.                                       */
+    /* Is there a connected socket whose unread input should be drained so close sends FIN? */
     if ((s->state == SSF_NETSOCK_STATE_CONNECTED) && (s->sock != SSF_NETSOCK_INVALID))
     {
         uint8_t drain[256];
         size_t drained = 0;
 
+        /* Yes, discard what has arrived without blocking, up to the configured bound */
         while (drained < SSF_NETSOCK_CONFIG_CLOSE_DRAIN_MAX)
         {
             long rc = (long)recv(SSF_NETSOCK_FD(s->sock), (char *)drain,
@@ -784,8 +817,7 @@ static void _SSFNetSockRelease(SSFNetSock_t *s)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns SUCCESS if connected, WANT_WRITE while a connect is in progress, or ERROR once every  */
-/* remaining address has failed (the instance is then closed).                                   */
+/* Returns SUCCESS if connected, WANT_WRITE while connecting, or ERROR (closed) if all failed.   */
 /* --------------------------------------------------------------------------------------------- */
 static SSFNetIOResult_t _SSFNetSockConnectNext(SSFNetSock_t *s)
 {
@@ -806,14 +838,18 @@ static SSFNetIOResult_t _SSFNetSockConnectNext(SSFNetSock_t *s)
         if (_SSFNetSockSetNonBlocking(sock) == false) { (void)SSF_NETSOCK_CLOSE(sock); continue; }
 
         rc = connect(SSF_NETSOCK_FD(sock), (struct sockaddr *)&sin, len);
+        /* Did the connect complete at once? */
         if (rc == 0)
         {
+            /* Yes, a local or very fast peer */
             s->sock = sock;
-            s->state = SSF_NETSOCK_STATE_CONNECTED;     /* Local or very fast peer */
+            s->state = SSF_NETSOCK_STATE_CONNECTED;
             return SSF_NET_IO_SUCCESS;
         }
+        /* Is the connect in progress? */
         if (SSF_NETSOCK_ERRNO() == SSF_NETSOCK_EINPROGRESS)
         {
+            /* Yes, pollOpen() finishes it */
             s->sock = sock;
             s->state = SSF_NETSOCK_STATE_CONNECTING;
             return SSF_NET_IO_WANT_WRITE;
@@ -829,38 +865,39 @@ static SSFNetIOResult_t _SSFNetSockConnectNext(SSFNetSock_t *s)
 /* --------------------------------------------------------------------------------------------- */
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if a connection attempt to host:port was started, else false. Never blocks.      */
+/* Returns true if a connection attempt to hostStr:port was started, else false. Never blocks.   */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFNetSockOpen(SSFNetTransport_t *t, SSFCStrIn_t host, size_t hostSize, uint16_t port)
+static bool _SSFNetSockOpen(SSFNetTransport_t *t, SSFCStrIn_t hostStr, size_t hostSize,
+                            uint16_t port)
 {
     SSFNetSock_t *s;
     size_t hostLen;
     uint8_t idx;
 
     SSF_REQUIRE(t != NULL);
-    SSF_REQUIRE(host != NULL);
+    SSF_REQUIRE(hostStr != NULL);
     SSF_REQUIRE(hostSize > 0);
     s = _SSFNetSockSelf(t);
     SSF_REQUIRE(s->state == SSF_NETSOCK_STATE_CLOSED);
 
-    if ((SSFStrLen(host, hostSize, &hostLen) == false) || (hostLen == 0)) return false;
+    if ((SSFStrLen(hostStr, hostSize, &hostLen) == false) || (hostLen == 0)) return false;
     if (hostLen >= SSF_NETSOCK_CONFIG_MAX_HOST_SIZE) return false;
     if (port == 0) return false;
-    /* IPv4 only (ssfnet.h): a ':' is never in a DNS name or IPv4 address, so it is an IPv6     */
-    /* literal (or garbage), refused before any lookup or connect is started.                   */
-    if (memchr(host, ':', hostLen) != NULL) return false;
+    /* IPv4 only: a ':' means an IPv6 literal or garbage, refused before any lookup or connect */
+    if (memchr(hostStr, ':', hostLen) != NULL) return false;
 
     s->port = port;
     s->addrCount = 0;
     s->addrNext = 0;
 
     /* A literal address is parsed here and needs no lookup. */
-    if (_SSFNetSockParseLiteral(s, host)) return (_SSFNetSockConnectNext(s) != SSF_NET_IO_ERROR);
+    if (_SSFNetSockParseLiteral(s, hostStr))
+    { return (_SSFNetSockConnectNext(s) != SSF_NET_IO_ERROR); }
 
     /* A host name is resolved asynchronously; pollOpen() collects the answer. */
     idx = _SSFNetSockLookupAlloc();
     if (idx == SSF_NETSOCK_NO_LOOKUP) return false;
-    if (_SSFNetSockLookupStart(&_lookups[idx], host, hostLen) == false) return false;
+    if (_SSFNetSockLookupStart(&_lookups[idx], hostStr, hostLen) == false) return false;
     _lookups[idx].state = SSF_NETSOCK_LOOKUP_OWNED;
     s->lookup = idx;
     s->state = SSF_NETSOCK_STATE_RESOLVING;
@@ -868,8 +905,7 @@ static bool _SSFNetSockOpen(SSFNetTransport_t *t, SSFCStrIn_t host, size_t hostS
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns SUCCESS once connected, WANT_READ while resolving, WANT_WRITE while connecting, else  */
-/* CLOSED or ERROR once every address has failed.                                                */
+/* Returns SUCCESS, WANT_READ resolving, WANT_WRITE connecting, else CLOSED or ERROR if failed.  */
 /* --------------------------------------------------------------------------------------------- */
 static SSFNetIOResult_t _SSFNetSockPollOpen(SSFNetTransport_t *t)
 {
@@ -887,10 +923,13 @@ static SSFNetIOResult_t _SSFNetSockPollOpen(SSFNetTransport_t *t)
 
     if (s->state == SSF_NETSOCK_STATE_CONNECTED) return SSF_NET_IO_SUCCESS;
 
+    /* Is a name lookup in progress? */
     if (s->state == SSF_NETSOCK_STATE_RESOLVING)
     {
-        SSFNetSockLookupResult_t lr = _SSFNetSockLookupPoll(&_lookups[s->lookup], s);
+        SSFNetSockLookupResult_t lr;
 
+        /* Yes, collect its answer and start connecting */
+        lr = _SSFNetSockLookupPoll(&_lookups[s->lookup], s);
         if (lr == SSF_NETSOCK_LOOKUP_PENDING) return SSF_NET_IO_WANT_READ;
         _lookups[s->lookup].state = SSF_NETSOCK_LOOKUP_FREE;    /* Poll() released it */
         s->lookup = SSF_NETSOCK_NO_LOOKUP;
@@ -900,8 +939,7 @@ static SSFNetIOResult_t _SSFNetSockPollOpen(SSFNetTransport_t *t)
 
     if (s->state != SSF_NETSOCK_STATE_CONNECTING) return SSF_NET_IO_ERROR;
 
-    /* Writable means the connect finished, one way or the other; Winsock reports a failed      */
-    /* connect through the exception set instead.                                               */
+    /* Writable means the connect finished; Winsock reports a failed one in the exception set */
     FD_ZERO(&wfds);
     FD_ZERO(&efds);
     FD_SET(SSF_NETSOCK_FD(s->sock), &wfds);
@@ -914,13 +952,15 @@ static SSFNetIOResult_t _SSFNetSockPollOpen(SSFNetTransport_t *t)
 
     if (getsockopt(SSF_NETSOCK_FD(s->sock), SOL_SOCKET, SO_ERROR, (char *)&err, &errLen) != 0)
     { _SSFNetSockRelease(s); return SSF_NET_IO_ERROR; }
+    /* Did the connect succeed? */
     if ((err == 0) && (FD_ISSET(SSF_NETSOCK_FD(s->sock), &efds) == 0))
     {
+        /* Yes, connected */
         s->state = SSF_NETSOCK_STATE_CONNECTED;
         return SSF_NET_IO_SUCCESS;
     }
 
-    /* This address failed; move on to the next one. */
+    /* This address failed; move on to the next one */
     (void)SSF_NETSOCK_CLOSE(s->sock);
     s->sock = SSF_NETSOCK_INVALID;
     r = _SSFNetSockConnectNext(s);
@@ -932,8 +972,8 @@ static SSFNetIOResult_t _SSFNetSockPollOpen(SSFNetTransport_t *t)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns SUCCESS with bytes accepted, WANT_WRITE if none could be, else CLOSED or ERROR.       */
 /* --------------------------------------------------------------------------------------------- */
-static SSFNetIOResult_t _SSFNetSockSend(SSFNetTransport_t *t, const uint8_t *buf, size_t len,
-                              size_t *sentOut)
+static SSFNetIOResult_t _SSFNetSockSend(SSFNetTransport_t *t, const uint8_t *buf, size_t bufLen,
+                                        size_t *sentOut)
 {
     SSFNetSock_t *s;
     SSFNetSockIOLen_t n;
@@ -941,14 +981,14 @@ static SSFNetIOResult_t _SSFNetSockSend(SSFNetTransport_t *t, const uint8_t *buf
 
     SSF_REQUIRE(t != NULL);
     SSF_REQUIRE(buf != NULL);
-    SSF_REQUIRE(len > 0);
+    SSF_REQUIRE(bufLen > 0);
     SSF_REQUIRE(sentOut != NULL);
     s = _SSFNetSockSelf(t);
 
     *sentOut = 0;
     if (s->state != SSF_NETSOCK_STATE_CONNECTED) return SSF_NET_IO_ERROR;
 
-    n = (len > (size_t)INT_MAX) ? (SSFNetSockIOLen_t)INT_MAX : (SSFNetSockIOLen_t)len;
+    n = (bufLen > (size_t)INT_MAX) ? (SSFNetSockIOLen_t)INT_MAX : (SSFNetSockIOLen_t)bufLen;
     rc = (long)send(SSF_NETSOCK_FD(s->sock), (const char *)buf, n, SSF_NETSOCK_SEND_FLAGS);
     if (rc > 0) { *sentOut = (size_t)rc; return SSF_NET_IO_SUCCESS; }
     if (rc == 0) return SSF_NET_IO_WANT_WRITE;
@@ -956,8 +996,7 @@ static SSFNetIOResult_t _SSFNetSockSend(SSFNetTransport_t *t, const uint8_t *buf
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns SUCCESS when connected, else ERROR. Bytes send() accepted are already in the kernel,  */
-/* which delivers them after close() (close() drains unread input so it ends with FIN, not RST). */
+/* Returns SUCCESS when connected, else ERROR; accepted bytes are already in the kernel.         */
 /* --------------------------------------------------------------------------------------------- */
 static SSFNetIOResult_t _SSFNetSockShutdown(SSFNetTransport_t *t)
 {
@@ -972,7 +1011,8 @@ static SSFNetIOResult_t _SSFNetSockShutdown(SSFNetTransport_t *t)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns SUCCESS with bytes received, WANT_READ if none, CLOSED at end of stream, else ERROR.  */
 /* --------------------------------------------------------------------------------------------- */
-static SSFNetIOResult_t _SSFNetSockRecv(SSFNetTransport_t *t, uint8_t *buf, size_t size, size_t *gotOut)
+static SSFNetIOResult_t _SSFNetSockRecv(SSFNetTransport_t *t, uint8_t *buf, size_t bufSize,
+                                        size_t *gotOut)
 {
     SSFNetSock_t *s;
     SSFNetSockIOLen_t n;
@@ -980,14 +1020,14 @@ static SSFNetIOResult_t _SSFNetSockRecv(SSFNetTransport_t *t, uint8_t *buf, size
 
     SSF_REQUIRE(t != NULL);
     SSF_REQUIRE(buf != NULL);
-    SSF_REQUIRE(size > 0);
+    SSF_REQUIRE(bufSize > 0);
     SSF_REQUIRE(gotOut != NULL);
     s = _SSFNetSockSelf(t);
 
     *gotOut = 0;
     if (s->state != SSF_NETSOCK_STATE_CONNECTED) return SSF_NET_IO_ERROR;
 
-    n = (size > (size_t)INT_MAX) ? (SSFNetSockIOLen_t)INT_MAX : (SSFNetSockIOLen_t)size;
+    n = (bufSize > (size_t)INT_MAX) ? (SSFNetSockIOLen_t)INT_MAX : (SSFNetSockIOLen_t)bufSize;
     rc = (long)recv(SSF_NETSOCK_FD(s->sock), (char *)buf, n, 0);
     if (rc > 0) { *gotOut = (size_t)rc; return SSF_NET_IO_SUCCESS; }
     if (rc == 0) return SSF_NET_IO_CLOSED;             /* Orderly shutdown by the peer */
@@ -1012,9 +1052,12 @@ void SSFNetSockInit(SSFNetSock_t *s)
     SSF_REQUIRE(s->magic != SSF_NETSOCK_INIT_MAGIC);
 
 #ifdef _WIN32
+    /* Is Winsock stopped? */
     if (_wsaIsStarted == false)
     {
         WSADATA wsa;
+
+        /* Yes, start it */
         SSF_ASSERT(WSAStartup(MAKEWORD(2, 2), &wsa) == 0);
         _wsaIsStarted = true;
     }

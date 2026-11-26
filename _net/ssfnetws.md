@@ -97,9 +97,9 @@ Options live in [`_opt/ssfnetws_opt.h`](../_opt/ssfnetws_opt.h); each can be ove
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `SSF_NETWS_CONFIG_MAX_HOST_SIZE` | `256` | Host names passed to `open()`, including the NUL, 2..256. |
-| `SSF_NETWS_CONFIG_HS_BUF_SIZE` | `1024` | Holds the Upgrade request (path and extra fields included), then the response head, then serves as the receive staging buffer. 256..65535. A long query string, such as an AWS SigV4 presigned path, may need more. |
-| `SSF_NETWS_CONFIG_TX_FRAME_SIZE` | `256` | Largest payload of one outbound frame, 1..65535. Overhead is 6 bytes per frame up to 125, else 8. |
+| `SSF_NETWS_CONFIG_MAX_HOST_SIZE` | `256` | Host names passed to `open()`, including the NUL, 2..256. A longer host makes `open()` return false. |
+| `SSF_NETWS_CONFIG_HS_BUF_SIZE` | `1024` | Holds the Upgrade request (path and extra fields included), then the response head, then serves as the receive staging buffer. 256..65535. A request that does not fit makes `open()` return false; a response head that does not fit fails the handshake. A long query string, such as an AWS SigV4 presigned path, may need more. |
+| `SSF_NETWS_CONFIG_TX_FRAME_SIZE` | `256` | Largest payload of one outbound frame, 1..65535. Each `send()` frames at most this many bytes; a larger write is split across calls. Overhead is 6 bytes per frame up to 125, else 8. |
 | `SSF_HTTP_CONFIG_MAX_FIELDS` | `24` | From [`ssfhttphdr`](ssfhttphdr.md): fields the response head may hold. |
 
 `SSFNetWSSession_t` is about `HS_BUF_SIZE + TX_FRAME_SIZE + MAX_HOST_SIZE + 400` bytes; with the
@@ -113,7 +113,7 @@ defaults, about 2 KB.
 
 | | Function | Description |
 |---|---|---|
-| [e.g.](#ex-init) | [`void SSFNetWSInit(ws, inner, path, fieldsOpt, fieldCount)`](#ssfnetwsinit) | Initialize a session over an inner transport |
+| [e.g.](#ex-init) | [`void SSFNetWSInit(ws, inner, pathStr, fieldsOpt, fieldsOptLen)`](#ssfnetwsinit) | Initialize a session over an inner transport |
 | | [`void SSFNetWSDeInit(ws)`](#ssfnetwsdeinit) | Close and wipe the session |
 | | [`SSFNetWSState_t SSFNetWSGetState(ws)`](#ssfnetwsgetstate) | Connection state |
 
@@ -129,20 +129,20 @@ The transport operations themselves are reached through `ws->transport` and foll
 ### [↑](#functions) [`void SSFNetWSInit()`](#functions)
 
 ```c
-void SSFNetWSInit(SSFNetWSSession_t *ws, SSFNetTransport_t *inner, SSFCStrIn_t path,
-                  const SSFHTTPHdrField_t *fieldsOpt, uint32_t fieldCount);
+void SSFNetWSInit(SSFNetWSSession_t *ws, SSFNetTransport_t *inner, SSFCStrIn_t pathStr,
+                  const SSFHTTPHdrField_t *fieldsOpt, uint32_t fieldsOptLen);
 ```
 
 Initializes a session over `inner`, which must outlive it. Pass `&ws->transport` to the client.
 
-- `path` is the request target, such as `"/mqtt"`, optionally followed by a query string.
-- `fieldsOpt` holds `fieldCount` extra request fields, such as `Authorization`. They may not name
+- `pathStr` is the request target, such as `"/mqtt"`, optionally followed by a query string.
+- `fieldsOpt` holds `fieldsOptLen` extra request fields, such as `Authorization`. They may not name
   `Host`, `Upgrade`, `Connection`, `Content-Length`, `Transfer-Encoding` or any
   `Sec-WebSocket-*` field (case-insensitively).
 - All strings are app owned and must stay valid. They are checked by every `open()`.
 
 Asserts if the session is already initialized, if `inner` or any of its six operations is NULL,
-if `path` is NULL, or if `fieldCount` is non-zero with `fieldsOpt` NULL.
+if `pathStr` is NULL, or if `fieldsOptLen` is non-zero with `fieldsOpt` NULL.
 
 **Returns:** Nothing.
 

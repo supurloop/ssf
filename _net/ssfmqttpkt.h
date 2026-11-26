@@ -42,28 +42,10 @@ extern "C" {
 #include "ssf.h"
 
 /* --------------------------------------------------------------------------------------------- */
-/* Design                                                                                        */
-/* --------------------------------------------------------------------------------------------- */
-/* - Pure functions over caller-supplied buffers; no state, no allocation.                      */
-/* - Encoders write one complete packet (fixed header included) and set *lenOut to its length.  */
-/*   A packet that does not fit in size bytes, or an argument that is not encodable, is an app  */
-/*   error and asserts. Callers that need to refuse an oversized PUBLISH at run time check with  */
-/*   SSFMQTTPktPublishLen() first.                                                               */
-/* - Decoders take exactly one complete packet as delimited by SSFMQTTPktFrame() and return     */
-/*   false if it is malformed for its type. They do not judge whether the packet is expected.   */
-/* - Strings supplied by the app are NUL terminated and validated with a bounded scan against   */
-/*   the given size (which includes the NUL), so a string must be strictly shorter than size.   */
-/* - Outbound strings (topic names, filters, client id, user name) are limited to printable     */
-/*   ASCII, 0x20..0x7E, so ill-formed UTF-8 (1.5.3) and control characters are never sent.       */
-/*   Non-ASCII UTF-8 is refused too: a limitation, not a protocol rule. Topic names may not     */
-/*   hold '+' or '#'; filters must place them per 4.7.1. An inbound topic is rejected only for   */
-/*   NUL or a wildcard; its UTF-8 is not checked.                                                */
-
-/* --------------------------------------------------------------------------------------------- */
 /* Defines and typedefs                                                                          */
 /* --------------------------------------------------------------------------------------------- */
 #define SSF_MQTT_PKT_MAX_REMAINING_LEN   (268435455ul)  /* 4-byte variable length integer */
-#define SSF_MQTT_PKT_MAX_FIXED_HDR_LEN   (5u)           /* type byte + 4 length bytes     */
+#define SSF_MQTT_PKT_MAX_FIXED_HDR_LEN   (5u)           /* Type byte + 4 length bytes */
 #define SSF_MQTT_PKT_MAX_STRING_LEN      (65535u)
 
 /* Control packet type: upper nibble of the first byte. Values are those of the specification. */
@@ -92,28 +74,28 @@ typedef enum
 typedef enum
 {
     SSF_MQTTC_QOS_MIN = -1,
-    SSF_MQTTC_QOS_0,                 /* At most once                                            */
-    SSF_MQTTC_QOS_1,                 /* At least once                                           */
-    SSF_MQTTC_QOS_2,                 /* Exactly once; recognized on the wire, not supported     */
+    SSF_MQTTC_QOS_0,                 /* At most once */
+    SSF_MQTTC_QOS_1,                 /* At least once */
+    SSF_MQTTC_QOS_2,                 /* Exactly once; recognized on the wire, not supported */
     SSF_MQTTC_QOS_MAX
 } SSFMQTTCQoS_t;
 
 typedef enum
 {
-    SSF_MQTT_PKT_FRAME_MALFORMED,    /* Fixed header invalid; the stream cannot be resynced     */
-    SSF_MQTT_PKT_FRAME_INCOMPLETE,   /* More bytes needed                                       */
-    SSF_MQTT_PKT_FRAME_COMPLETE      /* A whole packet is present at the start of the buffer    */
+    SSF_MQTT_PKT_FRAME_MALFORMED,    /* Fixed header invalid; the stream cannot be resynced */
+    SSF_MQTT_PKT_FRAME_INCOMPLETE,   /* More bytes needed */
+    SSF_MQTT_PKT_FRAME_COMPLETE      /* A whole packet is present at the start of the buffer */
 } SSFMQTTPktFrame_t;
 
-/* Decoded PUBLISH. Pointers reference the packet buffer passed to the decoder.                  */
+/* Decoded PUBLISH. Pointers reference the packet buffer passed to the decoder. */
 typedef struct
 {
-    const uint8_t *topic;            /* Not NUL terminated                                      */
-    uint16_t topicLen;               /* >= 1                                                    */
-    const uint8_t *payload;          /* NULL when payloadLen == 0                               */
+    const uint8_t *topic;            /* Not NUL terminated */
+    uint16_t topicLen;               /* >= 1 */
+    const uint8_t *payload;          /* NULL when payloadLen == 0 */
     size_t payloadLen;
-    uint16_t packetId;               /* 0 for QoS 0                                             */
-    SSFMQTTCQoS_t qos;               /* 0, 1 or 2                                               */
+    uint16_t packetId;               /* 0 for QoS 0 */
+    SSFMQTTCQoS_t qos;               /* 0, 1 or 2 */
     bool retain;
     bool dup;
 } SSFMQTTPktPublish_t;
@@ -124,35 +106,33 @@ typedef struct
 /* One SUBSCRIBE entry: a topic filter and the QoS requested for it. */
 typedef struct
 {
-    SSFCStrIn_t filter;              /* NUL terminated, app owned                               */
-    SSFMQTTCQoS_t qos;               /* 0 or 1                                                  */
+    SSFCStrIn_t filter;              /* NUL terminated, app owned */
+    SSFMQTTCQoS_t qos;               /* 0 or 1 */
 } SSFMQTTPktSub_t;
 
 /* Last Will, sent in CONNECT; the broker publishes it if the connection ends without DISCONNECT */
 typedef struct
 {
-    SSFCStrIn_t topic;               /* Topic name, NUL terminated, app owned                   */
-    const uint8_t *payloadOpt;       /* Binary, app owned; NULL only when payloadLen == 0       */
+    SSFCStrIn_t topic;               /* Topic name, NUL terminated, app owned */
+    const uint8_t *payloadOpt;       /* Binary, app owned; NULL only when payloadLen == 0 */
     uint16_t payloadLen;
-    SSFMQTTCQoS_t qos;               /* 0 or 1                                                  */
+    SSFMQTTCQoS_t qos;               /* 0 or 1 */
     bool retain;
 } SSFMQTTPktWill_t;
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
-/* Framing. Inspects the fixed header at the start of buf. On COMPLETE and on INCOMPLETE where   */
-/* the fixed header itself is complete, *pktLenOut is the total packet length; otherwise 0. A    */
-/* caller can therefore reject an oversized packet before receiving all of it.                   */
-SSFMQTTPktFrame_t SSFMQTTPktFrame(const uint8_t *buf, size_t len, size_t *pktLenOut);
+/* Framing. *pktLenOut is the total packet length once the fixed header is complete, else 0. */
+SSFMQTTPktFrame_t SSFMQTTPktFrame(const uint8_t *buf, size_t bufLen, size_t *pktLenOut);
 
 /* Encoders. Each asserts if the packet does not fit or an argument is not encodable. */
-void SSFMQTTPktEncodeConnect(uint8_t *buf, size_t size, size_t *lenOut, SSFCStrIn_t clientId,
+void SSFMQTTPktEncodeConnect(uint8_t *buf, size_t size, size_t *lenOut, SSFCStrIn_t clientIdStr,
                              size_t clientIdSize, const SSFMQTTPktWill_t *willOpt,
-                             size_t willTopicSize, SSFCStrIn_t usernameOpt, size_t usernameSize,
+                             size_t willTopicSize, SSFCStrIn_t usernameStrOpt, size_t usernameSize,
                              const uint8_t *passwordOpt, size_t passwordLen,
                              uint16_t keepAliveSec);
-void SSFMQTTPktEncodePublish(uint8_t *buf, size_t size, size_t *lenOut, SSFCStrIn_t topic,
+void SSFMQTTPktEncodePublish(uint8_t *buf, size_t size, size_t *lenOut, SSFCStrIn_t topicStr,
                              size_t topicSize, const uint8_t *payload, size_t payloadLen,
                              SSFMQTTCQoS_t qos, bool retain, uint16_t packetId);
 void SSFMQTTPktEncodeSubscribe(uint8_t *buf, size_t size, size_t *lenOut, uint16_t packetId,
@@ -161,15 +141,13 @@ void SSFMQTTPktEncodePubAck(uint8_t *buf, size_t size, size_t *lenOut, uint16_t 
 void SSFMQTTPktEncodePingReq(uint8_t *buf, size_t size, size_t *lenOut);
 void SSFMQTTPktEncodeDisconnect(uint8_t *buf, size_t size, size_t *lenOut);
 
-/* Encoded length of a PUBLISH with a valid topic of topicLen bytes, so a caller can refuse one  */
-/* that will not fit its buffer before encoding. Returns 0 if it would exceed the protocol max. */
+/* Encoded PUBLISH length for a valid topic of topicLen bytes, or 0 if over the protocol max. */
 size_t SSFMQTTPktPublishLen(size_t topicLen, size_t payloadLen, SSFMQTTCQoS_t qos);
 
-/* Encoded length of the CONNECT that SSFMQTTPktEncodeConnect() would produce for the same       */
-/* arguments, so a caller can check it fits a buffer. Asserts where the encoder would.           */
-size_t SSFMQTTPktConnectLen(SSFCStrIn_t clientId, size_t clientIdSize,
+/* Encoded length of the CONNECT that SSFMQTTPktEncodeConnect() would produce for these args. */
+size_t SSFMQTTPktConnectLen(SSFCStrIn_t clientIdStr, size_t clientIdSize,
                             const SSFMQTTPktWill_t *willOpt, size_t willTopicSize,
-                            SSFCStrIn_t usernameOpt, size_t usernameSize,
+                            SSFCStrIn_t usernameStrOpt, size_t usernameSize,
                             const uint8_t *passwordOpt, size_t passwordLen);
 
 /* Decoders. pkt/pktLen delimit exactly one complete packet of the named type. */
@@ -181,11 +159,9 @@ bool SSFMQTTPktDecodePubAck(const uint8_t *pkt, size_t pktLen, uint16_t *packetI
 bool SSFMQTTPktDecodePublish(const uint8_t *pkt, size_t pktLen, SSFMQTTPktPublish_t *pubOut);
 bool SSFMQTTPktDecodePingResp(const uint8_t *pkt, size_t pktLen);
 
-/* Validation of outbound strings: NUL terminated within size, 1..65535 bytes, printable ASCII.  */
-/* A topic name holds no wildcard; a filter has '#' only as the whole last level and '+' only as */
-/* a whole level.                                                                                */
-bool SSFMQTTPktIsValidTopic(SSFCStrIn_t topic, size_t topicSize);
-bool SSFMQTTPktIsValidFilter(SSFCStrIn_t filter, size_t filterSize);
+/* Outbound string validation: printable ASCII, 1..65535 bytes, wildcards placed per 4.7.1. */
+bool SSFMQTTPktIsValidTopic(SSFCStrIn_t topicStr, size_t topicSize);
+bool SSFMQTTPktIsValidFilter(SSFCStrIn_t filterStr, size_t filterSize);
 
 #if SSF_CONFIG_MQTTPKT_UNIT_TEST == 1
 void SSFMQTTPktUnitTest(void);

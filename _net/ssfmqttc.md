@@ -107,6 +107,16 @@ the application run in `SSFMQTTCTask()`. Both are driven from one application lo
   for malformed fields (`PROTOCOL`). Over a slow link a very large one delays every packet behind
   it, PINGRESP included.
 - **Packet ids** start at 1 and continue across reconnects. Clean session makes a reset unnecessary.
+- **Packet codec.** [`ssfmqttpkt.h`](ssfmqttpkt.h) is pure functions over caller-supplied
+  buffers, with no state or allocation. Each encoder writes one complete packet, fixed header
+  included, and sets `*lenOut` to its length; a packet that does not fit `size`, or an argument
+  that is not encodable, asserts, so a caller that must refuse an oversized PUBLISH at run time
+  checks `SSFMQTTPktPublishLen()` first. Each decoder takes exactly one complete packet as
+  delimited by `SSFMQTTPktFrame()` and returns `false` if it is malformed for its type; it does
+  not judge whether the packet is expected. `SSFMQTTPktFrame()` reports the total packet length
+  as soon as the fixed header is complete, so an oversized packet can be rejected before all of
+  it arrives. Strings are NUL terminated and validated with a bounded scan against their size
+  argument, which includes the NUL, so a string must be strictly shorter than its size.
 
 <a id="lifecycle"></a>
 
@@ -266,23 +276,25 @@ brokers may deliver matching and retained packets ahead of SUBACK.
 ## [↑](#ssfmqttc--mqtt-311-client) Configuration
 
 Options live in [`_opt/ssfmqttc_opt.h`](../_opt/ssfmqttc_opt.h) (aggregated into the build via
-`ssfoptions.h`). Sizes include the NUL terminator.
+`ssfoptions.h`). Sizes include the NUL terminator, so application strings must be strictly shorter;
+MQTT 3.1.1 caps every string field at 65535 bytes. Tick-based options use `SSF_TICKS_PER_SEC`
+from `ssfport.h`, which must be included first (`ssfoptions.h` does this).
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE` | `128` | Topic names and filters, 2..65536. Also bounds inbound topics. |
-| `SSF_MQTTC_CONFIG_MAX_HOST_SIZE` | `64` | Broker host name or address, 2..256. |
-| `SSF_MQTTC_CONFIG_MAX_CLIENT_ID_SIZE` | `64` | Client identifier, 2..65536. Brokers must accept 1 to 23 characters. |
+| `SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE` | `128` | Topic names and filters, 2..65536. Also bounds inbound topics; a longer inbound PUBLISH topic is dropped with `SSF_MQTTC_REASON_RX_PUBLISH_TOPIC_TOO_LONG`. |
+| `SSF_MQTTC_CONFIG_MAX_HOST_SIZE` | `64` | Broker host name or address, 2..256 (DNS name limit plus NUL). |
+| `SSF_MQTTC_CONFIG_MAX_CLIENT_ID_SIZE` | `64` | Client identifier, 2..65536. Brokers must accept 1 to 23 characters and may accept longer. |
 | `SSF_MQTTC_CONFIG_MAX_USERNAME_SIZE` | `64` | User name, 2..65536. |
 | `SSF_MQTTC_CONFIG_MAX_PASSWORD_LEN` | `64` | Password bytes, 1..65535. Binary, not NUL terminated. |
-| `SSF_MQTTC_CONFIG_MAX_SUBSCRIPTIONS` | `8` | Maximum entries in the subscription set, 1..16. |
+| `SSF_MQTTC_CONFIG_MAX_SUBSCRIPTIONS` | `8` | Maximum entries in the subscription set, 1..16. All filters are sent in one SUBSCRIBE, so the tx block size must hold them. |
 | <a id="opt-subretry"></a>`SSF_MQTTC_CONFIG_SUB_RETRY_TICKS` | 5 minutes (500 ms in the ssfmqttc unit test build) | Interval at which refused filters are subscribed again, measured from READY and from each refused retry. At least 60 s outside the unit test build (`#error`). Override with `-D`. |
-| <a id="opt-depth"></a>`SSF_MQTTC_CONFIG_RX_PUBLISH_QUEUE_DEPTH` | `4` | Inbound PUBLISH packets held for the application. Sizes the rx pool and the PUBACK capacity. |
-| <a id="opt-retry"></a>`SSF_MQTTC_CONFIG_RX_PUBLISH_RETRY_TICKS` | 1 s | Re-offer interval for a deferred inbound PUBLISH. |
-| <a id="opt-maxticks"></a>`SSF_MQTTC_CONFIG_RX_PUBLISH_MAX_TICKS` | 30 s (5 s in the ssfmqttc unit test build) | A deferred inbound PUBLISH is dropped this long after its first offer. Override with `-D`. |
-| <a id="opt-hold"></a>`SSF_MQTTC_CONFIG_RX_HOLD_MAX_TICKS` | 10 s (400 ms in the ssfmqttc unit test build) | Longest a QoS 1 PUBLISH is held, with reads suspended, waiting for queue space. Everything behind it waits too, so `txPublishTimeout` and `subscribeTimeout` should exceed it. Override with `-D`. |
-| <a id="opt-openpoll"></a>`SSF_MQTTC_CONFIG_OPEN_POLL_TICKS` | 10 ms | Longest `SSFMQTTCTask()` lets the app loop sleep while the transport resolves the host and connects. |
-| <a id="opt-pingresp"></a>`SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT` | 30 s (250 ms in the ssfmqttc unit test build) | Connection is dropped if PINGRESP does not follow PINGREQ within this time. Bounds the minimum `keepAliveSec` at four times this value. Override with `-D`. |
+| <a id="opt-depth"></a>`SSF_MQTTC_CONFIG_RX_PUBLISH_QUEUE_DEPTH` | `4` | Inbound PUBLISH packets held for the application, at least 1. Sizes the rx pool (depth plus one framing block) and the PUBACK capacity of the control pool. |
+| <a id="opt-retry"></a>`SSF_MQTTC_CONFIG_RX_PUBLISH_RETRY_TICKS` | 1 s | Re-offer interval for a deferred inbound PUBLISH, at least 1 tick. |
+| <a id="opt-maxticks"></a>`SSF_MQTTC_CONFIG_RX_PUBLISH_MAX_TICKS` | 30 s (5 s in the ssfmqttc unit test build) | A deferred inbound PUBLISH is dropped this long after its first offer. Must be at least `SSF_MQTTC_CONFIG_RX_PUBLISH_RETRY_TICKS`. Override with `-D`. |
+| <a id="opt-hold"></a>`SSF_MQTTC_CONFIG_RX_HOLD_MAX_TICKS` | 10 s (400 ms in the ssfmqttc unit test build, longer than its PINGRESP timeout) | Longest a QoS 1 PUBLISH is held, with reads suspended, waiting for queue space; it is then dropped and acknowledged (`SSF_MQTTC_REASON_RX_PUBLISH_HOLD_TIMEOUT`) and reading resumes. Everything behind it waits too, PINGRESP and PUBACKs for the application's own publishes included, so `txPublishTimeout` and `subscribeTimeout` should exceed it. Override with `-D`. |
+| <a id="opt-openpoll"></a>`SSF_MQTTC_CONFIG_OPEN_POLL_TICKS` | 10 ms | Longest `SSFMQTTCTask()` lets the app loop sleep while the transport resolves the host and connects, at least 1 tick. |
+| <a id="opt-pingresp"></a>`SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT` | 30 s (250 ms in the ssfmqttc unit test build) | Connection is dropped if PINGRESP does not follow PINGREQ within this time. PINGREQ is sent every `keepAliveSec / 4`, which must be at least this value, so the default allows a minimum `keepAliveSec` of 120. The unit test value keeps the same ratio with `keepAliveSec` 1. Override with `-D`. |
 
 The ssfsm event and timer pools must be sized for the client: see `SSF_SM_MAX_ACTIVE_EVENTS` and
 `SSF_SM_MAX_ACTIVE_TIMERS` in [`_opt/ssfsm_opt.h`](../_opt/ssfsm_opt.h). The client alone can
@@ -587,7 +599,7 @@ for (;;)
 ### [↑](#functions) [`bool SSFMQTTCTxPublish()`](#functions)
 
 ```c
-bool SSFMQTTCTxPublish(SSFCStrIn_t topic, const uint8_t *payload, size_t payloadLen,
+bool SSFMQTTCTxPublish(SSFCStrIn_t topicStr, const uint8_t *payload, size_t payloadLen,
                        SSFMQTTCQoS_t qos, bool retain, SSFMQTTCTxPublishFn_t txPublishFnOpt,
                        void *txPublishFnCtxOpt);
 ```
@@ -596,10 +608,10 @@ Queues a PUBLISH. Valid only when `SSFMQTTCIsReady()` is true. On `true` the com
 if given, is guaranteed to fire exactly once within `txPublishTimeout` with the context as its
 first argument; the tx block is held until then.
 
-Asserts if not initialized, `topic` is NULL, `payload` is NULL with a non-zero length, `qos` is
+Asserts if not initialized, `topicStr` is NULL, `payload` is NULL with a non-zero length, `qos` is
 not 0 or 1, or a context is given without a callback.
 
-**Returns:** `false` if not READY; if `topic` is empty, not shorter than the topic constant,
+**Returns:** `false` if not READY; if `topicStr` is empty, not shorter than the topic constant,
 holds `+` or `#`, or holds a character outside printable ASCII (sending it would make the
 broker disconnect); if the encoded packet would not fit a tx block; or if no tx block is free.
 Retry later, except for a bad topic, which never succeeds. `true` if queued.

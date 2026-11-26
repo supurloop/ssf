@@ -37,22 +37,34 @@
 #if SSF_CONFIG_PEM_UNIT_TEST == 1
 
 /* Decodes text as one call; returns the result and fills the outputs. */
-static SSFPEMResult_t _UTDecode(const char *text, size_t *pos, const char **label,
+static SSFPEMResult_t _UTDecode(const char *textStr, size_t *pos, const char **label,
                                 size_t *labelLen, uint8_t *der, size_t derSize, size_t *derLen)
 {
-    return SSFPEMDecodeNext(text, strlen(text), pos, label, labelLen, der, derSize, derLen);
+    SSF_REQUIRE(textStr != NULL);
+    SSF_REQUIRE(pos != NULL);
+    SSF_REQUIRE(label != NULL);
+    SSF_REQUIRE(labelLen != NULL);
+    SSF_REQUIRE(derLen != NULL);
+
+    return SSFPEMDecodeNext(textStr, strlen(textStr), pos, label, labelLen, der, derSize, derLen);
 }
 
 /* True if every byte of buf is zero. */
-static bool _UTAllZero(const uint8_t *buf, size_t len)
+static bool _UTAllZero(const uint8_t *buf, size_t bufSize)
 {
     size_t i;
-    for (i = 0; i < len; i++) { if (buf[i] != 0u) return false; }
+
+    SSF_REQUIRE(buf != NULL);
+
+    for (i = 0; i < bufSize; i++)
+    {
+        if (buf[i] != 0u) return false;
+    }
     return true;
 }
 
-/* Expects text to fail with result r, leave *pos at 0 and zero the output buffer. */
-static void _UTExpectErr(const char *text, SSFPEMResult_t r, size_t derSize)
+/* Expects textStr to fail with result r, leave *pos at 0 and zero the output buffer. */
+static void _UTExpectErr(const char *textStr, SSFPEMResult_t r, size_t derSize)
 {
     uint8_t der[64];
     size_t pos = 0;
@@ -60,9 +72,11 @@ static void _UTExpectErr(const char *text, SSFPEMResult_t r, size_t derSize)
     size_t labelLen = 0;
     size_t derLen = 0;
 
-    SSF_ASSERT(derSize <= sizeof(der));
+    SSF_REQUIRE(textStr != NULL);
+    SSF_REQUIRE(derSize <= sizeof(der));
+
     memset(der, 0xAA, sizeof(der));
-    SSF_ASSERT(_UTDecode(text, &pos, &label, &labelLen, der, derSize, &derLen) == r);
+    SSF_ASSERT(_UTDecode(textStr, &pos, &label, &labelLen, der, derSize, &derLen) == r);
     SSF_ASSERT(pos == 0u);
     SSF_ASSERT(_UTAllZero(der, derSize));
 }
@@ -72,13 +86,19 @@ static uint32_t _utScrubCalls;
 static bool _utScrubDirty;
 static void _UTScrubHook(const char *quad, size_t quadSize, const uint8_t *tri, size_t triSize)
 {
+    SSF_REQUIRE(quad != NULL);
+    SSF_REQUIRE(tri != NULL);
+
     _utScrubCalls++;
-    if (!_UTAllZero((const uint8_t *)quad, quadSize) || !_UTAllZero(tri, triSize))
+    /* Any scratch byte left non-zero? */
+    if ((!_UTAllZero((const uint8_t *)quad, quadSize)) || (!_UTAllZero(tri, triSize)))
     {
+        /* Yes, record the leak */
         _utScrubDirty = true;
     }
 }
 
+/* Runs the PEM decoder unit tests. */
 void SSFPEMUnitTest(void)
 {
     uint8_t der[64];
@@ -94,7 +114,7 @@ void SSFPEMUnitTest(void)
         SSF_ASSERT(_UTDecode(t, &pos, &label, &labelLen, der, sizeof(der), &derLen) ==
                    SSF_PEM_BLOCK);
         SSF_ASSERT(SSFPEMLabelIs(label, labelLen, "TEST"));
-        SSF_ASSERT(label == t + 11);
+        SSF_ASSERT(label == (t + 11));
         SSF_ASSERT(derLen == 4u);
         SSF_ASSERT((der[0] == 0u) && (der[1] == 1u) && (der[2] == 2u) && (der[3] == 3u));
         SSF_ASSERT(pos == strlen(t));
@@ -135,10 +155,10 @@ void SSFPEMUnitTest(void)
         pos = 0;
         SSF_ASSERT(_UTDecode(t, &pos, &label, &labelLen, der, sizeof(der), &derLen) ==
                    SSF_PEM_BLOCK);
-        SSF_ASSERT(SSFPEMLabelIs(label, labelLen, "ONE") && (derLen == 1u) && (der[0] == 1u));
+        SSF_ASSERT((SSFPEMLabelIs(label, labelLen, "ONE")) && (derLen == 1u) && (der[0] == 1u));
         SSF_ASSERT(_UTDecode(t, &pos, &label, &labelLen, der, sizeof(der), &derLen) ==
                    SSF_PEM_BLOCK);
-        SSF_ASSERT(SSFPEMLabelIs(label, labelLen, "TWO") && (derLen == 2u) && (der[1] == 2u));
+        SSF_ASSERT((SSFPEMLabelIs(label, labelLen, "TWO")) && (derLen == 2u) && (der[1] == 2u));
         SSF_ASSERT(_UTDecode(t, &pos, &label, &labelLen, der, sizeof(der), &derLen) ==
                    SSF_PEM_END);
     }
@@ -174,9 +194,9 @@ void SSFPEMUnitTest(void)
         const char *t = "-----BEGIN TEST-----\nAAECAw==\n-----END TEST-----\n";
         pos = 0;
         memset(der, 0xAA, sizeof(der));
-        SSF_ASSERT(SSFPEMDecodeNext(t, strlen(t) - 6u, &pos, &label, &labelLen, der, sizeof(der),
+        SSF_ASSERT(SSFPEMDecodeNext(t, (strlen(t) - 6u), &pos, &label, &labelLen, der, sizeof(der),
                                     &derLen) == SSF_PEM_ERR);
-        SSF_ASSERT((pos == 0u) && _UTAllZero(der, sizeof(der)));
+        SSF_ASSERT((pos == 0u) && (_UTAllZero(der, sizeof(der))));
     }
 
     /* ---- Output too small: ERR_SIZE, written bytes zeroed ---- */
@@ -221,16 +241,22 @@ void SSFPEMUnitTest(void)
         {
             memset(lab, 'K', n);
             lab[n] = 0;
-            SSF_ASSERT(snprintf(t, sizeof(t), "-----BEGIN %s-----\nAAECAw==\n-----END %s-----\n",
-                                lab, lab) < (int)sizeof(t));
+            SSF_ASSERT((snprintf(t, sizeof(t), "-----BEGIN %s-----\nAAECAw==\n-----END %s-----\n",
+                                 lab, lab)) < ((int)sizeof(t)));
+            /* Label at the maximum length? */
             if (n == SSF_PEM_MAX_LABEL_LEN)
             {
+                /* Yes, it decodes */
                 pos = 0;
                 SSF_ASSERT(_UTDecode(t, &pos, &label, &labelLen, der, sizeof(der), &derLen) ==
                            SSF_PEM_BLOCK);
                 SSF_ASSERT(labelLen == SSF_PEM_MAX_LABEL_LEN);
             }
-            else _UTExpectErr(t, SSF_PEM_ERR, 64u);
+            else
+            {
+                /* No, one over the maximum is refused */
+                _UTExpectErr(t, SSF_PEM_ERR, 64u);
+            }
         }
     }
 
@@ -251,21 +277,25 @@ void SSFPEMUnitTest(void)
     /* ---- BEGIN and END lines must start a line ---- */
     {
         const char *t;
+        /* Mid-line BEGIN is text */
         pos = 0;
-        t = "x-----BEGIN TEST-----\nAAECAw==\n-----END TEST-----\n";       /* mid-line: text */
+        t = "x-----BEGIN TEST-----\nAAECAw==\n-----END TEST-----\n";
         SSF_ASSERT(_UTDecode(t, &pos, &label, &labelLen, der, sizeof(der), &derLen) ==
                    SSF_PEM_END);
+        /* Indented BEGIN is text */
         pos = 0;
-        t = " -----BEGIN TEST-----\nAAECAw==\n-----END TEST-----\n";       /* indented: text */
+        t = " -----BEGIN TEST-----\nAAECAw==\n-----END TEST-----\n";
         SSF_ASSERT(_UTDecode(t, &pos, &label, &labelLen, der, sizeof(der), &derLen) ==
                    SSF_PEM_END);
+        /* The real BEGIN after a mid-line one is found */
         pos = 0;
         t = "see -----BEGIN NOTE-----\n-----BEGIN TEST-----\nAAECAw==\n-----END TEST-----\n";
         SSF_ASSERT(_UTDecode(t, &pos, &label, &labelLen, der, sizeof(der), &derLen) ==
-                   SSF_PEM_BLOCK);                                     /* the real one is found */
-        SSF_ASSERT(SSFPEMLabelIs(label, labelLen, "TEST") && (derLen == 4u));
+                   SSF_PEM_BLOCK);
+        SSF_ASSERT((SSFPEMLabelIs(label, labelLen, "TEST")) && (derLen == 4u));
+        /* CR-only lines */
         pos = 0;
-        t = "-----BEGIN TEST-----\rAAECAw==\r-----END TEST-----\r";       /* CR-only lines */
+        t = "-----BEGIN TEST-----\rAAECAw==\r-----END TEST-----\r";
         SSF_ASSERT(_UTDecode(t, &pos, &label, &labelLen, der, sizeof(der), &derLen) ==
                    SSF_PEM_BLOCK);
         SSF_ASSERT((derLen == 4u) && (pos == strlen(t)));
@@ -277,12 +307,13 @@ void SSFPEMUnitTest(void)
 
     /* ---- Every exit leaves the decoder's scratch zeroed (success, END, errors) ---- */
     {
+        /* Success, success padded, partial group, bad character, no END, no block */
         static const char *cases[] = {
-            "-----BEGIN TEST-----\nQUJD\n-----END TEST-----\n",           /* success: "ABC" */
-            "-----BEGIN TEST-----\nQUJDQUI=\n-----END TEST-----\n",       /* success, padded */
-            "-----BEGIN TEST-----\nQUJDQU\n-----END TEST-----\n",         /* partial group */
-            "-----BEGIN TEST-----\nQUJD*UJD\n-----END TEST-----\n",       /* bad character */
-            "-----BEGIN TEST-----\nQUJDQUJD\n",                           /* no END */
+            "-----BEGIN TEST-----\nQUJD\n-----END TEST-----\n",
+            "-----BEGIN TEST-----\nQUJDQUI=\n-----END TEST-----\n",
+            "-----BEGIN TEST-----\nQUJDQU\n-----END TEST-----\n",
+            "-----BEGIN TEST-----\nQUJD*UJD\n-----END TEST-----\n",
+            "-----BEGIN TEST-----\nQUJDQUJD\n",
             "no block here\n" };
         size_t k;
         _ssfPEMUTScrubHook = _UTScrubHook;
@@ -292,11 +323,12 @@ void SSFPEMUnitTest(void)
             _utScrubDirty = false;
             pos = 0;
             (void)_UTDecode(cases[k], &pos, &label, &labelLen, der, sizeof(der), &derLen);
-            SSF_ASSERT((_utScrubCalls == 1u) && !_utScrubDirty);
+            SSF_ASSERT((_utScrubCalls == 1u) && (!_utScrubDirty));
+            /* Output too small for ERR_SIZE */
             _utScrubCalls = 0;
             pos = 0;
-            (void)_UTDecode(cases[k], &pos, &label, &labelLen, der, 2u, &derLen);  /* ERR_SIZE */
-            SSF_ASSERT((_utScrubCalls == 1u) && !_utScrubDirty);
+            (void)_UTDecode(cases[k], &pos, &label, &labelLen, der, 2u, &derLen);
+            SSF_ASSERT((_utScrubCalls == 1u) && (!_utScrubDirty));
         }
         _ssfPEMUTScrubHook = NULL;
     }

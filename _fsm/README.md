@@ -60,8 +60,8 @@ Options live in [`_opt/ssfsm_opt.h`](../_opt/ssfsm_opt.h) (aggregated into the b
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `SSF_SM_MAX_ACTIVE_EVENTS` | `16` | Maximum number of simultaneously queued events across all state machines; increase if events are dropped under peak load |
-| `SSF_SM_MAX_ACTIVE_TIMERS` | `8` | Maximum number of simultaneously running timers across all state machines |
+| `SSF_SM_MAX_ACTIVE_EVENTS` | `16` | Maximum number of simultaneously queued events across all state machines; increase if events are dropped under peak load. The ssfmqttc client alone can have about eight outstanding (API, pump and decoded packet events); the rest is margin for other machines sharing the pool |
+| `SSF_SM_MAX_ACTIVE_TIMERS` | `8` | Maximum number of simultaneously running timers across all state machines. The ssfmqttc client runs up to three at once during a session; the rest is margin for other machines |
 
 The following enumerations are **required** in [`_opt/ssfsm_opt.h`](../_opt/ssfsm_opt.h):
 
@@ -136,7 +136,7 @@ a counting semaphore capped at 1:
 | [e.g.](#ex-deinit) | [`void SSFSMDeInit()`](#ssfsmdeinit) | De-initialize the framework and release all resources |
 | [e.g.](#ex-init-handler) | [`void SSFSMInitHandler(smid, initial)`](#ssfsminithandler) | Register a state machine and deliver `SSF_SM_EVENT_ENTRY` to the initial state |
 | [e.g.](#ex-deinit-handler) | [`void SSFSMDeInitHandler(smid)`](#ssfsmdeinithandler) | Unregister a state machine |
-| [e.g.](#ex-task) | [`bool SSFSMTask(nextTimeout)`](#ssfsmtask) | Process all pending events and expired timers; returns time until next timer |
+| [e.g.](#ex-task) | [`bool SSFSMTask(nextTimeoutOpt)`](#ssfsmtask) | Process all pending events and expired timers; returns time until next timer |
 | [e.g.](#ex-put-event-data) | [`void SSFSMPutEventData(smid, eid, data, dataLen)`](#ssfsmputeventdata) | Post an event with a data payload to a state machine |
 | [e.g.](#ex-put-event) | [`void SSFSMPutEvent(smid, eid)`](#ssfsmputevent) | Post an event without data (expands to `SSFSMPutEventData` with `NULL`/`0`) |
 | [e.g.](#ex-tran) | [`void SSFSMTran(next)`](#ssfsmtran) | Trigger a state transition; valid only inside a state handler |
@@ -292,7 +292,7 @@ SSFSMDeInitHandler(SSF_SM_STATUS_LED);
 ### [↑](#functions) [`bool SSFSMTask()`](#functions)
 
 ```c
-bool SSFSMTask(SSFSMTimeout_t *nextTimeout);
+bool SSFSMTask(SSFSMTimeout_t *nextTimeoutOpt);
 ```
 
 Processes all pending events and fires any expired timers by invoking the appropriate state
@@ -300,11 +300,11 @@ handlers. Must be called repeatedly from the framework's execution context.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `nextTimeout` | out | `SSFSMTimeout_t *` | Receives the number of system ticks until the next timer expires, or `SSF_SM_MAX_TIMEOUT` if no timers are running. Pass `NULL` in single-threaded superloop builds. |
+| `nextTimeoutOpt` | in-out | `SSFSMTimeout_t *` | Optional. Initialize to `SSF_SM_MAX_TIMEOUT`; lowered to the number of system ticks until the next timer expires if that is sooner, unchanged if no timers are running. Pass `NULL` in single-threaded superloop builds. |
 
-**Returns:** `true` if there are additional pending events that should be processed immediately
-(call `SSFSMTask()` again without waiting); `false` when no more events are queued and the
-caller may safely block for up to `*nextTimeout` ticks.
+**Returns:** `true` if timers are still running; `false` when no timers are running. All queued
+events and expired timers are processed before returning, so the caller may block for up to
+`*nextTimeoutOpt` ticks or until a new event is posted.
 
 <a id="ex-task"></a>
 

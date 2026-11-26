@@ -35,7 +35,7 @@
 /*                                                                                               */
 /* Supported date range: 1970-01-01T00:00:00.000000000Z - 2199-12-31T23:59:59.999999999Z         */
 /* Unix time is measured in system ticks (unixSys is seconds scaled by SSF_TICKS_PER_SEC)        */
-/* Unix time is always UTC (Z) time zone, other zones are handled by the ssfios8601 interface.   */
+/* Unix time is always UTC (Z) time zone, other zones are handled by the ssfiso8601 interface.   */
 /* Unix time does not account for leap seconds, it only accounts for leap years.                 */
 /* It is assumed that the RTC is periodically updated from an external time source, such as NTP. */
 /* Inputs are strictly checked to ensure they represent valid calendar dates.                    */
@@ -102,13 +102,18 @@ static const uint16_t _daysInMonthAcc[SSFDTIME_MONTHS_IN_YEAR - 1] =
     { 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334 };
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns the days from the epoch to the start of year (years since 1970): 365 a year, plus a   */
-/* leap day every fourth year from 1972, less the one 2100 skips (OPTIMIZE DTIME-01).            */
+/* Returns the days from the epoch to the start of year (years since 1970).                      */
 /* --------------------------------------------------------------------------------------------- */
 static uint32_t _SSFDTimeDaysBeforeYear(uint32_t year)
 {
-    uint32_t days = (year * (uint32_t)SSFDTIME_DAYS_IN_YEAR) + ((year + 1u) >> 2);
+    uint32_t days;
 
+    SSF_REQUIRE(year <= (SSFDTIME_NUM_YEARS + 1u));
+
+    /* 365 days a year plus a leap day every fourth year from 1972 */
+    days = (year * (uint32_t)SSFDTIME_DAYS_IN_YEAR) + ((year + 1u) >> 2);
+
+    /* Year after 2100, which skips its leap day? */
     if (year > (SSFDTIME_NON_LEAP_YEAR - SSFDTIME_EPOCH_YEAR)) days--;
     return days;
 }
@@ -144,7 +149,7 @@ static bool _SSFDTimeStructIsMagicValid(const SSFDTimeStruct_t *ts)
 /* --------------------------------------------------------------------------------------------- */
 /* Performs the harder conversions from unix to struct time.                                     */
 /* --------------------------------------------------------------------------------------------- */
-void _SSFDTimeUnixToStruct(uint32_t unixDays, SSFDTimeStruct_t *ts)
+static void _SSFDTimeUnixToStruct(uint32_t unixDays, SSFDTimeStruct_t *ts)
 {
     uint32_t year;
     uint32_t month;
@@ -154,27 +159,24 @@ void _SSFDTimeUnixToStruct(uint32_t unixDays, SSFDTimeStruct_t *ts)
 
     SSF_REQUIRE(unixDays < _SSFDTimeDaysBeforeYear(SSFDTIME_NUM_YEARS + 1u));
 
-    /* The days before year y are at least 365 * y, so unixDays / 366 is the year or the one   */
-    /* before it. (unixDays * 45839) >> 24 is that quotient or one less, without a divide (none */
-    /* on Cortex-M0+), and its product stays below 2^32 for every supported day.               */
+    /* Estimate year as unixDays / 366 without a divide, then correct upward */
     year = (unixDays * 45839u) >> 24;
     while (unixDays >= _SSFDTimeDaysBeforeYear(year + 1u)) year++;
     unixDays -= _SSFDTimeDaysBeforeYear(year);
     ts->year = (uint16_t)year;
     ts->yday = (uint16_t)unixDays;
 
-    /* Month and day of month without a search (OPTIMIZE DTIME-02): January and February */
-    /* directly; from 1 March the month lengths repeat 31, 30, 31, 30, 31 every 153 days, */
-    /* so month = (5 * d + 2) / 153 and its first day is (153 * month + 2) / 5 days in.   */
-    /* Both divides are exact multiply-shifts over their whole input ranges (d <= 306).    */
+    /* Day of year before 1 March? */
     marchDay = 59u + (uint32_t)SSFDTIME_IS_LEAP_YEAR(ts->year);
     if (unixDays < marchDay)
     {
+        /* Yes, month is January or February */
         month = (unixDays >= 31u) ? 1u : 0u;
         ts->month = (uint8_t)month;
         ts->day = (uint8_t)(unixDays - (31u * month));
         return;
     }
+    /* No, month and day from the 153-day March-based cycle by multiply-shift */
     unixDays -= marchDay;
     month = (((5u * unixDays) + 2u) * 857u) >> 17;
     ts->month = (uint8_t)(month + SSF_DTIME_MONTH_MAR);
@@ -207,8 +209,11 @@ bool SSFDTimeStructInit(SSFDTimeStruct_t *ts, uint16_t year, uint8_t month, uint
     ts->sec = sec;
     ts->fsec = fsec;
     ts->yday = day;
+
+    /* Month after January? */
     if (month > 0)
     {
+        /* Yes, add the days of the preceding months */
         month--;
         if ((month >= 1) && (SSFDTIME_IS_LEAP_YEAR(year))) { ts->yday += 1; }
         ts->yday += _daysInMonthAcc[month];
@@ -244,7 +249,7 @@ bool SSFDTimeUnixToStruct(SSFPortTick_t unixSys, SSFDTimeStruct_t *ts, size_t ts
     ts->fsec = (uint32_t)(unixSys % SSF_TICKS_PER_SEC);
     unixSys = unixSys / SSF_TICKS_PER_SEC;
 
-    /* Fail if time above limit */
+    /* Seconds in supported range? */
     if (unixSys > SSFDTIME_UNIX_EPOCH_SYS_MAX) return false;
 
     /* Perform the easy conversions */
@@ -287,8 +292,10 @@ bool SSFDTimeStructToUnix(const SSFDTimeStruct_t *ts, SSFPortTick_t *unixSys)
 
     (*unixSys) = ts->year * SSFDTIME_SEC_IN_YEAR;
 
-    /* Adjust for leap seconds */
+    /* Adjust for leap days */
     (*unixSys) += (((((SSFPortTick_t)ts->year) + 1) >> 2) * SSFDTIME_SEC_IN_DAY);
+
+    /* Year after 2100, which skips its leap day? */
     if (ts->year > (SSFDTIME_NON_LEAP_YEAR - SSFDTIME_EPOCH_YEAR))
     { (*unixSys) -= SSFDTIME_SEC_IN_DAY; }
 
@@ -321,9 +328,12 @@ uint8_t SSFDTimeDaysInMonth(uint16_t year, uint8_t month)
     SSF_ASSERT(year <= SSF_TS_YEAR_MAX);
     SSF_ASSERT(month <= SSF_TS_MONTH_MAX);
 
-    if ((month == SSF_DTIME_MONTH_FEB) && SSFDTIME_IS_LEAP_YEAR(year))
+    /* February of a leap year? */
+    if ((month == SSF_DTIME_MONTH_FEB) && (SSFDTIME_IS_LEAP_YEAR(year)))
     {
+        /* Yes, 0-based last day of a leap February */
         return _daysInMonth[SSF_DTIME_MONTH_FEB];
     }
+    /* No, 0-based last day from the table */
     return _daysInMonth[month] - 1;
 }

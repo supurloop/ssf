@@ -92,21 +92,24 @@ void SSFDTimeUnitTest(void)
     {
         for (j = 0; j < SSFDTIME_MONTHS_IN_YEAR; j++)
         {
+            /* February? */
             if (j == SSF_DTIME_MONTH_FEB)
             {
+                /* Yes, is it a leap year? */
                 if (((lc & 0x03) == 0) && (lc != 132))
                 {
-                    /* Leap year */
+                    /* Yes, leap year */
                     SSF_ASSERT(SSFDTimeDaysInMonth(tsi.year, j) == _utDaysInMonth[j]);
                 }
                 else
                 {
-                    /* Not leap year */
+                    /* No, not leap year */
                     SSF_ASSERT(SSFDTimeDaysInMonth(tsi.year, j) == (_utDaysInMonth[j] - 1));
                 }
             }
             else
             {
+                /* No, not February */
                 SSF_ASSERT(SSFDTimeDaysInMonth(tsi.year, j) == (_utDaysInMonth[j] - 1));
             }
         }
@@ -117,14 +120,15 @@ void SSFDTimeUnitTest(void)
     lc = 2;
     for (tsi.year = 0; tsi.year <= SSF_TS_YEAR_MAX; tsi.year++)
     {
+        /* Leap year? */
         if (((lc & 0x03) == 0) && (lc != 132))
         {
-            /* Leap year */
+            /* Yes, leap year */
             SSF_ASSERT(SSFDTimeIsLeapYear(tsi.year));
         }
         else
         {
-            /* Not leap year */
+            /* No, not leap year */
             SSF_ASSERT(SSFDTimeIsLeapYear(tsi.year) == false);
         }
         lc++;
@@ -149,8 +153,8 @@ void SSFDTimeUnitTest(void)
     for (tsi.year = 0; tsi.year <= SSF_TS_YEAR_MAX; tsi.year++)
     {
         SSF_ASSERT(SSFDTimeStructInit(&ts, tsi.year, SSF_DTIME_MONTH_FEB,
-                                      _utDaysInMonth[SSF_DTIME_MONTH_FEB] +
-                                      (uint8_t)(SSFDTimeIsLeapYear(tsi.year)), 0, 0, 0, 0) ==
+                                      (_utDaysInMonth[SSF_DTIME_MONTH_FEB] +
+                                      (uint8_t)(SSFDTimeIsLeapYear(tsi.year))), 0, 0, 0, 0) ==
                                       false);
     }
     SSF_ASSERT(SSFDTimeStructInit(&ts, 0, SSF_DTIME_MONTH_MAR,
@@ -183,13 +187,16 @@ void SSFDTimeUnitTest(void)
     {
         tsi.year = rand() % (SSF_TS_YEAR_MAX + 1);
         tsi.month = rand() % (SSF_TS_MONTH_MAX + 1);
+        /* February of a leap year? */
         if (SSFDTimeIsLeapYear(tsi.year) && (tsi.month == SSF_DTIME_MONTH_FEB))
         {
-            tsi.day =  rand() % (_utDaysInMonth[tsi.month]);
+            /* Yes, allow day 29 */
+            tsi.day = rand() % (_utDaysInMonth[tsi.month]);
         }
         else
         {
-            tsi.day =  rand() % (_utDaysInMonth[tsi.month] - 1);
+            /* No, exclude the last day of the table month */
+            tsi.day = rand() % (_utDaysInMonth[tsi.month] - 1);
         }
         tsi.hour = rand() % (SSF_TS_HOUR_MAX + 1);
         tsi.min = rand() % (SSF_TS_MIN_MAX + 1);
@@ -248,9 +255,9 @@ void SSFDTimeUnitTest(void)
         tsi.yday = 0;
         for (tsi.month = 0; tsi.month <= SSF_TS_MONTH_MAX; tsi.month++)
         {
-            for (tsi.day = 0; tsi.day <= (uint8_t)(_utDaysInMonth[tsi.month] +
+            for (tsi.day = 0; tsi.day <= (uint8_t)((_utDaysInMonth[tsi.month] +
                                          (uint8_t)(SSFDTimeIsLeapYear(tsi.year) &&
-                                         (tsi.month == SSF_DTIME_MONTH_FEB)) - 1);
+                                         (tsi.month == SSF_DTIME_MONTH_FEB))) - 1);
                                          tsi.day++)
             {
                 for (tsi.hour = 0; tsi.hour <= SSF_TS_HOUR_MAX; tsi.hour++)
@@ -315,8 +322,8 @@ void SSFDTimeUnitTest(void)
     {
         for (ts.month = 0; ts.month <= SSF_TS_MONTH_MAX; ts.month++)
         {
-            ts.day = _utDaysInMonth[ts.month] +
-                     (uint8_t) (SSFDTimeIsLeapYear(ts.year) && (ts.month == SSF_DTIME_MONTH_FEB))
+            ts.day = (_utDaysInMonth[ts.month] +
+                      (uint8_t)(SSFDTimeIsLeapYear(ts.year) && (ts.month == SSF_DTIME_MONTH_FEB)))
                      - 1;
 #if SSF_DTIME_STRUCT_STRICT_CHECK == 1
             ts.magic = 0;
@@ -370,8 +377,8 @@ void SSFDTimeUnitTest(void)
         unixSys %= (SSFDTIME_UNIX_EPOCH_SYS_MAX + 1);
 
         /* Ensure min and max tested */
-        if (i == 0) unixSys = SSFDTIME_UNIX_EPOCH_SYS_MIN;
-        else if (i == 1) unixSys = SSFDTIME_UNIX_EPOCH_SYS_MAX;
+        if (i == 0) { unixSys = SSFDTIME_UNIX_EPOCH_SYS_MIN; }
+        else if (i == 1) { unixSys = SSFDTIME_UNIX_EPOCH_SYS_MAX; }
 
         /* Convert unixSys to time struct */
         SSF_ASSERT(SSFDTimeUnixToStruct(unixSys, &ts, sizeof(ts)));
@@ -496,11 +503,17 @@ void SSFDTimeUnitTest(void)
     }
 #endif /* SSF_DTIME_EXHAUSTIVE_UNIT_TEST */
 
-    /* ---- DTIME-01/02: every supported day against an independent days-to-civil ---- */
+    /* DTIME-01/02: every supported day against an independent days-to-civil */
     {
         uint32_t day;
-        uint32_t lastDay = (uint32_t)(SSFDTIME_UNIX_EPOCH_SYS_MAX / SSF_TICKS_PER_SEC / 86400ull);
-        static const struct { uint16_t y; uint8_t m; uint8_t d; uint16_t yday; } edges[] = {
+        uint32_t lastDay = (uint32_t)((SSFDTIME_UNIX_EPOCH_SYS_MAX / SSF_TICKS_PER_SEC) / 86400ull);
+        static const struct
+        {
+            uint16_t y;
+            uint8_t m;
+            uint8_t d;
+            uint16_t yday;
+        } edges[] = {
             { 1970u, 0u, 0u, 0u }, { 1972u, 1u, 28u, 59u }, { 1972u, 2u, 0u, 60u },
             { 1973u, 2u, 0u, 59u }, { 2000u, 1u, 28u, 59u }, { 2099u, 11u, 30u, 364u },
             { 2100u, 1u, 27u, 58u }, { 2100u, 2u, 0u, 59u }, { 2104u, 1u, 28u, 59u },
@@ -519,8 +532,8 @@ void SSFDTimeUnitTest(void)
             uint32_t m = (mp < 10u) ? (mp + 2u) : (mp - 10u);
             uint32_t y = yoe + (era * 400u) + ((m <= 1u) ? 1u : 0u);
 
-            unixSys = (SSFPortTick_t)day * 86400ull * SSF_TICKS_PER_SEC;
-            SSF_ASSERT(SSFDTimeUnixToStruct(unixSys + SSF_TICKS_PER_SEC - 1u, &ts, sizeof(ts)));
+            unixSys = ((SSFPortTick_t)day * 86400ull) * SSF_TICKS_PER_SEC;
+            SSF_ASSERT(SSFDTimeUnixToStruct((unixSys + SSF_TICKS_PER_SEC) - 1u, &ts, sizeof(ts)));
             SSF_ASSERT((ts.year + SSFDTIME_EPOCH_YEAR) == y);
             SSF_ASSERT(ts.month == m);
             SSF_ASSERT(ts.day == d);
@@ -542,7 +555,8 @@ void SSFDTimeUnitTest(void)
             SSF_ASSERT((ts.year == tsi.year) && (ts.month == edges[lc].m) &&
                        (ts.day == edges[lc].d) && (ts.yday == edges[lc].yday));
         }
+        /* No 29 February 2100 */
         SSF_ASSERT(SSFDTimeStructInit(&tsi, (uint16_t)(2100u - SSFDTIME_EPOCH_YEAR), 1u, 28u,
-                                      0u, 0u, 0u, 0u) == false); /* no 29 February 2100 */
+                                      0u, 0u, 0u, 0u) == false);
     }
 }

@@ -31,6 +31,32 @@ None — `ssfport` is the foundation layer on which all other SSF modules depend
   and configure `SSF_CONFIG_LITTLE_ENDIAN` when the port must define them.
 - The mutex macros (`SSF_MUTEX_*`) are only required when
   `SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1`.
+- When `SSF_CONFIG_BYTE_ORDER_MACROS == 1`, `SSF_CONFIG_LITTLE_ENDIAN` is detected from the
+  compiler's `__BYTE_ORDER__` (GCC/Clang). Compilers without `__BYTE_ORDER__` default to little
+  endian; set `SSF_CONFIG_LITTLE_ENDIAN` to `0` by hand on a big-endian target with such a compiler.
+- `SSF_CONFIG_ENABLE_THREAD_SUPPORT` lets ssfsm events be signalled safely from multiple contexts
+  (and optimizes when the state machine thread runs) and lets ssfcfg be called safely from multiple
+  contexts. It is a fall-through default, so a command-line `-D` wins (build-arm.sh passes `0`).
+- `SSF_CONFIG_HAVE_OPENSSL` is `1` on host builds where libcrypto is linked (macOS/Linux native).
+  Cross builds (e.g. mipsel under QEMU) pass `-DSSF_CONFIG_HAVE_OPENSSL=0` to skip OpenSSL
+  cross-validation in the unit suite.
+- `SSF_CONFIG_MQTTC_UNIT_TEST_BROKER == 1` also runs a round trip against a public broker and needs
+  internet access. An unreachable broker is reported and skipped; any other failure asserts.
+- `SSF_CONFIG_UT_VERBOSE` (default `0`) gates diagnostic stdout from unit tests (microbenchmark
+  timings, OpenSSL cross-check banners, Wycheproof per-tcId mismatches, zeroization-audit failure
+  details), keeping main.c's "Running ... PASSED in Ns" lines aligned. Pass
+  `-DSSF_CONFIG_UT_VERBOSE=1` when profiling or debugging a failure. When disabled,
+  `SSF_UT_PRINTF()` wraps the call in an unevaluated `sizeof`, so arguments are type-checked and
+  referenced (no unused-variable warnings) but no code is generated; `<stdio.h>` must be in scope.
+- `SSF_NOINLINE` gives a function its own stack frame and call site; it is used by stack-scrub
+  helpers and side-channel-sensitive routines that need a clean frame.
+- `SSF_OPTIMIZER_BARRIER(p)` forces the compiler to materialize `p` (an address-taken object) and
+  fences memory operations across that point, so stack-scrub helpers and pollute/scan probes are
+  not reordered or elided. `volatile` alone is not sufficient on MSVC. The GCC/Clang form is an
+  empty inline asm with `"r"(p)` and a `"memory"` clobber; the MSVC form pairs `_ReadWriteBarrier`
+  with a volatile read of the first byte.
+- `SSFPortGetEntropy()` is backed by the OS CSPRNG (BCryptGenRandom on Windows, `/dev/urandom`
+  on POSIX).
 - All `SSF_CONFIG_*_UNIT_TEST` enables can be set to `0` in a production build to exclude unit
   test code.
 - `SSF_REQUIRE()` documents input-parameter assertions; `SSF_ENSURE()` documents return-value

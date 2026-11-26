@@ -53,6 +53,8 @@ provisioning.
 - Base64 decoding is constant-time per character (see [`ssfbase64`](ssfbase64.md)). The body
   loop still branches on whitespace and line breaks, so timing reflects the layout of the text
   and its length, not the key bytes.
+- **DBC exemptions.** The per-character helpers `_SSFPEMAt()` and `_SSFPEMIsEol()` carry no
+  assertions; [`SSFPEMDecodeNext()`](#ssfpemdecodenext) validates their inputs.
 
 <a id="configuration"></a>
 
@@ -79,7 +81,7 @@ No options file. The unit-test entry point is gated by `SSF_CONFIG_PEM_UNIT_TEST
 | | Function / Macro | Description |
 |---|-----------------|-------------|
 | [e.g.](#ex-decodenext) | [`SSFPEMResult_t SSFPEMDecodeNext(pem, pemLen, pos, labelOut, labelLenOut, derOpt, derSize, derLenOut)`](#ssfpemdecodenext) | Decode the next block |
-| | [`bool SSFPEMLabelIs(label, labelLen, str)`](#ssfpemlabelis) | Compare a block's label with a C string |
+| | [`bool SSFPEMLabelIs(label, labelLen, cmpStr)`](#ssfpemlabelis) | Compare a block's label with a C string |
 
 <a id="function-reference"></a>
 
@@ -134,8 +136,8 @@ if (r != SSF_PEM_END) { /* malformed block or too large: do not use a partial re
 ### [↑](#ssfpem--pem-block-decoder) [`bool SSFPEMLabelIs()`](#functions)
 
 ```c
-bool SSFPEMLabelIs(const char *label, size_t labelLen, const char *str);
+bool SSFPEMLabelIs(const char *label, size_t labelLen, const char *cmpStr);
 ```
 
-Returns `true` if `label[0..labelLen)` equals the null-terminated `str` exactly (same length,
-same bytes). `label` and `str` must not be `NULL`.
+Returns `true` if `label[0..labelLen)` equals the null-terminated `cmpStr` exactly (same length,
+same bytes). `label` and `cmpStr` must not be `NULL`.

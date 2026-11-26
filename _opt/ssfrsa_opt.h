@@ -22,7 +22,7 @@ extern "C" {
 #define SSF_RSA_CONFIG_ENABLE_PSS            (1u)
 #define SSF_RSA_CONFIG_MILLER_RABIN_ROUNDS   (5u)
 
-/* Bytes added to the stack scrub at the end of each sign / keygen entry point (SAFE-05). The    */
+/* Bytes added to the stack scrub at the end of each sign / keygen entry point. The            */
 /* scrub is sized to the stack the ssfbn calls below the entry point use, as measured with      */
 /* Cortex-M4 GCC -Os; other compilers and flags can use a little more (M4 -O2: 64-80 B, M0+    */
 /* -Os: 96-112 B), so set 128u there to scrub it all, at the cost of that much more peak stack. */

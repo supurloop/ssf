@@ -48,8 +48,7 @@ static const uint8_t _b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvw
 #define _SSF_B64_EQ(x, c) ((uint32_t)0u - ((((x) ^ (uint32_t)(c)) - 1u) >> 31))
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns encoding of 0-63 for valid encoded char, 64 for '=' pad, else 65 for invalid.         */
-/* Constant time in e: no branch or table index depends on the character (SAFE-02, PEM-01).      */
+/* Returns constant-time encoding 0-63 for valid char, 64 for '=' pad, else 65 for invalid.      */
 /* --------------------------------------------------------------------------------------------- */
 static uint8_t _SSFBase64GetEncoding(uint8_t e)
 {
@@ -64,7 +63,7 @@ static uint8_t _SSFBase64GetEncoding(uint8_t e)
 
     v = (mU & (x - 'A')) | (mL & (x - ('a' - 26u))) | (mD & (x + (52u - '0'))) |
         (mP & 62u) | (mS & 63u) | (mE & 64u);
-    return (uint8_t)(v | (~(mU | mL | mD | mP | mS | mE) & 65u));
+    return (uint8_t)(v | ((~(mU | mL | mD | mP | mS | mE)) & 65u));
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -170,7 +169,7 @@ bool SSFBase64Encode(const uint8_t *in, size_t inLen, SSFCStrOut_t outStr, size_
     }
     SSF_ASSERT(outSize > 0);
     *outStr = 0;
-    return inLen == 0;
+    return (inLen == 0);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -185,6 +184,7 @@ bool SSFBase64Decode(SSFCStrIn_t inStr, size_t inLenLim, uint8_t *out, size_t ou
     SSF_REQUIRE(out != NULL);
     SSF_REQUIRE(outLen != NULL);
 
+    /* Is the input length not a multiple of 4? */
     if ((inLenLim & 0x03) != 0) return false;
     *outLen = 0;
     /* Is there another input block and room for output? */
@@ -199,6 +199,6 @@ bool SSFBase64Decode(SSFCStrIn_t inStr, size_t inLenLim, uint8_t *out, size_t ou
         if (outSize >= len) outSize -= len;
         else outSize = 0;
     }
-    return inLenLim == 0;
+    return (inLenLim == 0);
 }
 

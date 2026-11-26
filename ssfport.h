@@ -66,10 +66,7 @@ extern "C" {
 #define SSF_CONFIG_PEM_UNIT_TEST     (1u)
 #define SSF_CONFIG_PKEY_UNIT_TEST    (1u)
 
-/* SSF_CONFIG_HAVE_OPENSSL -- set to 1 on host builds where libcrypto is linked at the build's   */
-/* command line (macOS/Linux native). Cross builds (e.g. mipsel under QEMU) override this to 0   */
-/* to skip OpenSSL cross-validation paths in the unit suite. Defined as a fall-through default   */
-/* so command-line -D wins.                                                                      */
+/* 1 when libcrypto is linked for unit test cross-validation; -D on the command line overrides */
 #ifndef SSF_CONFIG_HAVE_OPENSSL
 #define SSF_CONFIG_HAVE_OPENSSL      (1u)
 #endif
@@ -80,14 +77,14 @@ extern "C" {
 #define SSF_CONFIG_AESCTR_UNIT_TEST  (1u)
 #define SSF_CONFIG_AESGCM_UNIT_TEST  (1u)
 #define SSF_CONFIG_BN_UNIT_TEST      (1u)
-#define SSF_CONFIG_BN_MICROBENCH     (1u)  /* 1 to run MontMul/MontSquare perf harness */
-#define SSF_CONFIG_CCP_UNIT_TEST     (1u)  /* ChaCha20-Poly1305 AEAD */
+#define SSF_CONFIG_BN_MICROBENCH     (1u) /* 1 to run MontMul/MontSquare perf harness */
+#define SSF_CONFIG_CCP_UNIT_TEST     (1u) /* ChaCha20-Poly1305 AEAD */
 #define SSF_CONFIG_CHACHA20_UNIT_TEST (1u)
 #define SSF_CONFIG_CMS_UNIT_TEST     (1u)
 #define SSF_CONFIG_CRYPT_UNIT_TEST   (1u)
-#define SSF_CONFIG_CRYPT_CT_TIMING_TEST (1u)  /* 1 to run SSFCryptCTMemEq wall-clock CT check */
+#define SSF_CONFIG_CRYPT_CT_TIMING_TEST (1u) /* 1 to run SSFCryptCTMemEq wall-clock CT check */
 #define SSF_CONFIG_EC_UNIT_TEST      (1u)
-#define SSF_CONFIG_EC_MICROBENCH     (1u)  /* 1 to run [k]G perf harness in ssfec_ut */
+#define SSF_CONFIG_EC_MICROBENCH     (1u) /* 1 to run [k]G perf harness in ssfec_ut */
 #define SSF_CONFIG_ECDSA_UNIT_TEST   (1u)
 
 #define SSF_CONFIG_ED25519_UNIT_TEST (1u)
@@ -146,95 +143,90 @@ extern "C" {
 #define SSF_CONFIG_NETSOCK_UNIT_TEST (1u)
 #define SSF_CONFIG_NETWS_UNIT_TEST   (1u)
 #define SSF_CONFIG_TLSC_UNIT_TEST    (1u)
-/* 1 also runs a round trip against a public broker; needs internet access. Unreachable broker  */
-/* is reported and skipped, any other failure asserts.                                         */
+/* 1 also runs a round trip against a public broker; needs internet access */
 #define SSF_CONFIG_MQTTC_UNIT_TEST_BROKER (1u)
 
 /* If any unit test is enabled then enable unit test mode */
 #if /* _codec */ \
-    SSF_CONFIG_ASN1_UNIT_TEST == 1 || \
-    SSF_CONFIG_BASE64_UNIT_TEST == 1 || \
-    SSF_CONFIG_BASE64URL_UNIT_TEST == 1 || \
-    SSF_CONFIG_DEC_UNIT_TEST == 1 || \
-    SSF_CONFIG_GOBJ_UNIT_TEST == 1 || \
-    SSF_CONFIG_HEX_UNIT_TEST == 1 || \
-    SSF_CONFIG_INI_UNIT_TEST == 1 || \
-    SSF_CONFIG_JSON_UNIT_TEST == 1 || \
-    SSF_CONFIG_MATCH_UNIT_TEST == 1 || \
-    SSF_CONFIG_STR_UNIT_TEST == 1 || \
-    SSF_CONFIG_TLV_UNIT_TEST == 1 || \
-    SSF_CONFIG_UBJSON_UNIT_TEST == 1 || \
-    SSF_CONFIG_X509_UNIT_TEST == 1 || \
-    SSF_CONFIG_PEM_UNIT_TEST == 1 || \
-    SSF_CONFIG_PKEY_UNIT_TEST == 1 || \
+    (SSF_CONFIG_ASN1_UNIT_TEST == 1) || \
+    (SSF_CONFIG_BASE64_UNIT_TEST == 1) || \
+    (SSF_CONFIG_BASE64URL_UNIT_TEST == 1) || \
+    (SSF_CONFIG_DEC_UNIT_TEST == 1) || \
+    (SSF_CONFIG_GOBJ_UNIT_TEST == 1) || \
+    (SSF_CONFIG_HEX_UNIT_TEST == 1) || \
+    (SSF_CONFIG_INI_UNIT_TEST == 1) || \
+    (SSF_CONFIG_JSON_UNIT_TEST == 1) || \
+    (SSF_CONFIG_MATCH_UNIT_TEST == 1) || \
+    (SSF_CONFIG_STR_UNIT_TEST == 1) || \
+    (SSF_CONFIG_TLV_UNIT_TEST == 1) || \
+    (SSF_CONFIG_UBJSON_UNIT_TEST == 1) || \
+    (SSF_CONFIG_X509_UNIT_TEST == 1) || \
+    (SSF_CONFIG_PEM_UNIT_TEST == 1) || \
+    (SSF_CONFIG_PKEY_UNIT_TEST == 1) || \
     /* _crypto */ \
-    SSF_CONFIG_AES_UNIT_TEST == 1 || \
-    SSF_CONFIG_AESCCM_UNIT_TEST == 1 || \
-    SSF_CONFIG_AESCTR_UNIT_TEST == 1 || \
-    SSF_CONFIG_AESGCM_UNIT_TEST == 1 || \
-    SSF_CONFIG_BN_UNIT_TEST == 1 || \
-    SSF_CONFIG_CCP_UNIT_TEST == 1 || \
-    SSF_CONFIG_CHACHA20_UNIT_TEST == 1 || \
-    SSF_CONFIG_CMS_UNIT_TEST == 1 || \
-    SSF_CONFIG_CRYPT_UNIT_TEST == 1 || \
-    SSF_CONFIG_EC_UNIT_TEST == 1 || \
-    SSF_CONFIG_ECDSA_UNIT_TEST == 1 || \
-    SSF_CONFIG_ED25519_UNIT_TEST == 1 || \
-    SSF_CONFIG_FE25519_UNIT_TEST == 1 || \
-    SSF_CONFIG_HKDF_UNIT_TEST == 1 || \
-    SSF_CONFIG_HMAC_UNIT_TEST == 1 || \
-    SSF_CONFIG_POLY1305_UNIT_TEST == 1 || \
-    SSF_CONFIG_PRNG_UNIT_TEST == 1 || \
-    SSF_CONFIG_RSA_UNIT_TEST == 1 || \
-    SSF_CONFIG_SHA1_UNIT_TEST == 1 || \
-    SSF_CONFIG_SHA2_UNIT_TEST == 1 || \
-    SSF_CONFIG_TLS_UNIT_TEST == 1 || \
-    SSF_CONFIG_X25519_UNIT_TEST == 1 || \
+    (SSF_CONFIG_AES_UNIT_TEST == 1) || \
+    (SSF_CONFIG_AESCCM_UNIT_TEST == 1) || \
+    (SSF_CONFIG_AESCTR_UNIT_TEST == 1) || \
+    (SSF_CONFIG_AESGCM_UNIT_TEST == 1) || \
+    (SSF_CONFIG_BN_UNIT_TEST == 1) || \
+    (SSF_CONFIG_CCP_UNIT_TEST == 1) || \
+    (SSF_CONFIG_CHACHA20_UNIT_TEST == 1) || \
+    (SSF_CONFIG_CMS_UNIT_TEST == 1) || \
+    (SSF_CONFIG_CRYPT_UNIT_TEST == 1) || \
+    (SSF_CONFIG_EC_UNIT_TEST == 1) || \
+    (SSF_CONFIG_ECDSA_UNIT_TEST == 1) || \
+    (SSF_CONFIG_ED25519_UNIT_TEST == 1) || \
+    (SSF_CONFIG_FE25519_UNIT_TEST == 1) || \
+    (SSF_CONFIG_HKDF_UNIT_TEST == 1) || \
+    (SSF_CONFIG_HMAC_UNIT_TEST == 1) || \
+    (SSF_CONFIG_POLY1305_UNIT_TEST == 1) || \
+    (SSF_CONFIG_PRNG_UNIT_TEST == 1) || \
+    (SSF_CONFIG_RSA_UNIT_TEST == 1) || \
+    (SSF_CONFIG_SHA1_UNIT_TEST == 1) || \
+    (SSF_CONFIG_SHA2_UNIT_TEST == 1) || \
+    (SSF_CONFIG_TLS_UNIT_TEST == 1) || \
+    (SSF_CONFIG_X25519_UNIT_TEST == 1) || \
     /* _ecc */ \
-    SSF_CONFIG_RS_UNIT_TEST == 1 || \
+    (SSF_CONFIG_RS_UNIT_TEST == 1) || \
     /* _edc */ \
-    SSF_CONFIG_CRC16_UNIT_TEST == 1 || \
-    SSF_CONFIG_CRC32_UNIT_TEST == 1 || \
-    SSF_CONFIG_FCSUM_UNIT_TEST == 1 || \
+    (SSF_CONFIG_CRC16_UNIT_TEST == 1) || \
+    (SSF_CONFIG_CRC32_UNIT_TEST == 1) || \
+    (SSF_CONFIG_FCSUM_UNIT_TEST == 1) || \
     /* _fsm */ \
-    SSF_CONFIG_SM_UNIT_TEST == 1 || \
+    (SSF_CONFIG_SM_UNIT_TEST == 1) || \
     /* _net */ \
-    SSF_CONFIG_HTTPHDR_UNIT_TEST == 1 || \
-    SSF_CONFIG_MQTTPKT_UNIT_TEST == 1 || \
-    SSF_CONFIG_MQTTC_UNIT_TEST == 1 || \
-    SSF_CONFIG_NETSOCK_UNIT_TEST == 1 || \
-    SSF_CONFIG_NETWS_UNIT_TEST == 1 || \
-    SSF_CONFIG_TLSC_UNIT_TEST == 1 || \
+    (SSF_CONFIG_HTTPHDR_UNIT_TEST == 1) || \
+    (SSF_CONFIG_MQTTPKT_UNIT_TEST == 1) || \
+    (SSF_CONFIG_MQTTC_UNIT_TEST == 1) || \
+    (SSF_CONFIG_NETSOCK_UNIT_TEST == 1) || \
+    (SSF_CONFIG_NETWS_UNIT_TEST == 1) || \
+    (SSF_CONFIG_TLSC_UNIT_TEST == 1) || \
     /* _storage */ \
-    SSF_CONFIG_CFG_UNIT_TEST == 1 || \
+    (SSF_CONFIG_CFG_UNIT_TEST == 1) || \
     /* _debug */ \
-    SSF_CONFIG_TRACE_UNIT_TEST == 1 || \
+    (SSF_CONFIG_TRACE_UNIT_TEST == 1) || \
     /* _struct */ \
-    SSF_CONFIG_BFIFO_UNIT_TEST == 1 || \
-    SSF_CONFIG_HEAP_UNIT_TEST == 1 || \
-    SSF_CONFIG_LL_UNIT_TEST == 1 || \
-    SSF_CONFIG_MPOOL_UNIT_TEST == 1 || \
-    SSF_CONFIG_SLL_UNIT_TEST == 1 || \
+    (SSF_CONFIG_BFIFO_UNIT_TEST == 1) || \
+    (SSF_CONFIG_HEAP_UNIT_TEST == 1) || \
+    (SSF_CONFIG_LL_UNIT_TEST == 1) || \
+    (SSF_CONFIG_MPOOL_UNIT_TEST == 1) || \
+    (SSF_CONFIG_SLL_UNIT_TEST == 1) || \
     /* _time */ \
-    SSF_CONFIG_DTIME_UNIT_TEST == 1 || \
-    SSF_CONFIG_ISO8601_UNIT_TEST == 1 || \
-    SSF_CONFIG_RTC_UNIT_TEST == 1 || \
+    (SSF_CONFIG_DTIME_UNIT_TEST == 1) || \
+    (SSF_CONFIG_ISO8601_UNIT_TEST == 1) || \
+    (SSF_CONFIG_RTC_UNIT_TEST == 1) || \
     /* _ui */ \
-    SSF_CONFIG_ARGV_UNIT_TEST == 1 || \
-    SSF_CONFIG_CLI_UNIT_TEST == 1 || \
-    SSF_CONFIG_VTED_UNIT_TEST == 1 || \
+    (SSF_CONFIG_ARGV_UNIT_TEST == 1) || \
+    (SSF_CONFIG_CLI_UNIT_TEST == 1) || \
+    (SSF_CONFIG_VTED_UNIT_TEST == 1) || \
     /* _osal */ \
-    SSF_CONFIG_LPTASK_UNIT_TEST == 1
+    (SSF_CONFIG_LPTASK_UNIT_TEST == 1)
 #define SSF_CONFIG_UNIT_TEST (1u)
 #else
 #define SSF_CONFIG_UNIT_TEST (0u)
 #endif
 
-/* SSF_CONFIG_UT_VERBOSE -- gate diagnostic stdout from unit tests (microbenchmark timings,       */
-/* OpenSSL cross-check banners, Wycheproof per-tcId mismatches, zeroization-audit failure         */
-/* details). Default 0 keeps the suite silent so main.c's "Running ... PASSED in Ns" line is the  */
-/* only output and aligned columns are not corrupted. Override with -DSSF_CONFIG_UT_VERBOSE=1     */
-/* to recover the diagnostic stream when profiling or debugging a failure.                        */
+/* 1 enables diagnostic stdout from unit tests; -D on the command line overrides */
 #ifndef SSF_CONFIG_UT_VERBOSE
 #define SSF_CONFIG_UT_VERBOSE (0u)
 #endif
@@ -243,11 +235,7 @@ extern "C" {
 #include <stdio.h>
 #define SSF_UT_PRINTF(...) printf(__VA_ARGS__)
 #else
-/* Disabled form: sizeof-of-call is unevaluated -- args are type-checked and "referenced" enough  */
-/* to suppress unused-variable warnings on counters that exist solely to drive these prints, but  */
-/* generate zero runtime code. Requires <stdio.h> in scope wherever SSF_UT_PRINTF appears so the  */
-/* printf prototype is visible to the sizeof expression; every unit test file that uses it        */
-/* already includes <stdio.h> for snprintf.                                                       */
+/* Type-check and reference the arguments without generating any runtime code */
 #include <stdio.h>
 #define SSF_UT_PRINTF(...) ((void)sizeof(printf(__VA_ARGS__)))
 #endif
@@ -271,24 +259,20 @@ typedef uint64_t SSFPortTick_t;
 /* --------------------------------------------------------------------------------------------- */
 /* Platform specific byte swapping macros                                                        */
 /* --------------------------------------------------------------------------------------------- */
-/* If your platform has byte order macros include the header file here and set */
-/* SSF_CONFIG_BYTE_ORDER_MACROS to 0. Else set SSF_CONFIG_BYTE_ORDER_MACROS to 1 and set */
-/* SSF_CONFIG_LITTLE_ENDIAN to 1 for little endian systems, else 0. */
+/* Use platform byte order macros when available, else define them for the target endianness */
 #ifdef __APPLE__
 #include <arpa/inet.h>
 #define SSF_CONFIG_BYTE_ORDER_MACROS (0u)
 #define SSF_CONFIG_LITTLE_ENDIAN (1u)
 #else
 #define SSF_CONFIG_BYTE_ORDER_MACROS (1u)
-/* Auto-detect endianness from the compiler when available (GCC/Clang expose
- * __BYTE_ORDER__). Hardcoding LE here corrupted ntohl/htonl/ntohll/htonll on
- * BE hosts, breaking SHA-2 (and any other consumer of those macros) on
- * mips/mips64. Embedded targets without __BYTE_ORDER__ default to LE; flip
- * SSF_CONFIG_LITTLE_ENDIAN by hand if you're on a non-GCC BE compiler. */
+/* Does the compiler report a big endian target? */
 #if defined(__BYTE_ORDER__) && defined(__ORDER_BIG_ENDIAN__) && \
     (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+/* Yes, big endian */
 #define SSF_CONFIG_LITTLE_ENDIAN (0u)
 #else
+/* No, assume little endian */
 #define SSF_CONFIG_LITTLE_ENDIAN (1u)
 #endif
 #endif
@@ -326,12 +310,7 @@ typedef uint64_t SSFPortTick_t;
 #endif /* SSF_CONFIG_LITTLE_ENDIAN */
 #endif /* SSF_CONFIG_BYTE_ORDER_MACROS */
 
-/* SSF_CONFIG_ENABLE_THREAD_SUPPORT allows ssfsm events to be safely signalled from mulitple */
-/* contexts and optimizes when the state machine thread runs. */
-/* SSF_CONFIG_ENABLE_THREAD_SUPPORT allows the ssfcfg module to be safely called from multiple
-   contexts. */
-/* 0, disable thread synchronization; 1, enable thread synchronization. */
-/* Defined as a fall-through default so command-line -D wins (build-arm.sh passes 0). */
+/* 1 enables thread synchronization, 0 disables it; -D on the command line overrides */
 #ifndef SSF_CONFIG_ENABLE_THREAD_SUPPORT
 #define SSF_CONFIG_ENABLE_THREAD_SUPPORT (1u)
 #endif
@@ -378,8 +357,7 @@ typedef pthread_mutex_t SSFMutex_t;
 /* Portable function attributes                                                                  */
 /* --------------------------------------------------------------------------------------------- */
 
-/* SSF_NOINLINE -- force the compiler to give the function its own stack frame and call site.    */
-/* Used by stack-scrub helpers and side-channel-sensitive routines that need a clean frame.      */
+/* Force a function to have its own stack frame and call site */
 #if defined(__GNUC__) || defined(__clang__)
 #define SSF_NOINLINE __attribute__((noinline))
 #elif defined(_MSC_VER)
@@ -388,16 +366,7 @@ typedef pthread_mutex_t SSFMutex_t;
 #define SSF_NOINLINE
 #endif
 
-/* SSF_OPTIMIZER_BARRIER(p) -- force the compiler to materialize p (an address-taken object) and */
-/* fence all preceding/following memory operations across this point. Required at the end of     */
-/* stack-scrub helpers and pollute/scan probes so the compiler cannot reorder loads/stores       */
-/* across the function boundary or elide a "dead" stack buffer that the test framework relies    */
-/* on having a real, addressable stack location. `volatile` alone is not sufficient on MSVC      */
-/* because the optimizer may still place a volatile local at a stack offset that does not        */
-/* persist across the call (or coalesce loop iterations). The GCC variant uses an empty inline   */
-/* asm with `"r"(p)` to pin the address into a register and `"memory"` to clobber. The MSVC      */
-/* variant pairs the deprecated-but-effective _ReadWriteBarrier compiler fence with a volatile   */
-/* read of the first byte to force materialization.                                              */
+/* Force the compiler to materialize p and fence memory operations across this point */
 #if defined(__GNUC__) || defined(__clang__)
 #define SSF_OPTIMIZER_BARRIER(p) __asm__ __volatile__("" : : "r"(p) : "memory")
 #elif defined(_MSC_VER)
@@ -417,7 +386,7 @@ __declspec(noreturn)
 #elif defined(__GNUC__) || defined(__clang__)
 __attribute__((noreturn))
 #endif
-void SSFPortAssert(const char *file, unsigned int line);
+void SSFPortAssert(const char *fileStr, unsigned int line);
 
 #ifdef _WIN32
 #define SSFPortGetTick64() GetTickCount64()
@@ -425,8 +394,7 @@ void SSFPortAssert(const char *file, unsigned int line);
 SSFPortTick_t SSFPortGetTick64(void);
 #endif /* _WIN32 */
 
-/* Platform entropy source. Returns true if bufLen bytes of entropy were copied into buf, else  */
-/* false. Backed by the OS CSPRNG (BCryptGenRandom on Windows, /dev/urandom on POSIX).          */
+/* Returns true if bufLen bytes of entropy were copied into buf, else false */
 bool SSFPortGetEntropy(uint8_t *buf, uint16_t bufLen);
 
 #include "ssf.h"

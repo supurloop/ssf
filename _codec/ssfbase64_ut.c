@@ -87,8 +87,7 @@ SSBase64UT_t _b64StringUT[] = {
 };
 
 /* --------------------------------------------------------------------------------------------- */
-/* Reference character decode for the SAFE-02 / PEM-01 test: the alphabet's index, 64 for '=',   */
-/* else 65. Found by searching an alphabet written out independently of ssfbase64.c.             */
+/* Returns reference alphabet index of ch, 64 for '=', else 65.                                  */
 /* --------------------------------------------------------------------------------------------- */
 static uint8_t _SSFBase64UTRefEnc(uint8_t ch)
 {
@@ -98,24 +97,36 @@ static uint8_t _SSFBase64UTRefEnc(uint8_t ch)
 
     for (i = 0; i < 65u; i++)
     {
-        if ((uint8_t)alphabet[i] == ch) return i;
+        if (((uint8_t)alphabet[i]) == ch) return i;
     }
     return 65u;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Reference block decode: the rules of SSFBase64Dec32To24 over _SSFBase64UTRefEnc.              */
+/* Returns reference block decode length of q into out, 0 if invalid.                           */
 /* --------------------------------------------------------------------------------------------- */
 static uint8_t _SSFBase64UTRefDec(const char *q, uint8_t *out)
 {
-    uint8_t a = _SSFBase64UTRefEnc((uint8_t)q[0]);
-    uint8_t b = _SSFBase64UTRefEnc((uint8_t)q[1]);
-    uint8_t c = _SSFBase64UTRefEnc((uint8_t)q[2]);
-    uint8_t d = _SSFBase64UTRefEnc((uint8_t)q[3]);
+    uint8_t a;
+    uint8_t b;
+    uint8_t c;
+    uint8_t d;
 
+    SSF_REQUIRE(q != NULL);
+    SSF_REQUIRE(out != NULL);
+
+    a = _SSFBase64UTRefEnc((uint8_t)q[0]);
+    b = _SSFBase64UTRefEnc((uint8_t)q[1]);
+    c = _SSFBase64UTRefEnc((uint8_t)q[2]);
+    d = _SSFBase64UTRefEnc((uint8_t)q[3]);
+
+    /* Any character outside the alphabet, or padding in the first two positions? */
     if ((a >= 64u) || (b >= 64u) || (c >= 65u) || (d >= 65u)) return 0;
+    /* Padding in position 3 followed by a non-pad? */
     if ((c == 64u) && (d != 64u)) return 0;
+    /* 1-byte block with non-zero unused low bits? */
     if ((c == 64u) && ((b & 0x0Fu) != 0u)) return 0;
+    /* 2-byte block with non-zero unused low bits? */
     if ((d == 64u) && (c != 64u) && ((c & 0x03u) != 0u)) return 0;
     out[0] = (uint8_t)((a << 2) | (b >> 4));
     if (c == 64u) return 1;
@@ -281,12 +292,12 @@ void SSFBase64UnitTest(void)
     SSF_ASSERT(SSFBase64Dec32To24("//9=", b24, sizeof(b24)) == 0);
 
     /* Sanity: the canonical forms still decode successfully. */
-    SSF_ASSERT(SSFBase64Dec32To24("AA==", b24, sizeof(b24)) == 1 && b24[0] == 0x00);
-    SSF_ASSERT(SSFBase64Dec32To24("/w==", b24, sizeof(b24)) == 1 && b24[0] == 0xFF);
-    SSF_ASSERT(SSFBase64Dec32To24("AAA=", b24, sizeof(b24)) == 2 &&
-               b24[0] == 0x00 && b24[1] == 0x00);
-    SSF_ASSERT(SSFBase64Dec32To24("//8=", b24, sizeof(b24)) == 2 &&
-               b24[0] == 0xFF && b24[1] == 0xFF);
+    SSF_ASSERT((SSFBase64Dec32To24("AA==", b24, sizeof(b24)) == 1) && (b24[0] == 0x00));
+    SSF_ASSERT((SSFBase64Dec32To24("/w==", b24, sizeof(b24)) == 1) && (b24[0] == 0xFF));
+    SSF_ASSERT((SSFBase64Dec32To24("AAA=", b24, sizeof(b24)) == 2) &&
+               (b24[0] == 0x00) && (b24[1] == 0x00));
+    SSF_ASSERT((SSFBase64Dec32To24("//8=", b24, sizeof(b24)) == 2) &&
+               (b24[0] == 0xFF) && (b24[1] == 0xFF));
 
     /* SSFBase64Decode must also reject the non-canonical forms end-to-end. */
     SSF_ASSERT(SSFBase64Decode("AB==", 4, decodedBigBin, sizeof(decodedBigBin), &outLen)
@@ -305,9 +316,7 @@ void SSFBase64UnitTest(void)
     SSF_ASSERT(SSFBase64Dec32To24("YWI=", b24, 2) == 2);
     SSF_ASSERT(memcmp(b24, "ab", 2) == 0);
 
-    /* SAFE-02 / PEM-01: every byte value (0-255, including '\0', '=' and the bytes next to each */
-    /* alphabet range) in every position of several quads decodes as the reference does: the  */
-    /* same return value and the same output bytes.                                            */
+    /* SAFE-02 / PEM-01: every byte value in every quad position decodes as the reference does */
     {
         static const char *bases[] = { "QUJD", "+/90", "zZaA", "AA==", "AAA=", "//8=", "Yg==" };
         size_t bi;

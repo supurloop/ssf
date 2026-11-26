@@ -51,25 +51,32 @@ static uint8_t _utBig[SSF_HTTP_HDR_MAX_HEAD_SIZE + 64u];
 static SSFHTTPHdrResponse_t _utResp;
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if the value of the only field named name equals value exactly.                  */
+/* Returns true if the value of the only field named nameStr equals valueStr exactly.            */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFHTTPHdrUTValueIs(const uint8_t *buf, SSFCStrIn_t name, SSFCStrIn_t value)
+static bool _SSFHTTPHdrUTValueIs(const uint8_t *buf, SSFCStrIn_t nameStr, SSFCStrIn_t valueStr)
 {
     uint16_t idx = 0;
     const uint8_t *v;
     size_t vLen;
 
-    if (SSFHTTPHdrFieldCount(buf, &_utResp, name) != 1u) return false;
-    if (SSFHTTPHdrFindField(buf, &_utResp, name, &idx, &v, &vLen) == false) return false;
-    return (vLen == strlen(value)) && (memcmp(v, value, vLen) == 0);
+    SSF_REQUIRE(buf != NULL);
+    SSF_REQUIRE(nameStr != NULL);
+    SSF_REQUIRE(valueStr != NULL);
+
+    /* Exactly one field with this name? */
+    if (SSFHTTPHdrFieldCount(buf, &_utResp, nameStr) != 1u) return false;
+    if (SSFHTTPHdrFindField(buf, &_utResp, nameStr, &idx, &v, &vLen) == false) return false;
+    return ((vLen == strlen(valueStr)) && (memcmp(v, valueStr, vLen) == 0));
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Parses text, returning the result.                                                            */
+/* Parses textStr, returning the result.                                                         */
 /* --------------------------------------------------------------------------------------------- */
-static SSFHTTPHdrParse_t _SSFHTTPHdrUTParse(const char *text)
+static SSFHTTPHdrParse_t _SSFHTTPHdrUTParse(const char *textStr)
 {
-    return SSFHTTPHdrParseResponse((const uint8_t *)text, strlen(text), &_utResp);
+    SSF_REQUIRE(textStr != NULL);
+
+    return SSFHTTPHdrParseResponse((const uint8_t *)textStr, strlen(textStr), &_utResp);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -129,8 +136,7 @@ static void _SSFHTTPHdrUTBuild(void)
     SSF_ASSERT(memcmp(_utBuf, expected, len) == 0);
     full = len;
 
-    /* Exact fits: each step succeeds with no byte to spare. "GET / HTTP/1.1\r\n" is 16 bytes, */
-    /* "Host: h:80\r\n" 12, "A: bcd\r\n" 8, and the empty line 2                             */
+    /* Exact fits: request line 16, Host 12, field 8 and empty line 2 bytes, none to spare */
     SSF_ASSERT(SSFHTTPHdrReqBegin(_utBuf, 28, &len, "GET", "/", "h", 80));
     SSF_ASSERT(len == 28u);
     SSF_ASSERT(SSFHTTPHdrReqBegin(_utBuf, 27, &len, "GET", "/", "h", 80) == false);
@@ -150,8 +156,7 @@ static void _SSFHTTPHdrUTBuild(void)
     SSF_ASSERT(SSFHTTPHdrReqBegin(_utBuf, sizeof(_utBuf), &len, "GET", "/", "h", 65535));
     SSF_ASSERT(memcmp(_utBuf, "GET / HTTP/1.1\r\nHost: h:65535\r\n", len) == 0);
 
-    /* Every buffer size: succeeds only once the whole head fits, never writes past size, and a  */
-    /* failing step leaves the length unchanged                                                  */
+    /* Every buffer size: fits or fails, never writes past size, failure keeps the length */
     for (size = 0; size <= full + 1u; size++)
     {
         bool ok;
@@ -226,7 +231,7 @@ static void _SSFHTTPHdrUTBuild(void)
     {
         len = full;
         SSF_ASSERT(SSFHTTPHdrReqAddField(_utBuf, sizeof(_utBuf), &len, goodNames[i], "v"));
-        SSF_ASSERT(len == (full + strlen(goodNames[i]) + strlen(": v\r\n")));
+        SSF_ASSERT(len == ((full + strlen(goodNames[i])) + strlen(": v\r\n")));
     }
     for (i = 0; i < (sizeof(badNames) / sizeof(badNames[0])); i++)
     {
@@ -248,8 +253,7 @@ static void _SSFHTTPHdrUTBuild(void)
         SSF_ASSERT(len == full);
     }
 
-    /* Unterminated strings exactly one byte longer than the scan bound: refused, and under      */
-    /* ASan any read past the bound is caught                                                    */
+    /* Unterminated strings one byte longer than the scan bound are refused without overread */
     {
         static char noNul[8];
 
@@ -403,15 +407,14 @@ static void _SSFHTTPHdrUTParseHead(void)
     SSF_ASSERT(SSFHTTPHdrParseResponse(_utBig, n + 4u, &_utResp) == SSF_HTTP_HDR_INCOMPLETE);
     SSF_ASSERT(SSFHTTPHdrParseResponse(_utBig, n + 6u, &_utResp) == SSF_HTTP_HDR_MALFORMED);
 
-    /* Head size limit: exactly the maximum is accepted, one more byte is not, and a buffer     */
-    /* longer than the maximum with no end inside it is MALFORMED rather than INCOMPLETE         */
+    /* Head size limit: the maximum is accepted, one more byte or no end past it is MALFORMED */
     for (n = 0; n <= 1u; n++)
     {
         size_t head = SSF_HTTP_HDR_MAX_HEAD_SIZE + n;
         size_t pre = strlen("HTTP/1.1 200 OK\r\nA: ");
 
         memcpy(_utBig, "HTTP/1.1 200 OK\r\nA: ", pre);
-        memset(&_utBig[pre], 'v', head - pre - 4u);
+        memset(&_utBig[pre], 'v', ((head - pre) - 4u));
         memcpy(&_utBig[head - 4u], "\r\n\r\n", 4);
         SSF_ASSERT(SSFHTTPHdrParseResponse(_utBig, head, &_utResp) ==
                    ((n == 0) ? SSF_HTTP_HDR_COMPLETE : SSF_HTTP_HDR_MALFORMED));

@@ -1,5 +1,4 @@
-/* Client certificate fixtures for ssftlsc_ut.c (test credentials only), generated with      */
-/* OpenSSL 4.0: leaves issued by "SSF Test Client CA" with clientAuth EKU; keys in PKCS#8.   */
+/* Client certificate and PKCS#8 key test fixtures for ssftlsc_ut.c issued by SSF Test Client CA */
 #ifndef SSF_TLSC_UT_CLIENT_H_INCLUDE
 #define SSF_TLSC_UT_CLIENT_H_INCLUDE
 
@@ -312,8 +311,7 @@ static const uint8_t _utClientIntCert[431] = {
     0x3D, 0xB0, 0xEE, 0x6B, 0x93, 0xAB, 0xD2, 0xCE, 0x84, 0x75, 0x23, 0x57, 0x46, 0x34, 0xC9,
 };
 
-/* P-256 leaves the client still sends but traces a warning about: Key Usage without          */
-/* digitalSignature, EKU serverAuth only, and validity 2020-01-01 .. 2021-01-01.              */
+/* P-256 leaves sent with a trace warning: no digitalSignature KU, serverAuth-only EKU, expired */
 static const uint8_t _utClientNoKUCert[370] = {
     0x30, 0x82, 0x01, 0x6E, 0x30, 0x82, 0x01, 0x14, 0xA0, 0x03, 0x02, 0x01, 0x02, 0x02, 0x14, 0x12,
     0x11, 0x86, 0xD2, 0x97, 0x66, 0x30, 0x96, 0xA0, 0x16, 0xD6, 0x26, 0xAA, 0x2A, 0x32, 0x63, 0x13,
@@ -435,8 +433,7 @@ static const uint8_t _utClientExpiredKey[138] = {
     0x6C, 0xC3, 0x3D, 0x00, 0x94, 0xEB, 0xDB, 0xC0, 0x2D, 0x63,
 };
 
-/* Signed sha256WithRSAEncryption: a self-signed root (exempt from the server's list) and a    */
-/* certificate it issued (not exempt).                                                          */
+/* sha256WithRSAEncryption self-signed root (exempt from server list) and a leaf it issued */
 static const uint8_t _utClientRsaRootCert[776] = {
     0x30, 0x82, 0x03, 0x04, 0x30, 0x82, 0x01, 0xEC, 0xA0, 0x03, 0x02, 0x01, 0x02, 0x02, 0x14, 0x28,
     0x3C, 0xA0, 0xB8, 0xAE, 0xCD, 0xAD, 0x15, 0xF0, 0x33, 0x89, 0x0C, 0xC2, 0x98, 0xBC, 0x00, 0x76,

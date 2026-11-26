@@ -50,39 +50,37 @@
 #define SSF_MQTTC_INIT_MAGIC             (0x4d515443ul)   /* 'MQTC' */
 #define SSF_MQTTC_PUBACK_SIZE            (4u)
 #define SSF_MQTTC_DISCONNECT_SIZE        (2u)
-#define SSF_MQTTC_CTL_PKT_SIZE           SSF_MQTTC_PUBACK_SIZE   /* Largest control packet       */
-#define SSF_MQTTC_CTL_RESERVE            (2u)   /* ctl blocks PUBACK may not take: _SSFMQTTCCtlAlloc()   */
+#define SSF_MQTTC_CTL_PKT_SIZE           SSF_MQTTC_PUBACK_SIZE   /* Largest control packet */
+#define SSF_MQTTC_CTL_RESERVE            (2u)   /* ctl blocks PUBACK may not take: _SSFMQTTCCtlAlloc() */
 #define SSF_MQTTC_CTL_BLOCKS             (SSF_MQTTC_CONFIG_RX_PUBLISH_QUEUE_DEPTH + \
                                           SSF_MQTTC_CTL_RESERVE)
 #define SSF_MQTTC_RX_BLOCKS              (SSF_MQTTC_CONFIG_RX_PUBLISH_QUEUE_DEPTH + \
                                           1u)   /* + the framing block */
 #define SSF_MQTTC_MIN_BLOCK_SIZE         (4u)   /* Smallest packet worth a pool: CONNACK, PUBACK */
-#define SSF_MQTTC_KEEPALIVE_DIV          (4u)   /* PINGREQ interval = keepAliveSec / this        */
+#define SSF_MQTTC_KEEPALIVE_DIV          (4u)   /* PINGREQ interval = keepAliveSec / this */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Typedefs                                                                                      */
 /* --------------------------------------------------------------------------------------------- */
-/* Header at the start of every pool block. Packet bytes follow immediately. */
-/* Outbound block header: tx and ctl pools. Lives in txQueue and txInflight. The type           */
-/* is fixed at allocation and selects the owning pool on free (see _SSFMQTTCTxBlockFree()).            */
+/* Outbound block header for the tx and ctl pools; packet bytes follow it */
 typedef struct
 {
-    SSFLLItem_t item;                 /* Must be first                                         */
+    SSFLLItem_t item;                 /* Must be first */
     SSFMQTTPktType_t type;
-    SSFMQTTCQoS_t qos;                /* PUBLISH                                               */
-    uint16_t packetId;                /* PUBLISH QoS 1, SUBSCRIBE, PUBACK                      */
-    size_t len;                       /* Encoded packet length                                 */
-    size_t sent;                      /* Bytes handed to the transport so far                  */
-    bool isTxPublish;                 /* Originated from SSFMQTTCTxPublish()                   */
-    SSFPortTick_t deadline;           /* txPublish: completion deadline                        */
-    SSFMQTTCTxPublishFn_t txFn;       /* txPublish: completion callback                        */
+    SSFMQTTCQoS_t qos;                /* PUBLISH */
+    uint16_t packetId;                /* PUBLISH QoS 1, SUBSCRIBE, PUBACK */
+    size_t len;                       /* Encoded packet length */
+    size_t sent;                      /* Bytes handed to the transport so far */
+    bool isTxPublish;                 /* Originated from SSFMQTTCTxPublish() */
+    SSFPortTick_t deadline;           /* txPublish: completion deadline */
+    SSFMQTTCTxPublishFn_t txFn;       /* txPublish: completion callback */
     void *txFnCtx;
 } SSFMQTTCTxBlock_t;
 
-/* Inbound block header: rx pool. The framing block and rxQueue entries.                       */
+/* Inbound block header for the rx pool; packet bytes follow it */
 typedef struct
 {
-    SSFLLItem_t item;                 /* Must be first                                         */
+    SSFLLItem_t item;                 /* Must be first */
     SSFMQTTCQoS_t qos;
     uint16_t packetId;
     uint16_t topicLen;
@@ -90,29 +88,26 @@ typedef struct
     bool retain;
     bool dup;
     uint32_t offerCount;
-    SSFPortTick_t firstOffer;         /* Tick of first offer to the app; 0 => not yet offered  */
-    SSFPortTick_t lastOffer;          /* Tick of the most recent deferred offer                */
+    SSFPortTick_t firstOffer;         /* Tick of first offer to the app; 0 => not yet offered */
+    SSFPortTick_t lastOffer;          /* Tick of the most recent deferred offer */
 } SSFMQTTCRxBlock_t;
 
-/* A queued SSFLLItem_t is the first member of its block, and SSFMPool blocks are               */
-/* SSF_MPOOL_ALIGN aligned, so an item converts back to its block (via void *, which            */
-/* -Wcast-align accepts).                                                                        */
+/* Converts a queued item, the first member of its aligned pool block, back to its block */
 #define _SSFMQTTCTxBlockOf(itm) ((SSFMQTTCTxBlock_t *)(void *)(itm))
 #define _SSFMQTTCRxBlockOf(itm) ((SSFMQTTCRxBlock_t *)(void *)(itm))
 typedef char _SSFMQTTCTxItemFirst_t[(offsetof(SSFMQTTCTxBlock_t, item) == 0u) ? 1 : -1];
 typedef char _SSFMQTTCRxItemFirst_t[(offsetof(SSFMQTTCRxBlock_t, item) == 0u) ? 1 : -1];
 
-/* Inbound PUBLISH larger than the rx block, consumed as it arrives and dropped. Only the fields */
-/* needed to validate and acknowledge it are captured. left == 0 => not skipping.                */
+/* Inbound PUBLISH larger than the rx block, consumed and dropped; left == 0 => not skipping */
 typedef struct
 {
-    size_t left;                      /* Packet bytes still to consume                         */
-    size_t pos;                       /* Packet offset of the next byte to consume             */
-    size_t tlOff;                     /* Offset of the topic length (fixed header length)        */
+    size_t left;                      /* Packet bytes still to consume */
+    size_t pos;                       /* Packet offset of the next byte to consume */
+    size_t tlOff;                     /* Offset of the topic length (fixed header length) */
     uint16_t topicLen;
-    uint16_t packetId;                /* QoS 1 only                                            */
+    uint16_t packetId;                /* QoS 1 only */
     SSFMQTTCQoS_t qos;
-    bool isTopicNul;                  /* Topic holds U+0000: malformed (MQTT-1.5.3-2)          */
+    bool isTopicNul;                  /* Topic holds U+0000: malformed (MQTT-1.5.3-2) */
 } SSFMQTTCRxSkip_t;
 
 #define SSF_MQTTC_TX_DATA(b) (((uint8_t *)(b)) + sizeof(SSFMQTTCTxBlock_t))
@@ -123,23 +118,34 @@ typedef enum
     SSF_MQTTC_LINK_CLOSED,
     SSF_MQTTC_LINK_OPENING,
     SSF_MQTTC_LINK_OPEN,
-    SSF_MQTTC_LINK_SHUTTING_DOWN,     /* STOPPING: DISCONNECT accepted, shutdown() delivering it  */
-    SSF_MQTTC_LINK_SHUT_DOWN          /* shutdown() done; TX_DRAINED posted, close() follows      */
+    SSF_MQTTC_LINK_SHUTTING_DOWN,     /* STOPPING: DISCONNECT accepted, shutdown() delivering it */
+    SSF_MQTTC_LINK_SHUT_DOWN          /* shutdown() done; TX_DRAINED posted, close() follows */
 } SSFMQTTCLink_t;
 
-/* Event payloads posted by the pump. Each must fit in sizeof(void *) or ssfsm heap-allocates.  */
-typedef struct { uint8_t code; uint8_t sessionPresent; } SSFMQTTCEvConnAck_t;
-/* SUBACK: per-filter results do not fit, so the pump stages them in subAckRefused and         */
-/* subAckDowngraded (see isSubAckStaged) and only the id, count and a QoS-exceeded flag travel.  */
-typedef struct { uint16_t packetId; uint8_t count; uint8_t isQosExceeded; } SSFMQTTCEvSubAck_t;
-typedef struct { uint16_t packetId; } SSFMQTTCEvPubAck_t;
+/* Event payloads posted by the pump. Each must fit in sizeof(void *) or ssfsm heap-allocates. */
+typedef struct
+{
+    uint8_t code;
+    uint8_t sessionPresent;
+} SSFMQTTCEvConnAck_t;
+/* Per-filter SUBACK results are staged in subAckRefused and subAckDowngraded */
+typedef struct
+{
+    uint16_t packetId;
+    uint8_t count;
+    uint8_t isQosExceeded;
+} SSFMQTTCEvSubAck_t;
+typedef struct
+{
+    uint16_t packetId;
+} SSFMQTTCEvPubAck_t;
 
 typedef struct
 {
     /* Fixed at init */
     SSFNetTransport_t *transport;
-    uint32_t txBlockSize;             /* Packet bytes per tx block                             */
-    uint32_t rxBlockSize;             /* Packet bytes per rx block                             */
+    uint32_t txBlockSize;             /* Packet bytes per tx block */
+    uint32_t rxBlockSize;             /* Packet bytes per rx block */
     SSFMPool_t txPool;
     SSFMPool_t rxPool;
     SSFMPool_t ctlPool;
@@ -147,43 +153,40 @@ typedef struct
     void *rxPublishFnCtx;
     SSFMQTTCEventFn_t eventFn;
     void *eventFnCtx;
-    SSFMQTTCRxBlock_t *rxFrame;       /* Reserved framing block                                */
+    SSFMQTTCRxBlock_t *rxFrame;       /* Reserved framing block */
 
     /* Per run */
-    SSFMQTTCOpts_t opts;              /* Pointer fields remain app owned                       */
-    bool isStarted;                   /* Between Start() and Stop(); gates both synchronously  */
-    SSFPortTick_t backoff;            /* Current reconnect wait; 0 => start at min             */
-    uint16_t nextPacketId;            /* Last id issued; 0 at init so the first is 1. Not reset  */
-                                      /* on reconnect: clean session makes that unnecessary    */
+    SSFMQTTCOpts_t opts;              /* Pointer fields remain app owned */
+    bool isStarted;                   /* Between Start() and Stop(); gates both synchronously */
+    SSFPortTick_t backoff;            /* Current reconnect wait; 0 => start at min */
+    uint16_t nextPacketId;            /* Last id issued; 0 at init so the first is 1 */
 
     /* Per connection */
-    uint16_t subscribePacketId;       /* Of the outstanding SUBSCRIBE, initial or retry        */
-    bool isPingPending;               /* PINGREQ queued or sent, PINGRESP not yet received     */
-    uint16_t subRefused;              /* Bit i: subsOpt[i] refused by the broker (SUBACK 0x80)  */
-    uint16_t subDowngraded;           /* Bit i: subsOpt[i] granted QoS 0 for QoS 1 requested    */
+    uint16_t subscribePacketId;       /* Of the outstanding SUBSCRIBE, initial or retry */
+    bool isPingPending;               /* PINGREQ queued or sent, PINGRESP not yet received */
+    uint16_t subRefused;              /* Bit i: subsOpt[i] refused by the broker (SUBACK 0x80) */
+    uint16_t subDowngraded;           /* Bit i: subsOpt[i] granted QoS 0 for QoS 1 requested */
     uint16_t subAckRefused;           /* Staged by the pump from the last SUBACK, bit i as above */
     uint16_t subAckDowngraded;
     bool isSubAckStaged;              /* Pump staged a SUBACK the state machine has not handled */
-    bool isSubRetryPending;           /* A retry SUBSCRIBE for subRetryIndex[] is outstanding   */
-    uint8_t subRetryCount;            /* Filters in the retry SUBSCRIBE                         */
+    bool isSubRetryPending;           /* A retry SUBSCRIBE for subRetryIndex[] is outstanding */
+    uint8_t subRetryCount;            /* Filters in the retry SUBSCRIBE */
     uint8_t subRetryIndex[SSF_MQTTC_CONFIG_MAX_SUBSCRIPTIONS];  /* Retry entry -> subsOpt index */
 
     /* Pump owned */
-    SSFMQTTCLink_t link;              /* Transport state; closed by the pump on fatal error    */
-    size_t rxLen;                     /* Bytes in rxFrame                                      */
-    SSFMQTTCRxSkip_t rxSkip;          /* Oversized inbound PUBLISH being dropped               */
-    bool isRxHeld;                    /* Back-pressure: a QoS 1 PUBLISH at the front of rxFrame */
-                                      /* waits for queue space; reads are suspended            */
-    SSFPortTick_t rxHeldSince;        /* When the current hold began                           */
-    bool isRxHoldEnded;               /* A hold ended since the PINGRESP deadline was armed    */
-    bool isRxConnAckSeen;             /* A CONNACK was framed on this connection (3.2.0: first)  */
-    uint16_t pubAckOwed;              /* Packet id of a PUBACK no ctl block could take, or 0;  */
-                                      /* reads are suspended until it is queued                */
+    SSFMQTTCLink_t link;              /* Transport state; closed by the pump on fatal error */
+    size_t rxLen;                     /* Bytes in rxFrame */
+    SSFMQTTCRxSkip_t rxSkip;          /* Oversized inbound PUBLISH being dropped */
+    bool isRxHeld;                    /* A QoS 1 PUBLISH at the front of rxFrame awaits space */
+    SSFPortTick_t rxHeldSince;        /* When the current hold began */
+    bool isRxHoldEnded;               /* A hold ended since the PINGRESP deadline was armed */
+    bool isRxConnAckSeen;             /* A CONNACK was framed on this connection (3.2.0: first) */
+    uint16_t pubAckOwed;              /* Packet id of a PUBACK no ctl block could take, or 0 */
 
     /* Queues of SSFMQTTCTxBlock_t (tx*) and SSFMQTTCRxBlock_t (rxQueue) */
-    SSFLL_t txQueue;                  /* Waiting for the transport                             */
-    SSFLL_t txInflight;               /* QoS 1 PUBLISH / SUBSCRIBE awaiting acknowledgement    */
-    SSFLL_t rxQueue;                  /* Inbound PUBLISH awaiting the app                      */
+    SSFLL_t txQueue;                  /* Waiting for the transport */
+    SSFLL_t txInflight;               /* QoS 1 PUBLISH / SUBSCRIBE awaiting acknowledgement */
+    SSFLL_t rxQueue;                  /* Inbound PUBLISH awaiting the app */
 
     SSFMQTTCState_t state;
     uint32_t magic;
@@ -242,13 +245,12 @@ static void _SSFMQTTCLinkFail(SSFMQTTCReason_t reason)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if an inbound QoS 1 PUBLISH may be acknowledged or held: after CONNACK and       */
-/* before DISCONNECT is queued (STOPPING), after which nothing may be sent (MQTT-3.14.4-1).      */
+/* Returns true if an inbound QoS 1 PUBLISH may be acknowledged or held, else false.             */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFMQTTCIsRxAckAllowed(void)
 {
-    return (_mqttc.state == SSF_MQTTC_STATE_SUBSCRIBING) ||
-           (_mqttc.state == SSF_MQTTC_STATE_CONNECTED);
+    return ((_mqttc.state == SSF_MQTTC_STATE_SUBSCRIBING) ||
+            (_mqttc.state == SSF_MQTTC_STATE_CONNECTED));
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -260,6 +262,7 @@ static void *_SSFMQTTCPoolAlloc(SSFMPool_t *pool, size_t hdrLen)
 
     SSF_REQUIRE(pool != NULL);
     SSF_REQUIRE(hdrLen > 0);
+    SSF_REQUIRE(hdrLen <= SSFMPoolBlockSize(pool));
 
     if (SSFMPoolIsEmpty(pool)) return NULL;
     b = SSFMPoolAlloc(pool, SSFMPoolBlockSize(pool), 0);
@@ -272,8 +275,8 @@ static void *_SSFMQTTCPoolAlloc(SSFMPool_t *pool, size_t hdrLen)
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFMQTTCIsCtlType(SSFMQTTPktType_t type)
 {
-    return (type == SSF_MQTT_PKT_PINGREQ) || (type == SSF_MQTT_PKT_DISCONNECT) ||
-           (type == SSF_MQTT_PKT_PUBACK);
+    return ((type == SSF_MQTT_PKT_PINGREQ) || (type == SSF_MQTT_PKT_DISCONNECT) ||
+            (type == SSF_MQTT_PKT_PUBACK));
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -295,7 +298,7 @@ static SSFMQTTCTxBlock_t *_SSFMQTTCTxBlockAlloc(SSFMQTTPktType_t type)
 static void _SSFMQTTCTxBlockFree(SSFMQTTCTxBlock_t *b)
 {
     SSF_REQUIRE(b != NULL);
-    SSFMPoolFree(_SSFMQTTCIsCtlType(b->type) ? &_mqttc.ctlPool : &_mqttc.txPool, b);
+    SSFMPoolFree((_SSFMQTTCIsCtlType(b->type) ? (&_mqttc.ctlPool) : (&_mqttc.txPool)), b);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -364,7 +367,7 @@ static SSFPortTick_t _SSFMQTTCKeepAliveTicks(void)
            SSF_MQTTC_KEEPALIVE_DIV;
 }
 
-/* SSF_LL_FIFO_PUSH asserts on a NULL block at the call site, so no wrapper function is needed. */
+/* Queues a tx or ctl block for the transport */
 #define _SSFMQTTCTxEnqueue(b) SSF_LL_FIFO_PUSH(&_mqttc.txQueue, (b))
 
 /* --------------------------------------------------------------------------------------------- */
@@ -387,9 +390,6 @@ static void _SSFMQTTCTxEnqueueSimple(SSFMQTTPktType_t type)
     SSFMQTTCTxBlock_t *b;
 
     SSF_REQUIRE((type == SSF_MQTT_PKT_PINGREQ) || (type == SSF_MQTT_PKT_DISCONNECT));
-    /* At most one of each is ever queued: PINGREQ by isPingPending, which only a PINGRESP after */
-    /* the PINGREQ was sent clears, DISCONNECT by STOPPING being entered once. The reserve holds */
-    /* exactly those two.                                                                        */
     SSF_ASSERT(_SSFMQTTCIsTxQueued(type) == false);
     b = _SSFMQTTCCtlAlloc(type, true);
     SSF_ASSERT(b != NULL);
@@ -491,6 +491,7 @@ static bool _SSFMQTTCTxInflightRemove(SSFMQTTPktType_t type, uint16_t packetId,
 {
     SSFLLItem_t *item;
 
+    SSF_REQUIRE((type == SSF_MQTT_PKT_PUBLISH) || (type == SSF_MQTT_PKT_SUBSCRIBE));
     SSF_REQUIRE(fnOut != NULL);
     SSF_REQUIRE(fnCtxOut != NULL);
 
@@ -539,13 +540,12 @@ static void _SSFMQTTCRxFrameConsume(size_t pktLen)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Acknowledges a dropped QoS 1 PUBLISH. With no ctl block free the PUBACK is owed instead, and  */
-/* reads stop until it is queued, so at most one is ever owed: a PUBACK is never skipped.        */
+/* Queues a PUBACK for a dropped QoS 1 PUBLISH, or owes it if no ctl block is free.              */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCRxPubAckOrOwe(uint16_t packetId)
 {
     SSF_REQUIRE(packetId != 0);
-    SSF_REQUIRE(_mqttc.pubAckOwed == 0);        /* Callers wait while one is owed */
+    SSF_REQUIRE(_mqttc.pubAckOwed == 0);
 
     if (_SSFMQTTCTxEnqueuePubAck(packetId) == false) _mqttc.pubAckOwed = packetId;
 }
@@ -562,10 +562,7 @@ static bool _SSFMQTTCRxPubAckOwedFlush(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Drops an inbound PUBLISH: acknowledges QoS 1 (or owes the PUBACK) so the broker window moves  */
-/* on, then reports the drop. Until CONNACK is acted on nothing is acknowledged: a PUBLISH then  */
-/* is a broker error (one framed before CONNACK already failed the attempt). Nor once           */
-/* DISCONNECT is queued (STOPPING): nothing may follow it, and the clean session forgets the id. */
+/* Drops an inbound PUBLISH, acknowledging QoS 1 when allowed, and reports the drop.             */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCRxPublishDrop(SSFMQTTCQoS_t qos, uint16_t packetId, SSFMQTTCReason_t reason)
 {
@@ -577,13 +574,11 @@ static void _SSFMQTTCRxPublishDrop(SSFMQTTCQoS_t qos, uint16_t packetId, SSFMQTT
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if PUBLISH first byte b0 carries QoS 2. No subscription allows it (the client    */
-/* asks for QoS 0 or 1 and a broker may not exceed the grant, MQTT 3.1.1 3.8.4), and QoS 2 is    */
-/* not supported, so it ends the connection with its own reason.                                 */
+/* Returns true if PUBLISH first byte b0 carries QoS 2, else false.                              */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFMQTTCRxIsQoS2(uint8_t b0)
 {
-    return ((b0 & 0x06u) >> 1) == (uint8_t)SSF_MQTTC_QOS_2;
+    return (((b0 & 0x06u) >> 1) == (uint8_t)SSF_MQTTC_QOS_2);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -591,13 +586,14 @@ static bool _SSFMQTTCRxIsQoS2(uint8_t b0)
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCRxHoldEnd(void)
 {
+    SSF_REQUIRE(_mqttc.isRxHeld);
+
     _mqttc.isRxHeld = false;
     _mqttc.isRxHoldEnded = true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if the inbound PUBLISH was queued, dropped or held (*isHeldOut), else false if   */
-/* the link failed. A held packet stays at the front of rxFrame and is offered here again.       */
+/* Returns true if the inbound PUBLISH was queued, dropped or held, else false if link failed.   */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFMQTTCRxPublishQueue(const uint8_t *pkt, size_t pktLen, bool *isHeldOut)
 {
@@ -611,7 +607,7 @@ static bool _SSFMQTTCRxPublishQueue(const uint8_t *pkt, size_t pktLen, bool *isH
 
     *isHeldOut = false;
 
-    /* QoS 2 is decided by the flags alone, as on the oversized path, whatever the body holds */
+    /* Is the PUBLISH QoS 2 by its fixed header flags? */
     if (_SSFMQTTCRxIsQoS2(pkt[0]))
     { _SSFMQTTCLinkFail(SSF_MQTTC_REASON_RX_PUBLISH_QOS2); return false; }
     if (SSFMQTTPktDecodePublish(pkt, pktLen, &pub) == false)
@@ -622,13 +618,13 @@ static bool _SSFMQTTCRxPublishQueue(const uint8_t *pkt, size_t pktLen, bool *isH
         return true;
     }
 
-    /* The rx pool holds exactly the framing block plus the queue depth, so an empty pool is   */
-    /* the queue-full condition. QoS 1 is held (back-pressure) for up to RX_HOLD_MAX_TICKS, then */
-    /* dropped; QoS 0, or a PUBLISH before CONNACK is acted on or while STOPPING, at once.      */
+    /* Is the rx queue full? */
     if ((b = _SSFMQTTCRxBlockAlloc()) == NULL)
     {
+        /* Yes, may this PUBLISH be held for queue space? */
         if ((pub.qos == SSF_MQTTC_QOS_1) && _SSFMQTTCIsRxAckAllowed())
         {
+            /* Yes, hold it until RX_HOLD_MAX_TICKS elapse, then drop it */
             SSFPortTick_t now = SSFPortGetTick64();
 
             if (_mqttc.isRxHeld == false)
@@ -646,14 +642,14 @@ static bool _SSFMQTTCRxPublishQueue(const uint8_t *pkt, size_t pktLen, bool *isH
                                    SSF_MQTTC_REASON_RX_PUBLISH_HOLD_TIMEOUT);
             return true;
         }
+        /* No, drop it at once */
         if (_mqttc.isRxHeld) _SSFMQTTCRxHoldEnd();      /* A hold abandoned on Stop */
         _SSFMQTTCRxPublishDrop(pub.qos, pub.packetId, SSF_MQTTC_REASON_RX_PUBLISH_QUEUE_FULL);
         return true;
     }
     if (_mqttc.isRxHeld) _SSFMQTTCRxHoldEnd();
 
-    /* Normalize to [topic][NUL][payload]. Always fits: the wire form also carried a fixed      */
-    /* header and a 2-byte topic length.                                                        */
+    /* Normalize to [topic][NUL][payload], which is smaller than the wire form */
     d = SSF_MQTTC_RX_DATA(b);
     memcpy(d, pub.topic, pub.topicLen);
     d[pub.topicLen] = 0;
@@ -701,11 +697,9 @@ static bool _SSFMQTTCRxControlPost(const uint8_t *pkt, size_t pktLen)
 
         if (SSFMQTTPktDecodeSubAck(pkt, pktLen, &ev.packetId, codes, sizeof(codes), &count) == false)
         { break; }
-        /* Only one SUBSCRIBE is ever outstanding, so a second SUBACK before the state machine   */
-        /* took the first is a broker error; it must not overwrite the staged results.          */
+        /* A second SUBACK before the first is handled is a broker error */
         if (_mqttc.isSubAckStaged) break;
-        /* The declared set is immutable while not STOPPED, so the codes can be compared here.  */
-        /* A retry SUBACK answers subRetryIndex[] only. The decoder admits only 0..2 and 0x80.   */
+        /* A retry SUBACK answers the filters in subRetryIndex[] only */
         expected = _mqttc.isSubRetryPending ? _mqttc.subRetryCount : _mqttc.opts.subCount;
         ev.count = (uint8_t)count;
         ev.isQosExceeded = 0;
@@ -746,8 +740,7 @@ static bool _SSFMQTTCRxControlPost(const uint8_t *pkt, size_t pktLen)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if a skip of the oversized PUBLISH at the start of the framing buffer began,     */
-/* else false if its fixed header flags are malformed or QoS 2 and the link failed.              */
+/* Returns true if a skip of an oversized PUBLISH began, else false if the link failed.          */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFMQTTCRxSkipStart(const uint8_t *frame, size_t pktLen)
 {
@@ -759,7 +752,7 @@ static bool _SSFMQTTCRxSkipStart(const uint8_t *frame, size_t pktLen)
     SSF_REQUIRE(pktLen > _mqttc.rxBlockSize);
     SSF_REQUIRE(SSF_MQTT_PKT_TYPE(frame[0]) == SSF_MQTT_PKT_PUBLISH);
 
-    /* The same flag rules as SSFMQTTPktDecodePublish(), which cannot see this packet whole */
+    /* Apply the fixed header flag rules of SSFMQTTPktDecodePublish() */
     if (_SSFMQTTCRxIsQoS2(frame[0]))
     { _SSFMQTTCLinkFail(SSF_MQTTC_REASON_RX_PUBLISH_QOS2); return false; }
     qosBits = (uint8_t)((frame[0] & 0x06u) >> 1);
@@ -767,8 +760,7 @@ static bool _SSFMQTTCRxSkipStart(const uint8_t *frame, size_t pktLen)
         ((qosBits == (uint8_t)SSF_MQTTC_QOS_0) && ((frame[0] & 0x08u) != 0)))
     { _SSFMQTTCLinkFail(SSF_MQTTC_REASON_PROTOCOL); return false; }
 
-    /* SSFMQTTPktFrame() returned a length, so the whole fixed header is in the buffer and its */
-    /* length bytes end at the first one without the continuation bit.                         */
+    /* The fixed header ends at the first length byte without the continuation bit */
     while ((frame[hdrLen - 1] & 0x80u) != 0) hdrLen++;
     SSF_ASSERT(hdrLen <= SSF_MQTT_PKT_MAX_FIXED_HDR_LEN);
 
@@ -780,25 +772,23 @@ static bool _SSFMQTTCRxSkipStart(const uint8_t *frame, size_t pktLen)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Captures the bytes of the big endian 16-bit field at packet offset at that lie in the n bytes */
-/* at p, which start at packet offset _mqttc.rxSkip.pos.                                         */
+/* Captures the bytes in p of the big endian 16-bit field at packet offset at.                   */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFMQTTCRxSkipTakeU16(const uint8_t *p, size_t n, size_t at, uint16_t *v)
+static void _SSFMQTTCRxSkipTakeU16(const uint8_t *p, size_t pLen, size_t at, uint16_t *v)
 {
     size_t pos = _mqttc.rxSkip.pos;
 
     SSF_REQUIRE(p != NULL);
     SSF_REQUIRE(v != NULL);
 
-    if ((at >= pos) && ((at - pos) < n))
-    { *v = (uint16_t)((*v & 0x00FFu) | ((uint16_t)p[at - pos] << 8)); }
-    if (((at + 1) >= pos) && ((at + 1 - pos) < n))
+    if ((at >= pos) && ((at - pos) < pLen))
+    { *v = (uint16_t)((*v & 0x00FFu) | (((uint16_t)p[at - pos]) << 8)); }
+    if (((at + 1) >= pos) && ((at + 1 - pos) < pLen))
     { *v = (uint16_t)((*v & 0xFF00u) | p[at + 1 - pos]); }
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if the skipped PUBLISH was well formed and has been dropped, else false if it    */
-/* was malformed and the link failed.                                                            */
+/* Returns true if the skipped PUBLISH was well formed and dropped, else false if link failed.   */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFMQTTCRxSkipFinish(void)
 {
@@ -807,8 +797,7 @@ static bool _SSFMQTTCRxSkipFinish(void)
 
     SSF_REQUIRE(s->left == 0);
 
-    /* pos is now the packet length. Checks match SSFMQTTPktDecodePublish() (neither checks     */
-    /* UTF-8).                                                                                  */
+    /* Apply the field checks of SSFMQTTPktDecodePublish(); pos is now the packet length */
     need = s->tlOff + 2u + s->topicLen + ((s->qos == SSF_MQTTC_QOS_1) ? 2u : 0u);
     if ((s->topicLen == 0) || (need > s->pos) || s->isTopicNul ||
         ((s->qos == SSF_MQTTC_QOS_1) && (s->packetId == 0)))
@@ -820,8 +809,7 @@ static bool _SSFMQTTCRxSkipFinish(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if the skip consumed what the framing buffer holds of it, else false if the      */
-/* skipped packet was malformed and the link failed.                                             */
+/* Returns true if the skip consumed the framing buffer, else false if the link failed.          */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFMQTTCRxSkipConsume(void)
 {
@@ -877,16 +865,14 @@ static bool _SSFMQTTCRxFrameProcess(void)
         fr = SSFMQTTPktFrame(frame, _mqttc.rxLen, &pktLen);
         if (fr == SSF_MQTT_PKT_FRAME_MALFORMED)
         { _SSFMQTTCLinkFail(SSF_MQTTC_REASON_PROTOCOL); return false; }
-        /* The first packet from the broker is CONNACK (3.2.0), so a PUBLISH framed before one  */
-        /* fails; one after it in the same read is fine and waits for the state machine. A QoS  */
-        /* 2 one goes on to fail with its own, more specific reason (RX_PUBLISH_QOS2).           */
+        /* Is this a non-QoS 2 PUBLISH framed before CONNACK (3.2.0)? */
         if ((SSF_MQTT_PKT_TYPE(frame[0]) == SSF_MQTT_PKT_PUBLISH) &&
             (_mqttc.isRxConnAckSeen == false) && (_SSFMQTTCRxIsQoS2(frame[0]) == false))
         { _SSFMQTTCLinkFail(SSF_MQTTC_REASON_PROTOCOL); return false; }
+        /* Is the packet too large for the rx block? */
         if ((pktLen != 0) && (pktLen > _mqttc.rxBlockSize))
         {
-            /* A PUBLISH that cannot fit is dropped as it arrives; the fixed header gives its   */
-            /* length, so the stream stays in sync. Any other packet that cannot fit is fatal.  */
+            /* Yes, skip a PUBLISH as it arrives, any other packet is fatal */
             if (SSF_MQTT_PKT_TYPE(frame[0]) != SSF_MQTT_PKT_PUBLISH)
             { _SSFMQTTCLinkFail(SSF_MQTTC_REASON_RX_OVERFLOW); return false; }
             if (_SSFMQTTCRxSkipStart(frame, pktLen) == false) return false;
@@ -951,7 +937,7 @@ static void _SSFMQTTCFail(SSFMQTTCReason_t reason)
 
     SSF_REQUIRE((reason > SSF_MQTTC_REASON_MIN) && (reason < SSF_MQTTC_REASON_MAX));
 
-    /* No DISCONNECT: the connection did not end by choice, so the broker must publish the will */
+    /* No DISCONNECT, so the broker publishes the will */
     _SSFMQTTCConnectionTeardown(false);
     _SSFMQTTCReport(event, reason);
     SSFSMTran(_SSFMQTTCStateReconnectWait);
@@ -1006,8 +992,7 @@ static void _SSFMQTTCRxPublishService(SSFPortTick_t *nextTimeoutOpt)
             }
         }
 
-        /* A QoS 1 delivery needs its PUBACK block first, and waits behind an owed PUBACK so */
-        /* that one goes out first                                                            */
+        /* A QoS 1 delivery needs its PUBACK block and waits behind an owed PUBACK */
         ack = NULL;
         if ((b->qos == SSF_MQTTC_QOS_1) && ((_mqttc.pubAckOwed != 0) ||
             ((ack = _SSFMQTTCCtlAlloc(SSF_MQTT_PKT_PUBACK, false)) == NULL)))
@@ -1068,7 +1053,7 @@ static void _SSFMQTTCStateStopped(SSFSMEventId_t eid, const SSFSMData_t *data, S
     {
     case SSF_SM_EVENT_ENTRY:
         _mqttc.state = SSF_MQTTC_STATE_STOPPED;
-        /* Silent at init: SSFMQTTCInit() enters this state before installing the callback. */
+        /* Silent at init: SSFMQTTCInit() enters this state before installing the callback */
         _SSFMQTTCReport(SSF_MQTTC_EVENT_STOPPED, SSF_MQTTC_REASON_NONE);
         break;
     case SSF_SM_EVENT_MQTTC_START:
@@ -1105,7 +1090,7 @@ static void _SSFMQTTCStateConnecting(SSFSMEventId_t eid, const SSFSMData_t *data
     {
         SSFMQTTCTxBlock_t *b = _SSFMQTTCTxBlockAlloc(SSF_MQTT_PKT_CONNECT);
 
-        SSF_ASSERT(b != NULL);  /* Nothing else holds tx blocks before CONNACK */
+        SSF_ASSERT(b != NULL);
         /* Fits: checked by Start() */
         SSFMQTTPktEncodeConnect(SSF_MQTTC_TX_DATA(b), _mqttc.txBlockSize, &b->len,
                                 _mqttc.opts.clientId, SSF_MQTTC_CONFIG_MAX_CLIENT_ID_SIZE,
@@ -1175,8 +1160,10 @@ static void _SSFMQTTCSessionSubscribe(void)
 {
     SSFMQTTCTxBlock_t *b;
 
+    SSF_REQUIRE(_mqttc.opts.subCount > 0);
+
     b = _SSFMQTTCTxBlockAlloc(SSF_MQTT_PKT_SUBSCRIBE);
-    SSF_ASSERT(b != NULL);      /* Only CONNECT took a tx block and it has been sent */
+    SSF_ASSERT(b != NULL);
     _mqttc.subscribePacketId = _SSFMQTTCNextPacketId();
     /* Asserts if SUBSCRIBE is larger than txBlockSize: a configuration error */
     SSFMQTTPktEncodeSubscribe(SSF_MQTTC_TX_DATA(b), _mqttc.txBlockSize, &b->len,
@@ -1188,8 +1175,7 @@ static void _SSFMQTTCSessionSubscribe(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Takes a SUBACK the pump staged: true if it answers the outstanding SUBSCRIBE of count filters */
-/* (its in-flight block is then released and the SUBACK timer stopped), else false.             */
+/* Returns true if the staged SUBACK answers the outstanding SUBSCRIBE, else false.              */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFMQTTCSessionSubAckTake(const SSFMQTTCEvSubAck_t *ev, uint32_t count)
 {
@@ -1197,6 +1183,7 @@ static bool _SSFMQTTCSessionSubAckTake(const SSFMQTTCEvSubAck_t *ev, uint32_t co
     void *fnCtx;
 
     SSF_REQUIRE(ev != NULL);
+    SSF_REQUIRE(count <= SSF_MQTTC_CONFIG_MAX_SUBSCRIPTIONS);
 
     _mqttc.isSubAckStaged = false;
     if ((ev->packetId != _mqttc.subscribePacketId) || (ev->count != count)) return false;
@@ -1206,8 +1193,7 @@ static bool _SSFMQTTCSessionSubAckTake(const SSFMQTTCEvSubAck_t *ev, uint32_t co
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Acts on the SUBACK for the initial SUBSCRIBE: READY whatever was refused, recording each      */
-/* filter's result; a higher QoS than requested, or a mismatched SUBACK, fails the attempt.      */
+/* Acts on the SUBACK for the initial SUBSCRIBE, recording each filter's result.                 */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCSessionRxSubAck(const SSFMQTTCEvSubAck_t *ev)
 {
@@ -1222,8 +1208,7 @@ static void _SSFMQTTCSessionRxSubAck(const SSFMQTTCEvSubAck_t *ev)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Queues a SUBSCRIBE for just the refused filters and arms the SUBACK timeout. With no tx block */
-/* free it is skipped and the retry timer armed again.                                           */
+/* Queues a SUBSCRIBE for just the refused filters, or rearms the retry timer if no block.       */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCSessionSubRetry(void)
 {
@@ -1259,8 +1244,7 @@ static void _SSFMQTTCSessionSubRetry(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Acts on a SUBACK in READY: it must answer the outstanding retry. Filters it grants leave the  */
-/* refused set and SUBSCRIPTION_CHANGED is reported; the retry timer runs while any remain.      */
+/* Acts on a SUBACK in READY, which must answer the outstanding retry SUBSCRIBE.                 */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCReadyRxSubAck(const SSFMQTTCEvSubAck_t *ev)
 {
@@ -1274,7 +1258,7 @@ static void _SSFMQTTCReadyRxSubAck(const SSFMQTTCEvSubAck_t *ev)
     _mqttc.isSubRetryPending = false;
     if (ev->isQosExceeded != 0) { _SSFMQTTCFail(SSF_MQTTC_REASON_SUBSCRIBE_QOS_EXCEEDED); return; }
     /* Every refused filter was in the retry, so its SUBACK is the new refused set */
-    granted = (uint16_t)(_mqttc.subRefused & (uint16_t)~_mqttc.subAckRefused);
+    granted = (uint16_t)(_mqttc.subRefused & ((uint16_t)(~_mqttc.subAckRefused)));
     _mqttc.subRefused = _mqttc.subAckRefused;
     _mqttc.subDowngraded |= _mqttc.subAckDowngraded;
     if (_mqttc.subRefused != 0)
@@ -1335,9 +1319,7 @@ static void _SSFMQTTCSuperStateSession(SSFSMEventId_t eid, const SSFSMData_t *da
     }
 
     case SSF_SM_EVENT_MQTTC_RX_PINGRESP:
-        /* Only an answer to a PINGREQ already sent counts. One arriving while ours is unsent  */
-        /* (or with none pending) is ignored, so a stalled send still times out and the ping   */
-        /* stays pending, which keeps a second PINGREQ out of the queue.                       */
+        /* Does this PINGRESP answer a PINGREQ already sent? */
         if (_mqttc.isPingPending && (_SSFMQTTCIsTxQueued(SSF_MQTT_PKT_PINGREQ) == false))
         {
             _mqttc.isPingPending = false;
@@ -1350,10 +1332,7 @@ static void _SSFMQTTCSuperStateSession(SSFSMEventId_t eid, const SSFSMData_t *da
         break;
 
     case SSF_SM_EVENT_MQTTC_TO_KEEPALIVE:
-        /* An unanswered PINGREQ, queued or already sent, has its PINGRESP timer running; it    */
-        /* will fail the connection or be answered. Queue another only when none is pending:    */
-        /* restarting that timer would cancel its deadline, and when this interval and the      */
-        /* timeout fall due on the same tick (the default 120 s / 30 s) it would never fire.    */
+        /* Is no PINGREQ pending, so its PINGRESP deadline is not restarted? */
         if (_mqttc.isPingPending == false)
         {
             _SSFMQTTCTxEnqueueSimple(SSF_MQTT_PKT_PINGREQ);
@@ -1365,13 +1344,10 @@ static void _SSFMQTTCSuperStateSession(SSFSMEventId_t eid, const SSFSMData_t *da
         break;
 
     case SSF_SM_EVENT_MQTTC_TO_PINGRESP:
-        /* A PINGRESP may be stuck behind a packet held for the app, or only just freed by a    */
-        /* hold that ended since the deadline was armed: a whole packet arrived, so the broker  */
-        /* is alive, and a hold ends within RX_HOLD_MAX_TICKS. Wait again, so the PINGRESP gets  */
-        /* a full timeout after the last hold. Reads stopped for an owed PUBACK mean blocked     */
-        /* writes, which keep-alive must catch.                                                  */
+        /* Could the PINGRESP be waiting behind an app hold rather than a blocked link? */
         if ((_mqttc.pubAckOwed == 0) && (_mqttc.isRxHeld || _mqttc.isRxHoldEnded))
         {
+            /* Yes, wait a full timeout again */
             _mqttc.isRxHoldEnded = false;
             SSFSMStartTimer(SSF_SM_EVENT_MQTTC_TO_PINGRESP, SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT);
             break;
@@ -1536,10 +1512,7 @@ static void _SSFMQTTCStateStopping(SSFSMEventId_t eid, const SSFSMData_t *data, 
     {
     case SSF_SM_EVENT_ENTRY:
         _mqttc.state = SSF_MQTTC_STATE_STOPPING;
-        /* Flush the queue with DISCONNECT appended; the pump posts TX_DRAINED when it empties.  */
-        /* Nothing can refill the queue in this state, so exactly one TX_DRAINED is ever posted: */
-        /* inbound PUBLISH is no longer acknowledged or held, and a hold or owed PUBACK is      */
-        /* abandoned (the clean session forgets it).                                             */
+        /* Flush the queue with DISCONNECT appended; the pump posts TX_DRAINED when it empties */
         _mqttc.isRxHeld = false;
         _mqttc.pubAckOwed = 0;
         _SSFMQTTCTxEnqueueSimple(SSF_MQTT_PKT_DISCONNECT);
@@ -1558,7 +1531,7 @@ static void _SSFMQTTCStateStopping(SSFSMEventId_t eid, const SSFSMData_t *data, 
         break;
 
     default:
-        break;        /* Inbound packets and drops no longer matter */
+        break;        /* Inbound packets and drops are ignored */
     }
 }
 
@@ -1581,7 +1554,7 @@ void SSFMQTTCInit(SSFNetTransport_t *transport, uint32_t txBlocks, uint32_t txBl
     SSF_REQUIRE(txBlockSize >= SSF_MQTTC_MIN_BLOCK_SIZE);
     SSF_REQUIRE(rxBlockSize >= SSF_MQTTC_MIN_BLOCK_SIZE);
     SSF_REQUIRE(rxPublishFn != NULL);
-    SSF_REQUIRE((eventFnOpt != NULL) || (eventFnCtxOpt == NULL));   /* Context needs a callback */
+    SSF_REQUIRE((eventFnOpt != NULL) || (eventFnCtxOpt == NULL));
 
     memset(&_mqttc, 0, sizeof(_mqttc));
     _mqttc.transport = transport;
@@ -1605,8 +1578,7 @@ void SSFMQTTCInit(SSFNetTransport_t *transport, uint32_t txBlocks, uint32_t txBl
     _mqttc.magic = SSF_MQTTC_INIT_MAGIC;
     SSFSMInitHandler(SSF_SM_MQTTC, _SSFMQTTCStateStopped);   /* Enters STOPPED */
 
-    /* Installed after the initial state is entered so that entry does not report STOPPED. Every */
-    /* later STOPPED entry follows a Stop() and is reported.                                      */
+    /* Installed after the initial state is entered so that entry does not report STOPPED */
     _mqttc.eventFn = eventFnOpt;
     _mqttc.eventFnCtx = eventFnCtxOpt;
 }
@@ -1671,9 +1643,6 @@ void SSFMQTTCStart(const SSFMQTTCOpts_t *opts)
     SSF_REQUIRE(opts->txPublishTimeout > 0);
     SSF_REQUIRE(opts->reconnectMinWait > 0);
     SSF_REQUIRE(opts->reconnectMaxWait >= opts->reconnectMinWait);
-    /* Every attempt sends this CONNECT; one too large for a tx block is a configuration error.  */
-    /* ConnectLen() also asserts on anything the encoder would refuse: a client id or user name  */
-    /* outside printable ASCII, or a bad will (topic name rules, QoS, payload).                  */
     SSF_REQUIRE(SSFMQTTPktConnectLen(opts->clientId, SSF_MQTTC_CONFIG_MAX_CLIENT_ID_SIZE,
                                      opts->willOpt, SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE,
                                      opts->usernameOpt, SSF_MQTTC_CONFIG_MAX_USERNAME_SIZE,
@@ -1699,8 +1668,7 @@ void SSFMQTTCStop(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Advances shutdown() while STOPPING: posts TX_DRAINED once every accepted byte, DISCONNECT     */
-/* included, is delivered; a failure is LINK_FAIL. WANT_* waits, bounded by the stop timer.      */
+/* Advances shutdown() while STOPPING, posting TX_DRAINED when all bytes are delivered.          */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCShutdownPoll(void)
 {
@@ -1789,10 +1757,7 @@ bool SSFMQTTCTask(SSFPortTick_t *nextTimeoutOpt)
             if (fn != NULL) fn(fnCtx, true);
         }
         else _SSFMQTTCTxBlockFree(b);
-        /* The one list change the state machine must act on: STOPPING ends when the flush is   */
-        /* complete. The queue empties exactly once in that state; the DISCONNECT that ends it   */
-        /* may still be buffered in the transport (TLS), so shutdown() delivers it and then      */
-        /* posts TX_DRAINED, at most once.                                                       */
+        /* Has STOPPING flushed its queue, so shutdown() can deliver the DISCONNECT? */
         if (SSFLLIsEmpty(&_mqttc.txQueue) && (_mqttc.state == SSF_MQTTC_STATE_STOPPING))
         {
             _mqttc.link = SSF_MQTTC_LINK_SHUTTING_DOWN;
@@ -1828,8 +1793,7 @@ done:
     _SSFMQTTCRxPublishService(nextTimeoutOpt);
     if (_mqttc.isRxHeld && (_mqttc.pubAckOwed == 0) && (_mqttc.link == SSF_MQTTC_LINK_OPEN))
     {
-        /* Retry the held packet at once if a slot just freed, else by the hold deadline. While */
-        /* a PUBACK is owed nothing moves until a ctl block frees, which the tx path signals.   */
+        /* Retry the held packet at once if a slot just freed, else by the hold deadline */
         SSFPortTick_t held = SSFPortGetTick64() - _mqttc.rxHeldSince;
 
         if (SSFMPoolLen(&_mqttc.rxPool) > 0) more = true;
@@ -1844,7 +1808,7 @@ done:
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if the PUBLISH was queued, else false.                                           */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFMQTTCTxPublish(SSFCStrIn_t topic, const uint8_t *payload, size_t payloadLen,
+bool SSFMQTTCTxPublish(SSFCStrIn_t topicStr, const uint8_t *payload, size_t payloadLen,
                        SSFMQTTCQoS_t qos, bool retain, SSFMQTTCTxPublishFn_t txPublishFnOpt,
                        void *txPublishFnCtxOpt)
 {
@@ -1853,20 +1817,20 @@ bool SSFMQTTCTxPublish(SSFCStrIn_t topic, const uint8_t *payload, size_t payload
     size_t pktLen;
 
     SSF_REQUIRE(_mqttc.magic == SSF_MQTTC_INIT_MAGIC);
-    SSF_REQUIRE(topic != NULL);
+    SSF_REQUIRE(topicStr != NULL);
     SSF_REQUIRE((payload != NULL) || (payloadLen == 0));
     SSF_REQUIRE((qos == SSF_MQTTC_QOS_0) || (qos == SSF_MQTTC_QOS_1));
-    SSF_REQUIRE((txPublishFnOpt != NULL) || (txPublishFnCtxOpt == NULL)); /* Context needs a callback */
+    SSF_REQUIRE((txPublishFnOpt != NULL) || (txPublishFnCtxOpt == NULL));
 
     if (_mqttc.state != SSF_MQTTC_STATE_CONNECTED) return false;
-    if (SSFMQTTPktIsValidTopic(topic, SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE) == false) return false;
-    (void)SSFStrLen(topic, SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE, &topicLen);   /* Valid above */
+    if (SSFMQTTPktIsValidTopic(topicStr, SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE) == false) return false;
+    (void)SSFStrLen(topicStr, SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE, &topicLen);   /* Valid above */
     pktLen = SSFMQTTPktPublishLen(topicLen, payloadLen, qos);
     if ((pktLen == 0) || (pktLen > _mqttc.txBlockSize)) return false;   /* Too large for a block */
     if ((b = _SSFMQTTCTxBlockAlloc(SSF_MQTT_PKT_PUBLISH)) == NULL) return false;
 
     b->packetId = (qos == SSF_MQTTC_QOS_1) ? _SSFMQTTCNextPacketId() : 0;
-    SSFMQTTPktEncodePublish(SSF_MQTTC_TX_DATA(b), _mqttc.txBlockSize, &b->len, topic,
+    SSFMQTTPktEncodePublish(SSF_MQTTC_TX_DATA(b), _mqttc.txBlockSize, &b->len, topicStr,
                             SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE, payload, payloadLen, qos, retain,
                             b->packetId);
 
@@ -1888,6 +1852,9 @@ SSFMQTTCState_t SSFMQTTCGetState(void)
     return _mqttc.state;
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true with the result of declared filter index while READY, else false.                */
+/* --------------------------------------------------------------------------------------------- */
 bool SSFMQTTCGetSubResult(uint32_t index, uint8_t *resultOut)
 {
     uint16_t bit;

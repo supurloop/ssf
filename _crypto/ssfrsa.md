@@ -154,6 +154,9 @@ comparable security.
   16-step Fermat inverse mod 65537 and an exact division, none of whose timing depends on
   `λ(n)`. It yields the same `d` (the unique inverse below `λ(n)`) as the variable-time
   extended Euclid used before OPTIMIZE BN-07.
+- DBC exception (timing-critical): `_SSFRSAMod65537` and `_SSFRSAMulMod65537` run per limb
+  and per Fermat step of that derivation and carry no parameter asserts; their only caller
+  keeps every operand below 65537.
 - **Key storage format is PKCS#1 DER.** `RSAPublicKey` = `SEQUENCE { INTEGER n, INTEGER
   e }`; `RSAPrivateKey` = `SEQUENCE { version, n, e, d, p, q, dp, dq, qInv }` (version 0,
   two-prime; `otherPrimeInfos` is not supported), all unsigned big-endian. Decoding is
@@ -209,6 +212,12 @@ comparable security.
   Other compilers and flags can go slightly deeper (M4 `-O2`: 64–80 B, Cortex-M0+ `-Os`:
   96–112 B); set [`SSF_RSA_CONFIG_STACK_SCRUB_MARGIN`](#configuration) to `128u` there to
   cover that too, at the cost of as much more peak stack.
+  Each scrub size is a linear model in `L` (`SSF_BN_MAX_MOD_LIMBS`, the modulus width in
+  limbs) and `T` (`2^SSF_BN_MODEXP_WIN_K`, the window entries): the window table (half-width
+  for the CRT exponentiations, full width for keygen's Miller-Rabin), `T` `SSFBN_t` headers,
+  and the other frames on the deepest secret-bearing chain. It is exact for `k = 2` to `7` at
+  each cap; signing floors `T` at 4, so it over-scrubs by 8–48 B at `k = 1` and `8`. The
+  model must be re-measured if a frame on that chain changes.
 - **Keys are not parsed lazily on every call.** Each sign / verify / key-validate entry
   point re-parses the DER blob on entry. If you're signing many messages under the same
   key, this is a few hundred microseconds per call that could in principle be

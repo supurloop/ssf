@@ -59,42 +59,44 @@ static const uint8_t _ssfPKeyOidP384[] = { 0x2B, 0x81, 0x04, 0x00, 0x22 };
 #endif
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if the OID value oid[0..len) equals ref.                                         */
+/* Returns true if the OID value oid[0..oidLen) equals ref.                                      */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFPKeyOidIs(const uint8_t *oid, uint32_t len, const uint8_t *ref, size_t refLen)
+static bool _SSFPKeyOidIs(const uint8_t *oid, uint32_t oidLen, const uint8_t *ref, size_t refLen)
 {
-    return (len == refLen) && (memcmp(oid, ref, refLen) == 0);
+    SSF_REQUIRE(oid != NULL);
+    SSF_REQUIRE(ref != NULL);
+
+    return ((oidLen == refLen) && (memcmp(oid, ref, refLen) == 0));
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Maps a named-curve OID to a key type; SSF_PKEY_TYPE_NONE if not an enabled curve.             */
 /* --------------------------------------------------------------------------------------------- */
-static SSFPKeyType_t _SSFPKeyCurveType(const uint8_t *oid, uint32_t len)
+static SSFPKeyType_t _SSFPKeyCurveType(const uint8_t *oid, uint32_t oidLen)
 {
+    SSF_REQUIRE(oid != NULL);
+
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
-    if (_SSFPKeyOidIs(oid, len, _ssfPKeyOidP256, sizeof(_ssfPKeyOidP256)))
+    if (_SSFPKeyOidIs(oid, oidLen, _ssfPKeyOidP256, sizeof(_ssfPKeyOidP256)))
     {
         return SSF_PKEY_TYPE_P256;
     }
 #endif
 #if SSF_EC_CONFIG_ENABLE_P384 == 1
-    if (_SSFPKeyOidIs(oid, len, _ssfPKeyOidP384, sizeof(_ssfPKeyOidP384)))
+    if (_SSFPKeyOidIs(oid, oidLen, _ssfPKeyOidP384, sizeof(_ssfPKeyOidP384)))
     {
         return SSF_PKEY_TYPE_P384;
     }
 #endif
     (void)oid;
-    (void)len;
+    (void)oidLen;
     return SSF_PKEY_TYPE_NONE;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Decodes a SEC 1 ECPrivateKey (RFC 5915). wrapperType is the curve named by an enclosing      */
-/* PKCS#8 AlgorithmIdentifier, or SSF_PKEY_TYPE_NONE for a standalone key, which must name its    */
-/* curve. Sets priv (left-padded to the curve size) and pub (derived; a public key in the file */
-/* must equal it).                                                                               */
+/* Decodes a SEC 1 ECPrivateKey (RFC 5915), setting priv and the derived and checked pub.        */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFPKeyDecodeSEC1(const uint8_t *der, size_t derLen, SSFPKeyType_t wrapperType,
+static bool _SSFPKeyDecodeSEC1(const uint8_t *der, size_t derLen, SSFPKeyType_t wrapperTypeOpt,
                                SSFPKey_t *key)
 {
     SSFASN1Cursor_t cur = { der, (uint32_t)derLen };
@@ -110,49 +112,58 @@ static bool _SSFPKeyDecodeSEC1(const uint8_t *der, size_t derLen, SSFPKeyType_t 
     uint32_t pubLen = 0;
     uint8_t unused;
     uint16_t tag;
-    SSFPKeyType_t type = wrapperType;
+    SSFPKeyType_t type = wrapperTypeOpt;
     SSFECCurve_t curve;
     size_t size;
+
+    SSF_REQUIRE(der != NULL);
+    SSF_REQUIRE((wrapperTypeOpt == SSF_PKEY_TYPE_NONE) || (wrapperTypeOpt == SSF_PKEY_TYPE_P256) ||
+                (wrapperTypeOpt == SSF_PKEY_TYPE_P384));
+    SSF_REQUIRE(key != NULL);
 
     if (derLen > 0xFFFFFFFFu) return false;
     if (!SSFASN1DecOpenConstructed(&cur, SSF_ASN1_TAG_SEQUENCE, &seq, &next)) return false;
     if (!SSFASN1DecIsEmpty(&next)) return false;
-    if (!SSFASN1DecGetIntU64(&seq, &version, &seq) || (version != 1u)) return false;
+    /* Is the version missing or not 1? */
+    if ((!SSFASN1DecGetIntU64(&seq, &version, &seq)) || (version != 1u)) return false;
     if (!SSFASN1DecGetOctetString(&seq, &scalar, &scalarLen, &seq)) return false;
 
-    /* parameters [0] EXPLICIT: a named curve only */
-    if (SSFASN1DecPeekTag(&seq, &tag) && (tag == SSF_PKEY_TAG_EC_CURVE))
+    /* Are parameters [0] EXPLICIT present? */
+    if ((SSFASN1DecPeekTag(&seq, &tag)) && (tag == SSF_PKEY_TAG_EC_CURVE))
     {
+        /* Yes, they must be a named curve only, agreeing with any wrapper curve */
         if (!SSFASN1DecOpenConstructed(&seq, SSF_PKEY_TAG_EC_CURVE, &ctx, &seq)) return false;
-        if (!SSFASN1DecGetOIDRaw(&ctx, &oid, &oidLen, &ctx) || !SSFASN1DecIsEmpty(&ctx))
+        if ((!SSFASN1DecGetOIDRaw(&ctx, &oid, &oidLen, &ctx)) || (!SSFASN1DecIsEmpty(&ctx)))
         {
             return false;
         }
         type = _SSFPKeyCurveType(oid, oidLen);
         if ((type == SSF_PKEY_TYPE_NONE) ||
-            ((wrapperType != SSF_PKEY_TYPE_NONE) && (type != wrapperType))) return false;
+            ((wrapperTypeOpt != SSF_PKEY_TYPE_NONE) && (type != wrapperTypeOpt))) return false;
     }
     if (type == SSF_PKEY_TYPE_NONE) return false;
 
-    /* publicKey [1] EXPLICIT BIT STRING */
-    if (SSFASN1DecPeekTag(&seq, &tag) && (tag == SSF_PKEY_TAG_EC_PUB))
+    /* Is publicKey [1] EXPLICIT BIT STRING present? */
+    if ((SSFASN1DecPeekTag(&seq, &tag)) && (tag == SSF_PKEY_TAG_EC_PUB))
     {
+        /* Yes, it must be a whole-byte BIT STRING and nothing else */
         if (!SSFASN1DecOpenConstructed(&seq, SSF_PKEY_TAG_EC_PUB, &ctx, &seq)) return false;
-        if (!SSFASN1DecGetBitString(&ctx, &pub, &pubLen, &unused, &ctx) || (unused != 0u) ||
-            !SSFASN1DecIsEmpty(&ctx)) return false;
+        if ((!SSFASN1DecGetBitString(&ctx, &pub, &pubLen, &unused, &ctx)) || (unused != 0u) ||
+            (!SSFASN1DecIsEmpty(&ctx))) return false;
     }
     if (!SSFASN1DecIsEmpty(&seq)) return false;
 
-    /* Scalar: at most the curve size; a short one (leading zeros dropped) is left-padded */
-    curve = (type == SSF_PKEY_TYPE_P256) ? SSF_EC_CURVE_P256 : SSF_EC_CURVE_P384;
-    size = (type == SSF_PKEY_TYPE_P256) ? 32u : 48u;
+    /* Is the scalar empty or longer than the curve size? */
+    curve = ((type == SSF_PKEY_TYPE_P256) ? SSF_EC_CURVE_P256 : SSF_EC_CURVE_P384);
+    size = ((type == SSF_PKEY_TYPE_P256) ? 32u : 48u);
     if ((scalarLen == 0u) || (scalarLen > size)) return false;
     memcpy(&key->priv[size - scalarLen], scalar, scalarLen);
     key->privLen = size;
 
-    /* Derive the public key (also checks 1 <= d <= n - 1); one in the file must match */
+    /* Derive the public key, which also checks 1 <= d <= n - 1 */
     if (!SSFECDSAPubKeyFromPrivKey(curve, key->priv, size, key->pub, sizeof(key->pub),
                                    &key->pubLen)) return false;
+    /* Does a public key in the file differ from the derived one? */
     if ((pub != NULL) && ((pubLen != key->pubLen) || (memcmp(pub, key->pub, pubLen) != 0)))
     {
         return false;
@@ -162,13 +173,18 @@ static bool _SSFPKeyDecodeSEC1(const uint8_t *der, size_t derLen, SSFPKeyType_t 
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Accepts a PKCS#1 RSAPrivateKey after full validation; the key points at der (zero copy).     */
+/* Accepts a PKCS#1 RSAPrivateKey after full validation; the key points at der (zero copy).      */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFPKeyDecodePKCS1(const uint8_t *der, size_t derLen, SSFPKey_t *key)
 {
+    SSF_REQUIRE(der != NULL);
+    SSF_REQUIRE(key != NULL);
+
 #if SSF_RSA_ANY_ENABLED == 0
     /* No RSA key size is built: an RSA key is refused, like a key on a compiled-out curve */
-    (void)der; (void)derLen; (void)key;
+    (void)der;
+    (void)derLen;
+    (void)key;
     return false;
 #else
     if (!SSFRSAPrivKeyIsValid(der, derLen)) return false;
@@ -180,7 +196,7 @@ static bool _SSFPKeyDecodePKCS1(const uint8_t *der, size_t derLen, SSFPKey_t *ke
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Decodes PKCS#8 PrivateKeyInfo (v1) / OneAsymmetricKey (v2), RFC 5208 / RFC 5958.             */
+/* Decodes PKCS#8 PrivateKeyInfo (v1) / OneAsymmetricKey (v2), RFC 5208 / RFC 5958.              */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFPKeyDecodePKCS8(const uint8_t *der, size_t derLen, SSFPKey_t *key)
 {
@@ -202,10 +218,14 @@ static bool _SSFPKeyDecodePKCS8(const uint8_t *der, size_t derLen, SSFPKey_t *ke
     bool isEC;
     bool isEd;
 
+    SSF_REQUIRE(der != NULL);
+    SSF_REQUIRE(key != NULL);
+
     if (derLen > 0xFFFFFFFFu) return false;
     if (!SSFASN1DecOpenConstructed(&cur, SSF_ASN1_TAG_SEQUENCE, &seq, &next)) return false;
     if (!SSFASN1DecIsEmpty(&next)) return false;
-    if (!SSFASN1DecGetIntU64(&seq, &version, &seq) || (version > 1u)) return false;
+    /* Is the version missing or not v1 or v2? */
+    if ((!SSFASN1DecGetIntU64(&seq, &version, &seq)) || (version > 1u)) return false;
 
     /* AlgorithmIdentifier: RSA with NULL, EC with a named curve, Ed25519 with nothing */
     if (!SSFASN1DecOpenConstructed(&seq, SSF_ASN1_TAG_SEQUENCE, &alg, &seq)) return false;
@@ -213,46 +233,54 @@ static bool _SSFPKeyDecodePKCS8(const uint8_t *der, size_t derLen, SSFPKey_t *ke
     isRSA = _SSFPKeyOidIs(oid, oidLen, _ssfPKeyOidRSA, sizeof(_ssfPKeyOidRSA));
     isEC = _SSFPKeyOidIs(oid, oidLen, _ssfPKeyOidEC, sizeof(_ssfPKeyOidEC));
     isEd = _SSFPKeyOidIs(oid, oidLen, _ssfPKeyOidEd25519, sizeof(_ssfPKeyOidEd25519));
-    if (isRSA && !SSFASN1DecGetNull(&alg, &alg)) return false;
-    if (isEC && !SSFASN1DecGetOIDRaw(&alg, &curveOid, &curveOidLen, &alg)) return false;
-    if (!(isRSA || isEC || isEd) || !SSFASN1DecIsEmpty(&alg)) return false;
+    if ((isRSA) && (!SSFASN1DecGetNull(&alg, &alg))) return false;
+    if ((isEC) && (!SSFASN1DecGetOIDRaw(&alg, &curveOid, &curveOidLen, &alg))) return false;
+    /* Is the algorithm unknown or followed by unexpected parameters? */
+    if ((!(isRSA || isEC || isEd)) || (!SSFASN1DecIsEmpty(&alg))) return false;
 
     if (!SSFASN1DecGetOctetString(&seq, &inner, &innerLen, &seq)) return false;
 
-    /* attributes [0] are skipped; publicKey [1] only in v2 */
-    if (SSFASN1DecPeekTag(&seq, &tag) && (tag == SSF_PKEY_TAG_ATTRS))
+    /* Are attributes [0] present? */
+    if ((SSFASN1DecPeekTag(&seq, &tag)) && (tag == SSF_PKEY_TAG_ATTRS))
     {
+        /* Yes, skip them */
         if (!SSFASN1DecSkip(&seq, &seq)) return false;
     }
-    if (SSFASN1DecPeekTag(&seq, &tag) && (tag == SSF_PKEY_TAG_PKCS8PUB))
+    /* Is publicKey [1] present? */
+    if ((SSFASN1DecPeekTag(&seq, &tag)) && (tag == SSF_PKEY_TAG_PKCS8PUB))
     {
+        /* Yes, it is allowed only in v2 and must be a whole-byte BIT STRING */
         if ((version != 1u) ||
-            !SSFASN1DecGetTLV(&seq, &tag, &pub, &pubLen, &seq) ||
+            (!SSFASN1DecGetTLV(&seq, &tag, &pub, &pubLen, &seq)) ||
             (pubLen < 1u) || (pub[0] != 0u)) return false;
         pub++;
         pubLen--;
     }
     if (!SSFASN1DecIsEmpty(&seq)) return false;
 
+    /* Is the key RSA? */
     if (isRSA)
     {
-        /* A public key here cannot be checked without re-encoding it: refuse rather than ignore */
+        /* Yes, refuse a public key that cannot be checked without re-encoding it */
         if (pub != NULL) return false;
         return _SSFPKeyDecodePKCS1(inner, innerLen, key);
     }
+    /* Is the key EC? */
     if (isEC)
     {
+        /* Yes, decode the SEC 1 key under the wrapper's curve */
         SSFPKeyType_t type = _SSFPKeyCurveType(curveOid, curveOidLen);
         if (type == SSF_PKEY_TYPE_NONE) return false;
         if (!_SSFPKeyDecodeSEC1(inner, innerLen, type, key)) return false;
     }
     else
     {
-        /* Ed25519: CurvePrivateKey ::= OCTET STRING (the 32-byte seed), RFC 8410 */
+        /* No, Ed25519: CurvePrivateKey ::= OCTET STRING (the 32-byte seed), RFC 8410 */
         SSFASN1Cursor_t c = { inner, innerLen };
         const uint8_t *seed;
         uint32_t seedLen;
-        if (!SSFASN1DecGetOctetString(&c, &seed, &seedLen, &c) || !SSFASN1DecIsEmpty(&c) ||
+
+        if ((!SSFASN1DecGetOctetString(&c, &seed, &seedLen, &c)) || (!SSFASN1DecIsEmpty(&c)) ||
             (seedLen != SSF_ED25519_SEED_SIZE)) return false;
         memcpy(key->priv, seed, SSF_ED25519_SEED_SIZE);
         key->privLen = SSF_ED25519_SEED_SIZE;
@@ -260,6 +288,7 @@ static bool _SSFPKeyDecodePKCS8(const uint8_t *der, size_t derLen, SSFPKey_t *ke
         key->pubLen = SSF_ED25519_PUB_KEY_SIZE;
         key->type = SSF_PKEY_TYPE_ED25519;
     }
+    /* Does a public key in the file differ from the derived one? */
     if ((pub != NULL) && ((pubLen != key->pubLen) || (memcmp(pub, key->pub, pubLen) != 0)))
     {
         return false;
@@ -285,13 +314,13 @@ bool SSFPKeyDecodeDER(const uint8_t *der, size_t derLen, SSFPKey_t *keyOut)
     SSFPKeyWipe(keyOut);
     if (derLen > 0xFFFFFFFFu) return false;
 
-    /* The element after the version tells the formats apart: AlgorithmIdentifier SEQUENCE   */
-    /* (PKCS#8), privateKey OCTET STRING (SEC 1) or modulus INTEGER (PKCS#1).                  */
+    /* Is there an element after the version to tell the formats apart? */
     cur.buf = der;
     cur.bufLen = (uint32_t)derLen;
-    if (SSFASN1DecOpenConstructed(&cur, SSF_ASN1_TAG_SEQUENCE, &seq, &next) &&
-        SSFASN1DecGetIntU64(&seq, &version, &seq) && SSFASN1DecPeekTag(&seq, &tag))
+    if ((SSFASN1DecOpenConstructed(&cur, SSF_ASN1_TAG_SEQUENCE, &seq, &next)) &&
+        (SSFASN1DecGetIntU64(&seq, &version, &seq)) && (SSFASN1DecPeekTag(&seq, &tag)))
     {
+        /* Yes, SEQUENCE is PKCS#8, OCTET STRING is SEC 1, INTEGER is PKCS#1 */
         if (tag == SSF_ASN1_TAG_SEQUENCE) ok = _SSFPKeyDecodePKCS8(der, derLen, keyOut);
         else if (tag == SSF_ASN1_TAG_OCTET_STRING)
         {
@@ -315,7 +344,7 @@ bool SSFPKeyDecodePEM(const char *pem, size_t pemLen, uint8_t *derBuf, size_t de
     const char *label;
     size_t labelLen;
     size_t derLen;
-    uint8_t format = 0;     /* 1 PKCS#8, 2 SEC 1, 3 PKCS#1 */
+    uint8_t format = 0; /* 1 PKCS#8, 2 SEC 1, 3 PKCS#1 */
     uint8_t keyBlocks = 0;
     SSFPEMResult_t r;
     bool ok = false;
@@ -339,7 +368,8 @@ bool SSFPKeyDecodePEM(const char *pem, size_t pemLen, uint8_t *derBuf, size_t de
         else if (SSFPEMLabelIs(label, labelLen, "RSA PRIVATE KEY")) format = 3;
         else continue;
         keyPos = start;
-        if (++keyBlocks > 1u) goto done;
+        keyBlocks++;
+        if (keyBlocks > 1u) goto done;
     }
     if (keyBlocks != 1u) goto done;
 
@@ -352,8 +382,10 @@ bool SSFPKeyDecodePEM(const char *pem, size_t pemLen, uint8_t *derBuf, size_t de
     else ok = _SSFPKeyDecodePKCS1(derBuf, derLen, keyOut);
 
 done:
+    /* Did the decode fail? */
     if (!ok)
     {
+        /* Yes, wipe the key and the DER buffer */
         SSFPKeyWipe(keyOut);
         if (derBufSize > 0u) SSFCryptSecureZero(derBuf, derBufSize);
     }

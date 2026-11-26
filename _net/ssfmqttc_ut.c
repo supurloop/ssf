@@ -33,8 +33,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
-/* Sleep APIs for the broker test; included unconditionally because SSF_CONFIG_MQTTC_UNIT_TEST_  */
-/* BROKER is not defined until ssfport.h below.                                                  */
+/* Sleep APIs for the broker test, included before ssfport.h defines its switch */
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -55,13 +54,7 @@
 /* --------------------------------------------------------------------------------------------- */
 /* Design                                                                                        */
 /* --------------------------------------------------------------------------------------------- */
-/* Two layers. The first checks construction against the real socket transport without ever      */
-/* starting the client, so no network is touched. The second drives the client through a scripted */
-/* mock transport: the test injects the bytes a broker would send, captures the bytes the client */
-/* sends and compares them to hand-encoded packets, and dials transport results on demand. All   */
-/* timeouts in the mock scenarios are a few ticks so timer paths run in milliseconds. Keep-alive  */
-/* uses keepAliveSec 1, which the unit test build's 250 ms SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT     */
-/* allows; other scenarios use 120 and end long before their first ping.                         */
+/* Construction runs on the real socket, never started; scenarios script a mock transport        */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Defines                                                                                       */
@@ -88,18 +81,18 @@ typedef struct
 {
     SSFNetTransport_t transport;      /* Must be first */
     /* Script */
-    bool openResult;                  /* What open() returns                                   */
-    SSFNetIOResult_t pollResult;      /* What pollOpen() returns while opening                 */
-    SSFNetIOResult_t sendResult;      /* SUCCESS accepts bytes; anything else is returned      */
-    size_t sendChunk;                 /* Max bytes accepted per send(); 0 => unlimited         */
-    SSFNetIOResult_t recvEmptyResult; /* Returned when no injected bytes remain                */
-    size_t recvChunk;                 /* Max bytes returned per recv(); 0 => unlimited         */
-    uint32_t shutdownWants;           /* shutdown() returns WANT_WRITE this many times first   */
-    SSFNetIOResult_t shutdownResult;  /* Then this                                             */
+    bool openResult;                  /* What open() returns */
+    SSFNetIOResult_t pollResult;      /* What pollOpen() returns while opening */
+    SSFNetIOResult_t sendResult;      /* SUCCESS accepts bytes; anything else is returned */
+    size_t sendChunk;                 /* Max bytes accepted per send(); 0 => unlimited */
+    SSFNetIOResult_t recvEmptyResult; /* Returned when no injected bytes remain */
+    size_t recvChunk;                 /* Max bytes returned per recv(); 0 => unlimited */
+    uint32_t shutdownWants;           /* shutdown() returns WANT_WRITE this many times first */
+    SSFNetIOResult_t shutdownResult;  /* Then this */
     /* Observation */
-    uint32_t shutdownCount;           /* shutdown() calls on the current connection            */
-    bool isShutdown;                  /* shutdown() returned SUCCESS; send() is now invalid    */
-    bool wasShutdownAtClose;          /* isShutdown when close() last ran                      */
+    uint32_t shutdownCount;           /* shutdown() calls on the current connection */
+    bool isShutdown;                  /* shutdown() returned SUCCESS; send() is now invalid */
+    bool wasShutdownAtClose;          /* isShutdown when close() last ran */
     bool isOpening;
     bool isOpen;
     uint32_t openCount;
@@ -112,8 +105,8 @@ typedef struct
     uint8_t rx[SSF_MQTTC_UT_MOCK_BUF_SIZE];
     size_t rxLen;
     size_t rxPos;
-    size_t rxPadPos;                  /* rx offset at which rxPadLeft filler bytes are served  */
-    size_t rxPadLeft;                 /* Filler bytes still to serve; models huge packets      */
+    size_t rxPadPos;                  /* rx offset at which rxPadLeft filler bytes are served */
+    size_t rxPadLeft;                 /* Filler bytes still to serve; models huge packets */
 } SSFMQTTCUTMock_t;
 
 static SSFMQTTCUTMock_t _utMock;
@@ -121,22 +114,22 @@ static SSFMQTTCUTMock_t _utMock;
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if the scripted open succeeds and records host and port, else false.             */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFMQTTCUTMockOpen(SSFNetTransport_t *t, SSFCStrIn_t host, size_t hostSize,
+static bool _SSFMQTTCUTMockOpen(SSFNetTransport_t *t, SSFCStrIn_t hostStr, size_t hostSize,
                                 uint16_t port)
 {
     SSFMQTTCUTMock_t *m = (SSFMQTTCUTMock_t *)t;
     size_t len;
 
     SSF_REQUIRE(t == &_utMock.transport);
-    SSF_REQUIRE(host != NULL);
+    SSF_REQUIRE(hostStr != NULL);
     SSF_REQUIRE(hostSize > 0);
     SSF_REQUIRE(m->isOpening == false);
     SSF_REQUIRE(m->isOpen == false);
 
     m->openCount++;
-    SSF_ASSERT(SSFStrLen(host, hostSize, &len));
+    SSF_ASSERT(SSFStrLen(hostStr, hostSize, &len));
     SSF_ASSERT(len < sizeof(m->host));
-    memcpy(m->host, host, len + 1);
+    memcpy(m->host, hostStr, len + 1);
     m->port = port;
     if (m->openResult == false) return false;
     m->isOpening = true;
@@ -153,13 +146,17 @@ static SSFNetIOResult_t _SSFMQTTCUTMockPollOpen(SSFNetTransport_t *t)
     SSF_REQUIRE(t == &_utMock.transport);
     SSF_REQUIRE(m->isOpening);
 
+    /* Does the scripted poll complete the open? */
     if (m->pollResult == SSF_NET_IO_SUCCESS)
     {
+        /* Yes, connected */
         m->isOpening = false;
         m->isOpen = true;
     }
+    /* No, is it a failure rather than still pending? */
     else if ((m->pollResult != SSF_NET_IO_WANT_READ) && (m->pollResult != SSF_NET_IO_WANT_WRITE))
     {
+        /* Yes, the open is over */
         m->isOpening = false;
     }
     return m->pollResult;
@@ -211,8 +208,10 @@ static SSFNetIOResult_t _SSFMQTTCUTMockRecv(SSFNetTransport_t *t, uint8_t *buf, 
     m->recvCount++;
     *gotOut = 0;
     if ((m->recvChunk > 0) && (size > m->recvChunk)) size = m->recvChunk;
+    /* Filler bytes due at this offset? */
     if ((m->rxPadLeft > 0) && (m->rxPos == m->rxPadPos))
     {
+        /* Yes, serve them without storing them */
         avail = (m->rxPadLeft < size) ? m->rxPadLeft : size;
         memset(buf, 'p', avail);
         m->rxPadLeft -= avail;
@@ -308,12 +307,12 @@ static void _SSFMQTTCUTInjectPad(size_t n)
 /* --------------------------------------------------------------------------------------------- */
 /* Asserts the client sent exactly these bytes since the last check, then clears them.           */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFMQTTCUTExpectTx(const uint8_t *bytes, size_t len)
+static void _SSFMQTTCUTExpectTx(const uint8_t *bytesOpt, size_t len)
 {
-    SSF_REQUIRE((bytes != NULL) || (len == 0));
+    SSF_REQUIRE((bytesOpt != NULL) || (len == 0));
 
     SSF_ASSERT(_utMock.txLen == len);
-    if (len > 0) SSF_ASSERT(memcmp(_utMock.tx, bytes, len) == 0);
+    if (len > 0) SSF_ASSERT(memcmp(_utMock.tx, bytesOpt, len) == 0);
     _utMock.txLen = 0;
 }
 
@@ -459,6 +458,8 @@ static void _SSFMQTTCUTPumpUntilState(SSFMQTTCState_t state, SSFPortTick_t ticks
 {
     SSFPortTick_t end = SSFPortGetTick64() + ticks;
 
+    SSF_REQUIRE((state > SSF_MQTTC_STATE_MIN) && (state < SSF_MQTTC_STATE_MAX));
+
     for (;;)
     {
         bool isLate = (SSFPortGetTick64() > end);  /* Sampled before the tasks run */
@@ -480,6 +481,8 @@ static const SSFMQTTCSub_t _utOneSub[] = { { "a/b", SSF_MQTTC_QOS_1 } };
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTOptsInit(SSFMQTTCOpts_t *opts)
 {
+    SSF_REQUIRE(opts != NULL);
+
     memset(opts, 0, sizeof(*opts));
     opts->host = "mock";
     opts->port = 1883;
@@ -499,6 +502,9 @@ static void _SSFMQTTCUTOptsInit(SSFMQTTCOpts_t *opts)
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTBeginRx(uint32_t txBlocks, uint32_t rxBlockSize)
 {
+    SSF_REQUIRE(txBlocks > 0);
+    SSF_REQUIRE(rxBlockSize > 0);
+
     SSFSMInit(SSF_SM_MAX_ACTIVE_EVENTS, SSF_SM_MAX_ACTIVE_TIMERS);
     _SSFMQTTCUTMockReset();
     _SSFMQTTCUTRecordReset();
@@ -512,6 +518,8 @@ static void _SSFMQTTCUTBeginRx(uint32_t txBlocks, uint32_t rxBlockSize)
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTBegin(uint32_t txBlocks)
 {
+    SSF_REQUIRE(txBlocks > 0);
+
     _SSFMQTTCUTBeginRx(txBlocks, SSF_MQTTC_UT_RX_BLOCK_SIZE);
 }
 
@@ -549,6 +557,8 @@ static void _SSFMQTTCUTGoReady(const SSFMQTTCOpts_t *opts)
         { SSF_MQTTC_EVENT_READY, SSF_MQTTC_REASON_NONE },
     };
 
+    SSF_REQUIRE(opts != NULL);
+
     SSFMQTTCStart(opts);
     _SSFMQTTCUTPump();
     SSF_ASSERT(_utMock.openCount == 1);
@@ -573,7 +583,7 @@ static void _SSFMQTTCUTGoReady(const SSFMQTTCOpts_t *opts)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Layer 1: construction against the real socket transport, never started                       */
+/* Layer 1: construction against the real socket transport, never started                        */
 /* --------------------------------------------------------------------------------------------- */
 static SSFNetSock_t _utSock;
 
@@ -1052,8 +1062,7 @@ static void _SSFMQTTCUTScenarioRxDefer(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Tests that a QoS 0 PUBLISH finding the queue full is dropped and reported, unacknowledged,   */
-/* and that reading goes on: QoS 0 never causes back-pressure.                                   */
+/* Tests that a QoS 0 PUBLISH finding the queue full is dropped and reported; reads go on.       */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTScenarioRxQueueFull(void)
 {
@@ -1135,6 +1144,12 @@ static void _SSFMQTTCUTSubAckAttemptOpts(const SSFMQTTCOpts_t *opts, const uint8
                                          size_t subscribeLen, const uint8_t *subAck,
                                          size_t subAckLen)
 {
+    SSF_REQUIRE(opts != NULL);
+    SSF_REQUIRE(subscribe != NULL);
+    SSF_REQUIRE(subscribeLen > 0);
+    SSF_REQUIRE(subAck != NULL);
+    SSF_REQUIRE(subAckLen > 0);
+
     _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
     SSFMQTTCStart(opts);
     _SSFMQTTCUTPump();
@@ -1152,6 +1167,9 @@ static void _SSFMQTTCUTSubAckAttemptOpts(const SSFMQTTCOpts_t *opts, const uint8
 static void _SSFMQTTCUTSubOptsInit(SSFMQTTCOpts_t *opts, const SSFMQTTCSub_t *subs,
                                    uint32_t subCount)
 {
+    SSF_REQUIRE(opts != NULL);
+    SSF_REQUIRE((subs != NULL) || (subCount == 0));
+
     _SSFMQTTCUTOptsInit(opts);
     opts->subsOpt = subs;
     opts->subCount = subCount;
@@ -1168,6 +1186,11 @@ static void _SSFMQTTCUTSubAckAttempt(const SSFMQTTCSub_t *subs, uint32_t subCoun
 {
     static SSFMQTTCOpts_t opts;                       /* Read on every reconnect */
 
+    SSF_REQUIRE(subs != NULL);
+    SSF_REQUIRE(subCount > 0);
+    SSF_REQUIRE(subscribe != NULL);
+    SSF_REQUIRE(subAck != NULL);
+
     _SSFMQTTCUTSubOptsInit(&opts, subs, subCount);
     _SSFMQTTCUTSubAckAttemptOpts(&opts, subscribe, subscribeLen, subAck, subAckLen);
 }
@@ -1180,6 +1203,9 @@ static void _SSFMQTTCUTExpectSubResults(const uint8_t *expected, uint32_t count)
     uint32_t i;
     uint8_t r;
 
+    SSF_REQUIRE(expected != NULL);
+    SSF_REQUIRE(count <= SSF_MQTTC_CONFIG_MAX_SUBSCRIPTIONS);
+
     for (i = 0; i < count; i++)
     {
         r = 0xAA;
@@ -1189,8 +1215,7 @@ static void _SSFMQTTCUTExpectSubResults(const uint8_t *expected, uint32_t count)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Tests that a SUBACK failure code reaches READY with SUBSCRIBE_REFUSED, even when every filter */
-/* was refused, that each filter's result is reported, and that the connection works.            */
+/* Tests SUBACK refusals: READY with SUBSCRIBE_REFUSED, per-filter results, a working link.      */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTScenarioSubAckRefused(void)
 {
@@ -1247,8 +1272,7 @@ static void _SSFMQTTCUTScenarioSubAckRefused(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Tests that a lower granted QoS reaches READY with SUBSCRIBE_DOWNGRADED, that the connection   */
-/* then works, and that the next connection's exact grant reports READY with NONE.               */
+/* Tests a lower grant: READY with SUBSCRIBE_DOWNGRADED, not reported after an exact one.        */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTScenarioSubAckDowngraded(void)
 {
@@ -1371,8 +1395,7 @@ static void _SSFMQTTCUTScenarioSubAckDowngraded(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Tests that a SUBACK with the wrong packet id or code count fails with PROTOCOL whatever its   */
-/* codes say, and that a second SUBACK after READY ends the connection.                          */
+/* Tests a SUBACK with a wrong id or code count fails PROTOCOL; a second one ends the link.      */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTScenarioSubAckMismatch(void)
 {
@@ -1433,8 +1456,7 @@ static void _SSFMQTTCUTScenarioSubAckMismatch(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Tests that a granted QoS higher than requested ends the attempt with SUBSCRIBE_QOS_EXCEEDED,  */
-/* taking precedence over a failure code on another filter.                                      */
+/* Tests a grant above the request fails with SUBSCRIBE_QOS_EXCEEDED, over any refusal.          */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTScenarioSubAckQoSExceeded(void)
 {
@@ -1543,9 +1565,7 @@ static void _SSFMQTTCUTScenarioRxOverflow(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns the bytes written to buf for a PUBLISH with first byte b0, a topic of topicLen 'x'    */
-/* bytes, packetId when b0 has QoS bits, and a payload of payloadLen bytes of which only the     */
-/* first payloadWritten ('y') are written. *hdrLenOut is the fixed header length.                */
+/* Returns the length of a PUBLISH built in buf: 'x' topic, first payloadWritten 'y' bytes.      */
 /* --------------------------------------------------------------------------------------------- */
 static size_t _SSFMQTTCUTBuildPublish(uint8_t *buf, size_t size, uint8_t b0, size_t topicLen,
                                       uint16_t packetId, size_t payloadLen,
@@ -1617,9 +1637,7 @@ static void _SSFMQTTCUTScenarioRxTooLarge(void)
     _SSFMQTTCUTExpectTx(NULL, 0);
     _SSFMQTTCUTEnd();
 
-    /* QoS 1 whose topic alone is longer than the rx block, so its packet id lies beyond the  */
-    /* block; acknowledged, then the next packet is delivered and acknowledged. Every read     */
-    /* size, so the topic length and packet id bytes split across reads in every way.          */
+    /* QoS 1 with a topic longer than the rx block: acknowledged at every read size */
     for (i = 0; i < (sizeof(chunks) / sizeof(chunks[0])); i++)
     {
         _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
@@ -1774,8 +1792,7 @@ static void _SSFMQTTCUTScenarioRxTooLargeMalformed(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Tests that a QoS 2 PUBLISH, which no subscription allows, ends the connection with            */
-/* RX_PUBLISH_QOS2 on both inbound paths and before READY, without delivery or acknowledgement.  */
+/* Tests a QoS 2 PUBLISH ends the link with RX_PUBLISH_QOS2 on every path, unacknowledged.       */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTScenarioRxPublishQoS2(void)
 {
@@ -1914,9 +1931,7 @@ static void _SSFMQTTCUTScenarioRxTooLargeRetained(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Tests that a PUBLISH before CONNACK (3.2.0: CONNACK comes first) ends the attempt with        */
-/* PROTOCOL, whatever its size, and is never delivered or acknowledged; one after CONNACK in the */
-/* same read is accepted.                                                                        */
+/* Tests a PUBLISH before CONNACK fails the attempt (3.2.0); one after it is accepted.           */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTScenarioRxPublishBeforeConnAck(void)
 {
@@ -1979,8 +1994,7 @@ static void _SSFMQTTCUTScenarioRxPublishBeforeConnAck(void)
     _utEventCount = 0;
     _SSFMQTTCUTEnd();
 
-    /* Each connection starts over: after a READY one is lost, a PUBLISH ahead of the next      */
-    /* CONNACK still fails the attempt                                                          */
+    /* Each connection starts over: a PUBLISH before the next CONNACK still fails it */
     {
         static const uint8_t reserved[] = { 0xF0, 0x00 };
         static const SSFMQTTCUTEventRec_t lost[] =
@@ -2059,8 +2073,7 @@ static void _SSFMQTTCUTScenarioRxTooLargeLinkLoss(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Drives the client to READY with keepAliveSec (1 => ping every 250 ms; PINGRESP timeout is     */
-/* 250 ms). Connect and subscribe timeouts are long so a loaded host cannot trip them.           */
+/* Drives the client to READY with keepAliveSec and long connect and subscribe timeouts.         */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTGoReadyKeepAlive(uint16_t keepAliveSec)
 {
@@ -2094,12 +2107,13 @@ static void _SSFMQTTCUTGoReadyKeepAlive(uint16_t keepAliveSec)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns the tick by which the client had sent at least len bytes, pumping for at most ticks;  */
-/* asserts if it had not by then.                                                                */
+/* Returns the tick by which len bytes were sent, asserting if that takes more than ticks.       */
 /* --------------------------------------------------------------------------------------------- */
 static SSFPortTick_t _SSFMQTTCUTPumpUntilTx(size_t len, SSFPortTick_t ticks)
 {
     SSFPortTick_t end = SSFPortGetTick64() + ticks;
+
+    SSF_REQUIRE(len > 0);
 
     for (;;)
     {
@@ -2115,8 +2129,7 @@ static SSFPortTick_t _SSFMQTTCUTPumpUntilTx(size_t len, SSFPortTick_t ticks)
 
 
 /* --------------------------------------------------------------------------------------------- */
-/* Tests that an unanswered PINGREQ ends the connection within the PINGRESP timeout, also when   */
-/* the next keep-alive interval falls due on the same tick as that timeout.                      */
+/* Tests an unanswered PINGREQ ends the link within the PINGRESP timeout, even on a due ping.    */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTScenarioKeepAliveTimeout(void)
 {
@@ -2133,7 +2146,7 @@ static void _SSFMQTTCUTScenarioKeepAliveTimeout(void)
                                  SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT + SSF_MQTTC_UT_LOAD_TICKS);
     _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(pingReq));
 
-    /* No PINGRESP. Before the fix the failure never came: each interval restarted the timeout. */
+    /* No PINGRESP: a later keep-alive interval must not restart the timeout */
     _SSFMQTTCUTPumpUntilState(SSF_MQTTC_STATE_RECONNECT_WAIT,
                               SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT + SSF_MQTTC_UT_LOAD_TICKS);
     _SSFMQTTCUTExpectEvents(keepAlive, 1);
@@ -2158,8 +2171,7 @@ static void _SSFMQTTCUTScenarioKeepAliveTimeout(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Tests that answered pings keep the connection up and each interval sends one PINGREQ. A       */
-/* 500 ms interval leaves time to check that no second PINGREQ follows an answer.                */
+/* Tests that answered pings keep the link up with one PINGREQ per 500 ms interval.              */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTScenarioKeepAliveAnswered(void)
 {
@@ -2186,8 +2198,7 @@ static void _SSFMQTTCUTScenarioKeepAliveAnswered(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Tests that a PINGRESP arriving while our PINGREQ is still unsent is ignored: no second        */
-/* PINGREQ is queued, and the stalled connection still ends with KEEPALIVE.                      */
+/* Tests a PINGRESP while the PINGREQ is unsent is ignored and KEEPALIVE still ends it.          */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTScenarioKeepAliveUnsolicitedPingResp(void)
 {
@@ -2223,6 +2234,8 @@ static const uint8_t _utPktSubAckOkId2[] = { 0x90, 0x03, 0x00, 0x02, 0x01 };
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTPub1(uint8_t pkt[7], char topic, uint16_t packetId)
 {
+    SSF_REQUIRE(pkt != NULL);
+
     pkt[0] = 0x32; pkt[1] = 0x05; pkt[2] = 0x00; pkt[3] = 0x01; pkt[4] = (uint8_t)topic;
     pkt[5] = (uint8_t)(packetId >> 8); pkt[6] = (uint8_t)packetId;
 }
@@ -2232,6 +2245,8 @@ static void _SSFMQTTCUTPub1(uint8_t pkt[7], char topic, uint16_t packetId)
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTAppendAck(uint8_t *buf, size_t size, size_t *lenInOut, uint16_t packetId)
 {
+    SSF_REQUIRE(buf != NULL);
+    SSF_REQUIRE(lenInOut != NULL);
     SSF_ASSERT((*lenInOut + 4u) <= size);
     buf[(*lenInOut)++] = 0x40; buf[(*lenInOut)++] = 0x02;
     buf[(*lenInOut)++] = (uint8_t)(packetId >> 8); buf[(*lenInOut)++] = (uint8_t)packetId;
@@ -2243,6 +2258,9 @@ static void _SSFMQTTCUTAppendAck(uint8_t *buf, size_t size, size_t *lenInOut, ui
 static void _SSFMQTTCUTPumpUntilEvents(uint32_t count, SSFPortTick_t ticks)
 {
     SSFPortTick_t end = SSFPortGetTick64() + ticks;
+
+    SSF_REQUIRE(count > 0);
+    SSF_REQUIRE(count <= SSF_MQTTC_UT_EVENT_LOG_SIZE);
 
     for (;;)
     {
@@ -2256,12 +2274,13 @@ static void _SSFMQTTCUTPumpUntilEvents(uint32_t count, SSFPortTick_t ticks)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Pumps until count inbound PUBLISH packets were accepted, asserting if that takes more than    */
-/* ticks.                                                                                        */
+/* Pumps until count inbound PUBLISH packets were accepted, asserting if over ticks.             */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTPumpUntilTaken(uint32_t count, SSFPortTick_t ticks)
 {
     SSFPortTick_t end = SSFPortGetTick64() + ticks;
+
+    SSF_REQUIRE(count > 0);
 
     for (;;)
     {
@@ -2275,34 +2294,36 @@ static void _SSFMQTTCUTPumpUntilTaken(uint32_t count, SSFPortTick_t ticks)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if more than budget ticks passed since since. Keep-alive scenarios use it to     */
-/* judge only runs the host did not stall: on a heavily loaded host a pump can overrun a 250 ms  */
-/* PINGRESP timeout several times, and keep-alive then rightly ends the connection.              */
+/* Returns true if more than budget ticks passed since since: the host stalled.                  */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFMQTTCUTIsStalled(SSFPortTick_t since, SSFPortTick_t budget)
 {
-    return (SSFPortGetTick64() - since) > budget;
+    SSF_REQUIRE(budget > 0);
+
+    return ((SSFPortGetTick64() - since) > budget);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Asserts the connection is up with only the hold-timeout drop logged, unless the host stalled  */
-/* past budget since since, in which case only that the drop came first.                         */
+/* Asserts the link is up with only the hold-timeout drop, or if stalled that it came first.     */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTExpectHeldUp(SSFPortTick_t since, SSFPortTick_t budget)
 {
     static const SSFMQTTCUTEventRec_t held[] =
     { { SSF_MQTTC_EVENT_RX_PUBLISH_DROPPED, SSF_MQTTC_REASON_RX_PUBLISH_HOLD_TIMEOUT } };
 
+    SSF_REQUIRE(budget > 0);
+
+    /* Did the host stall past budget? */
     if (_SSFMQTTCUTIsStalled(since, budget))
     {
-        /* Either the hold ended first, or keep-alive fired before the hold could start */
+        /* Yes, either the hold ended first, or keep-alive fired before the hold could start */
         SSF_ASSERT(_utEventCount >= 1);
         SSF_ASSERT((_utEvents[0].reason == held[0].reason) ||
                    (_utEvents[0].reason == SSF_MQTTC_REASON_KEEPALIVE));
         _utEventCount = 0;
         return;
     }
-    /* The deferred head may also have timed out if the host stalled earlier in the scenario */
+    /* No, though the deferred head may have timed out if the host stalled earlier */
     SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTED);
     while ((_utEventCount > 1) &&
            (_utEvents[_utEventCount - 1u].reason == SSF_MQTTC_REASON_RX_PUBLISH_TIMEOUT))
@@ -2311,10 +2332,7 @@ static void _SSFMQTTCUTExpectHeldUp(SSFPortTick_t since, SSFPortTick_t budget)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Tests back-pressure: with the transport blocked, delivered messages' PUBACKs use up the ctl   */
-/* blocks, later messages wait in the queue, and the QoS 1 PUBLISH that then finds it full is    */
-/* held while reading stops. Once the transport drains, the held packet is queued, reading       */
-/* resumes, and every message is delivered once, in order, and acknowledged in order.            */
+/* Tests back-pressure: a full queue holds a QoS 1 PUBLISH and stops reads until drained.        */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTScenarioRxBackPressure(void)
 {
@@ -2369,9 +2387,7 @@ static void _SSFMQTTCUTScenarioRxBackPressure(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Tests the hold cap: a held QoS 1 PUBLISH is dropped and acknowledged after                    */
-/* RX_HOLD_MAX_TICKS, reading resumes, and a QoS 0 PUBLISH that was waiting behind it is then    */
-/* dropped as queue full. The connection stays up.                                               */
+/* Tests the hold cap: the held PUBLISH is dropped and acknowledged, reads resume, link up.      */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTScenarioRxHoldTimeout(void)
 {
@@ -2413,9 +2429,7 @@ static void _SSFMQTTCUTScenarioRxHoldTimeout(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Tests keep-alive across back-pressure: a PINGRESP stuck behind a held packet past its timeout */
-/* does not end the connection; but with reads stopped for an owed PUBACK on a dead uplink,      */
-/* keep-alive still does.                                                                        */
+/* Tests a PINGRESP held past its timeout keeps the link; a dead uplink still ends it.           */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTScenarioRxHoldKeepAlive(void)
 {
@@ -2458,8 +2472,7 @@ static void _SSFMQTTCUTScenarioRxHoldKeepAlive(void)
     _utMock.txLen = 0;
     _SSFMQTTCUTEnd();
 
-    /* A hold that ends just before the PINGRESP deadline: the PINGRESP, arriving only after   */
-    /* that deadline, still gets a full timeout from the end of the hold                        */
+    /* A hold ending just before the PINGRESP deadline gives a full timeout from its end */
     _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
     _SSFMQTTCUTGoReadyKeepAlive(1);
     (void)_SSFMQTTCUTPumpUntilTx(sizeof(pingReq), (2u * SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT) +
@@ -2482,8 +2495,7 @@ static void _SSFMQTTCUTScenarioRxHoldKeepAlive(void)
     _utMock.txLen = 0;
     _SSFMQTTCUTEnd();
 
-    /* A hold, then no PINGRESP ever (dead downlink): the deadline is extended once at most,   */
-    /* and keep-alive still ends the connection                                                  */
+    /* A hold, then no PINGRESP: the deadline is extended at most once; keep-alive ends it */
     _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
     _SSFMQTTCUTGoReadyKeepAlive(1);
     (void)_SSFMQTTCUTPumpUntilTx(sizeof(pingReq), (2u * SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT) +
@@ -2531,8 +2543,7 @@ static void _SSFMQTTCUTScenarioRxHoldKeepAlive(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Tests the owed PUBACK: each drop path that finds no PUBACK block owes the id and stops reads  */
-/* until the PUBACK is queued; it goes out before the PUBACK of any later delivery.              */
+/* Tests the owed PUBACK: a drop with no block free stops reads; it precedes later PUBACKs.      */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTScenarioRxPubAckOwed(void)
 {
@@ -2556,8 +2567,7 @@ static void _SSFMQTTCUTScenarioRxPubAckOwed(void)
     uint32_t n;
     SSFMQTTCOpts_t opts;
 
-    /* Kinds 0 and 1: a topic too long, a packet too large, after depth deliveries whose        */
-    /* PUBACKs are stuck behind a blocked transport                                             */
+    /* Kinds 0 and 1: topic too long, packet too large, after depth stuck PUBACKs */
     for (kind = 0; kind < 2u; kind++)
     {
         acksLen = 0;
@@ -2650,8 +2660,7 @@ static void _SSFMQTTCUTScenarioRxPubAckOwed(void)
     SSF_ASSERT(_utEventCount == 0);
     _SSFMQTTCUTEnd();
 
-    /* Kind 2b: a deferred head times out while another PUBACK is already owed: it waits its    */
-    /* turn rather than owing a second, and its PUBACK follows the owed one                      */
+    /* Kind 2b: a deferred head timing out behind an owed PUBACK waits its turn */
     acksLen = 0;
     _SSFMQTTCUTBeginRx(SSF_MQTTC_UT_TX_BLOCKS, sizeof(big));
     _SSFMQTTCUTOptsInit(&opts);
@@ -2684,8 +2693,7 @@ static void _SSFMQTTCUTScenarioRxPubAckOwed(void)
     _SSFMQTTCUTExpectTx(acks, acksLen);
     _SSFMQTTCUTEnd();
 
-    /* Kind 3: the hold cap expires while the PUBACK blocks are used up. The owed PUBACK goes   */
-    /* out before those of the queued messages delivered after it.                              */
+    /* Kind 3: the hold cap expires with no PUBACK block free; the owed PUBACK goes first */
     acksLen = 0;
     _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
     _SSFMQTTCUTOptsInit(&opts);
@@ -2714,8 +2722,7 @@ static void _SSFMQTTCUTScenarioRxPubAckOwed(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Tests that a held packet and an owed PUBACK die with their connection: nothing stale is sent  */
-/* after Stop, after a link failure, or on the next session.                                     */
+/* Tests a held packet and an owed PUBACK die with their connection: nothing stale is sent.      */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTScenarioRxHoldLifetime(void)
 {
@@ -2841,8 +2848,7 @@ static void _SSFMQTTCUTScenarioRxHoldLifetime(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Asserts SSFMQTTCTask() neither asks to be called again at once nor sets a zero timeout, a   */
-/* few times over: no busy loop.                                                                 */
+/* Asserts SSFMQTTCTask() neither asks to run again at once nor sets a zero timeout.             */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTExpectIdle(void)
 {
@@ -2859,9 +2865,7 @@ static void _SSFMQTTCUTExpectIdle(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Tests back-pressure edges: no busy loop while a packet is held behind an owed PUBACK or     */
-/* while shutting down; nothing after DISCONNECT; no hold before CONNACK; an immediate wake-up  */
-/* once a slot frees under a hold.                                                               */
+/* Tests back-pressure edges: no busy loop, nothing after DISCONNECT, no early hold, wake-up.    */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTScenarioRxHoldEdges(void)
 {
@@ -2876,8 +2880,7 @@ static void _SSFMQTTCUTScenarioRxHoldEdges(void)
     SSFPortTick_t t0;
     SSFMQTTCOpts_t opts;
 
-    /* 1. Held behind an owed PUBACK: a deferred head times out with no PUBACK block free,     */
-    /* freeing a slot the held packet cannot take until the owed PUBACK is queued               */
+    /* 1. Held behind an owed PUBACK: a deferred head times out with no PUBACK block free */
     _SSFMQTTCUTBeginRx(SSF_MQTTC_UT_TX_BLOCKS, sizeof(big));
     _SSFMQTTCUTOptsInit(&opts);
     _SSFMQTTCUTGoReady(&opts);
@@ -2910,8 +2913,7 @@ static void _SSFMQTTCUTScenarioRxHoldEdges(void)
     _SSFMQTTCUTPub1(pkt, 'z', 99);                  /* Held shortly before e times out */
     _SSFMQTTCUTInject(pkt, sizeof(pkt));
     _SSFMQTTCUTPumpUntilEvents(1, SSF_MQTTC_CONFIG_RX_HOLD_MAX_TICKS + SSF_MQTTC_UT_LOAD_TICKS);
-    /* e's timeout owes its PUBACK; on a loaded host the hold cap may expire first and owe    */
-    /* the held packet's instead. Either way a PUBACK is owed and nothing may spin.             */
+    /* e's timeout or, on a loaded host, the hold cap owes a PUBACK; nothing may spin */
     SSF_ASSERT((_utEvents[0].reason == SSF_MQTTC_REASON_RX_PUBLISH_TIMEOUT) ||
                (_utEvents[0].reason == SSF_MQTTC_REASON_RX_PUBLISH_HOLD_TIMEOUT));
     _SSFMQTTCUTExpectIdle();
@@ -2947,8 +2949,7 @@ static void _SSFMQTTCUTScenarioRxHoldEdges(void)
     _utMock.txLen = 0;
     _SSFMQTTCUTEnd();
 
-    /* 3. Nothing after DISCONNECT: a hold, then Stop with the uplink blocked, the hold cap     */
-    /* passing and a further QoS 1 PUBLISH arriving while STOPPING, then the uplink drains      */
+    /* 3. Nothing after DISCONNECT: hold, Stop on a blocked uplink, a late PUBLISH, drain */
     _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
     _SSFMQTTCUTOptsInit(&opts);
     opts.txPublishTimeout = SSF_TICKS_PER_SEC * 5u;
@@ -2974,7 +2975,7 @@ static void _SSFMQTTCUTScenarioRxHoldEdges(void)
     _utEventCount = 0;
     _SSFMQTTCUTEnd();
 
-    /* 3b. Nothing after DISCONNECT when a PUBACK is owed at Stop: the owed one is abandoned   */
+    /* 3b. Nothing after DISCONNECT when a PUBACK is owed at Stop: the owed one is abandoned */
     _SSFMQTTCUTBeginRx(SSF_MQTTC_UT_TX_BLOCKS, sizeof(big));
     _SSFMQTTCUTOptsInit(&opts);
     opts.txPublishTimeout = SSF_TICKS_PER_SEC * 5u;
@@ -3001,8 +3002,7 @@ static void _SSFMQTTCUTScenarioRxHoldEdges(void)
     _utEventCount = 0;
     _SSFMQTTCUTEnd();
 
-    /* 4. No hold before CONNACK: a hostile burst ahead of CONNACK ends the attempt at its first */
-    /* PUBLISH (3.2.0), so nothing is held or acknowledged                                       */
+    /* 4. No hold before CONNACK: the first early PUBLISH ends the attempt (3.2.0) */
     _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
     _SSFMQTTCUTOptsInit(&opts);
     SSFMQTTCStart(&opts);
@@ -3024,8 +3024,7 @@ static void _SSFMQTTCUTScenarioRxHoldEdges(void)
     }
     _SSFMQTTCUTEnd();
 
-    /* 5. Wake-up: once the transport drains under a hold and a slot frees, the task asks to be  */
-    /* called again at once                                                                      */
+    /* 5. Wake-up: a slot freeing under a hold makes the task ask to run again at once */
     _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
     _SSFMQTTCUTOptsInit(&opts);
     _SSFMQTTCUTGoReady(&opts);
@@ -3119,6 +3118,9 @@ static void _SSFMQTTCUTWillReconnect(const uint8_t *connect, size_t connectLen)
 {
     uint8_t subAck[] = { 0x90, 0x03, 0x00, 0x00, 0x01 };
 
+    SSF_REQUIRE(connect != NULL);
+    SSF_REQUIRE(connectLen > 0);
+
     _SSFMQTTCUTPump();
     _SSFMQTTCUTExpectTx(connect, connectLen);
     _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktConnAckOk));
@@ -3133,8 +3135,7 @@ static void _SSFMQTTCUTWillReconnect(const uint8_t *connect, size_t connectLen)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Tests the Last Will: CONNECT carries it on every attempt, a failure closes without DISCONNECT */
-/* so the broker publishes it, Stop() still sends DISCONNECT, and Start() rejects a bad will.    */
+/* Tests the Last Will on CONNECT, no DISCONNECT on failure, DISCONNECT on Stop, bad wills.      */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTScenarioWill(void)
 {
@@ -3176,7 +3177,7 @@ static void _SSFMQTTCUTScenarioWill(void)
     bad = will; bad.payloadOpt = bigMsg; bad.payloadLen = sizeof(bigMsg);
     SSF_ASSERT_TEST(SSFMQTTCStart(&opts));
     bad = will; bad.payloadOpt = bigMsg;
-    bad.payloadLen = (uint16_t)(SSF_MQTTC_UT_TX_BLOCK_SIZE - (sizeof(connectWill) - 3u) + 1u);
+    bad.payloadLen = (uint16_t)((SSF_MQTTC_UT_TX_BLOCK_SIZE - (sizeof(connectWill) - 3u)) + 1u);
     SSF_ASSERT_TEST(SSFMQTTCStart(&opts));             /* One byte too large */
     bad.payloadLen--;                                  /* Exactly fills a block */
     SSFMQTTCStart(&opts);
@@ -3239,7 +3240,7 @@ static void _SSFMQTTCUTScenarioWill(void)
 
     /* Stop() from READY still sends DISCONNECT, so an orderly stop never fires the will */
     _SSFMQTTCUTPumpUntilState(SSF_MQTTC_STATE_CONNECTING,
-                              SSF_MQTTC_UT_BACKOFF_TICKS * 2u + SSF_MQTTC_UT_LOAD_TICKS);
+                              (SSF_MQTTC_UT_BACKOFF_TICKS * 2u) + SSF_MQTTC_UT_LOAD_TICKS);
     _SSFMQTTCUTWillReconnect(connectWill, sizeof(connectWill));
     SSFMQTTCStop();
     _SSFMQTTCUTPumpUntilState(SSF_MQTTC_STATE_STOPPED, SSF_MQTTC_UT_LOAD_TICKS);
@@ -3270,6 +3271,8 @@ static void _SSFMQTTCUTGoReadyRefusedAD(SSFMQTTCOpts_t *opts)
     };
     static const uint8_t results[] = { SSF_MQTTC_SUB_REFUSED, 0, SSF_MQTTC_SUB_REFUSED };
 
+    SSF_REQUIRE(opts != NULL);
+
     _SSFMQTTCUTSubAckAttemptOpts(opts, SSF_MQTTC_UT_ARRAY(_utPktSubscribe3Subs),
                                  SSF_MQTTC_UT_ARRAY(_utPktSubAck3RefuseAD));
     SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTED);
@@ -3278,8 +3281,7 @@ static void _SSFMQTTCUTGoReadyRefusedAD(SSFMQTTCOpts_t *opts)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Tests the automatic retry of refused filters: only they are re-subscribed, every              */
-/* SSF_MQTTC_CONFIG_SUB_RETRY_TICKS, until granted; SUBSCRIPTION_CHANGED reports each gain.      */
+/* Tests refused filters are re-subscribed every SUB_RETRY_TICKS until granted.                  */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTScenarioSubRetry(void)
 {
@@ -3409,8 +3411,7 @@ static void _SSFMQTTCUTScenarioSubRetry(void)
     _SSFMQTTCUTExpectEvents(protocol, 1);
     _SSFMQTTCUTEnd();
 
-    /* Two SUBACKs in one read: the second is a broker error and must not replace the first's   */
-    /* results, so READY still reports the refusals before the connection ends                 */
+    /* Two SUBACKs in one read: the second ends the link; READY keeps the first's results */
     {
         static const uint8_t subAckGrantAll1[] = { 0x90, 0x05, 0x00, 0x01, 0x01, 0x00, 0x01 };
         static const SSFMQTTCUTEventRec_t readyThenLost[] =
@@ -3483,8 +3484,7 @@ static void _SSFMQTTCUTScenarioSubRetry(void)
         _SSFMQTTCUTEnd();
     }
 
-    /* A new connection subscribes the full set again and starts with fresh results, also when */
-    /* the old one ended with a retry outstanding                                              */
+    /* A new connection subscribes the full set with fresh results, even after a retry */
     _SSFMQTTCUTGoReadyRefusedAD(&opts);
     (void)_SSFMQTTCUTPumpUntilTx(sizeof(retryAD2),
                                  SSF_MQTTC_CONFIG_SUB_RETRY_TICKS + SSF_MQTTC_UT_LOAD_TICKS);
@@ -3757,11 +3757,10 @@ static SSFMQTTCEvent_t _SSFMQTTCUTLastEvent(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Tests a QoS 1 publish echoed back by a public broker over transport. Returns false if it was  */
-/* skipped because the broker was unreachable, which isRequired turns into a failure.            */
+/* Tests a broker echo over transport; returns false if unreachable unless isRequired.           */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFMQTTCUTBrokerEchoOver(SSFNetTransport_t *transport, uint16_t port,
-                                      const char *label, bool isRequired)
+                                      const char *labelStr, bool isRequired)
 {
     static char clientId[32];
     static char topic[64];
@@ -3771,6 +3770,10 @@ static bool _SSFMQTTCUTBrokerEchoOver(SSFNetTransport_t *transport, uint16_t por
     SSFMQTTCOpts_t opts;
     SSFPortTick_t end;
     SSFPortTick_t now = SSFPortGetTick64();
+
+    SSF_REQUIRE(transport != NULL);
+    SSF_REQUIRE(port > 0);
+    SSF_REQUIRE(labelStr != NULL);
 
     (void)snprintf(clientId, sizeof(clientId), "ssf-ut-%08lx", (unsigned long)(now & 0xFFFFFFFFul));
     (void)snprintf(topic, sizeof(topic), "ssf/ut/%s/echo", clientId);
@@ -3804,19 +3807,21 @@ static bool _SSFMQTTCUTBrokerEchoOver(SSFNetTransport_t *transport, uint16_t por
            (SSFPortGetTick64() < end))
     { _SSFMQTTCUTBrokerStep(); }
 
+    /* Broker not reached? */
     if (SSFMQTTCIsReady() == false)
     {
+        /* Yes, only an unreachable broker may skip the round trip */
         SSFMQTTCReason_t reason = (_utEventCount == 0) ? SSF_MQTTC_REASON_NONE :
                                   _utEvents[_utEventCount - 1].reason;
-        bool isUnreachable = (reason == SSF_MQTTC_REASON_TRANSPORT_ERROR) ||
-                             (reason == SSF_MQTTC_REASON_PEER_CLOSED) ||
-                             (reason == SSF_MQTTC_REASON_CONNECT_TIMEOUT) ||
-                             (reason == SSF_MQTTC_REASON_CONNACK_SERVER_UNAVAILABLE) ||
-                             (_utEventCount == 0);
+        bool isUnreachable = ((reason == SSF_MQTTC_REASON_TRANSPORT_ERROR) ||
+                              (reason == SSF_MQTTC_REASON_PEER_CLOSED) ||
+                              (reason == SSF_MQTTC_REASON_CONNECT_TIMEOUT) ||
+                              (reason == SSF_MQTTC_REASON_CONNACK_SERVER_UNAVAILABLE) ||
+                              (_utEventCount == 0));
         SSF_ASSERT(isUnreachable);                  /* Anything else is a real failure */
         SSF_ASSERT(isRequired == false);
         printf("ssfmqttc: %s:%u (%s) unreachable (reason %d); broker round trip skipped\r\n",
-               SSF_MQTTC_UT_BROKER_HOST, (unsigned)port, label, (int)reason);
+               SSF_MQTTC_UT_BROKER_HOST, (unsigned)port, labelStr, (int)reason);
         SSFMQTTCStop();
         end = SSFPortGetTick64() + SSF_MQTTC_UT_BROKER_STEP_TICKS;
         while ((SSFMQTTCGetState() != SSF_MQTTC_STATE_STOPPED) && (SSFPortGetTick64() < end))
@@ -3918,9 +3923,7 @@ static bool _SSFMQTTCUTBrokerEchoOver(SSFNetTransport_t *transport, uint16_t por
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Tests the Last Will against the broker: ssfmqttc subscribes to a unique will topic, then a    */
-/* second raw connection CONNECTs with that will (encoded by ssfmqttpkt) and closes without      */
-/* DISCONNECT. The broker must publish the will to ssfmqttc. The will is not retained.           */
+/* Tests the broker publishes a raw connection's will to ssfmqttc after it drops.                */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTBrokerWill(void)
 {
@@ -4031,9 +4034,7 @@ static void _SSFMQTTCUTBrokerWill(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Tests the broker round trip over plain TCP, then over WebSocket on the same TCP transport.    */
-/* A WebSocket handshake failure looks like TRANSPORT_ERROR, so once TCP has reached the broker  */
-/* the WebSocket leg may not be skipped.                                                         */
+/* Tests the broker round trip over TCP, then WebSocket, required once TCP reached it.           */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTBrokerEcho(void)
 {

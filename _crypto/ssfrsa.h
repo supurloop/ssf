@@ -107,13 +107,7 @@ typedef enum
 /* Maximum DER-encoded private key size. */
 #define SSF_RSA_MAX_PRIV_KEY_DER_SIZE ((5u * SSF_RSA_MAX_KEY_BYTES) + 200u)
 
-/* Stack scrubbed below each sign / keygen entry point's frame on return, in bytes (SAFE-05):   */
-/* the depth the ssfbn calls beneath it reach, from the Cortex-M4 GCC -Os call graph. L is the  */
-/* modulus width in limbs and T the 2^k window entries: the window table (half-width for the    */
-/* CRT exponentiations, full width for keygen's Miller-Rabin), T SSFBN_t headers, and the other  */
-/* frames on the deepest secret-bearing chain. Exact for k = 2 to 7 at each cap (T is floored at */
-/* 4 for signing, over by 8 to 48 B at k = 1 and 8); the scrub never raises the peak while it    */
-/* stays within that depth. Re-measure if a frame on the chain changes.                          */
+/* Stack bytes scrubbed below each sign / keygen entry point's frame on return. */
 #define SSF_RSA_STACK_SCRUB_L      ((size_t)SSF_BN_MAX_MOD_LIMBS)
 #define SSF_RSA_STACK_SCRUB_T      ((size_t)1u << SSF_BN_MODEXP_WIN_K)
 #define SSF_RSA_STACK_SCRUB_TS     ((SSF_RSA_STACK_SCRUB_T < 4u) ? 4u : SSF_RSA_STACK_SCRUB_T)
@@ -171,7 +165,7 @@ bool SSFRSAVerifyPSS(const uint8_t *pubKeyDer, size_t pubKeyDerLen, SSFRSAHash_t
                      const uint8_t *sig, size_t sigLen);
 #endif /* SSF_RSA_CONFIG_ENABLE_PSS */
 
-#endif /* SSF_RSA_ANY_ENABLED == 1 -- end of API gated on at-least-one-size-enabled */
+#endif /* SSF_RSA_ANY_ENABLED == 1 */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test (declared even when no RSA key size is enabled)                                     */

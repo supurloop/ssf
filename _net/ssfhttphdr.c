@@ -49,14 +49,14 @@
 /* Response parser states */
 typedef enum
 {
-    SSF_HTTP_HDR_ST_STATUS,          /* Fixed-position "HTTP/x.y nnn"                           */
-    SSF_HTTP_HDR_ST_STATUS_END,      /* After the code: SP then reason, or CR                   */
+    SSF_HTTP_HDR_ST_STATUS,          /* Fixed-position "HTTP/x.y nnn" */
+    SSF_HTTP_HDR_ST_STATUS_END,      /* After the code: SP then reason, or CR */
     SSF_HTTP_HDR_ST_REASON,
-    SSF_HTTP_HDR_ST_LINE_START,      /* Start of a field line, or the empty line                */
+    SSF_HTTP_HDR_ST_LINE_START,      /* Start of a field line, or the empty line */
     SSF_HTTP_HDR_ST_NAME,
     SSF_HTTP_HDR_ST_VALUE,
-    SSF_HTTP_HDR_ST_LF,              /* CR seen; LF must follow                                 */
-    SSF_HTTP_HDR_ST_END_LF           /* CR of the empty line seen                               */
+    SSF_HTTP_HDR_ST_LF,              /* CR seen; LF must follow */
+    SSF_HTTP_HDR_ST_END_LF           /* CR of the empty line seen */
 } SSFHTTPHdrState_t;
 
 /* --------------------------------------------------------------------------------------------- */
@@ -94,61 +94,82 @@ static uint8_t _SSFHTTPHdrLower(uint8_t c)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if a[0..len) equals the NUL terminated b, ASCII case-insensitively if ci.        */
+/* Returns true if a[0..aLen) equals bStr, ASCII case-insensitively if isCI.                     */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFHTTPHdrEquals(const uint8_t *a, size_t len, SSFCStrIn_t b, bool ci)
+static bool _SSFHTTPHdrEquals(const uint8_t *a, size_t aLen, SSFCStrIn_t bStr, bool isCI)
 {
     size_t i;
 
-    for (i = 0; i < len; i++)
+    SSF_REQUIRE((a != NULL) || (aLen == 0));
+    SSF_REQUIRE(bStr != NULL);
+
+    for (i = 0; i < aLen; i++)
     {
-        uint8_t cb = (uint8_t)b[i];
+        uint8_t cb = (uint8_t)bStr[i];
 
         if (cb == 0) return false;
-        if (ci) { if (_SSFHTTPHdrLower(a[i]) != _SSFHTTPHdrLower(cb)) return false; }
-        else if (a[i] != cb) return false;
+        /* Case-insensitive compare? */
+        if (isCI)
+        {
+            /* Yes, compare lower-cased bytes */
+            if (_SSFHTTPHdrLower(a[i]) != _SSFHTTPHdrLower(cb)) return false;
+        }
+        else
+        {
+            /* No, compare exact bytes */
+            if (a[i] != cb) return false;
+        }
     }
-    return b[len] == 0;
+    return (bStr[aLen] == 0);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Sets *lenOut to the length of str if its NUL lies within size bytes; else returns false.      */
+/* Returns true with *lenOut set to the length of textStr if NUL is within textSize, else false. */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFHTTPHdrLen(SSFCStrIn_t str, size_t size, size_t *lenOut)
+static bool _SSFHTTPHdrLen(SSFCStrIn_t textStr, size_t textSize, size_t *lenOut)
 {
-    return SSFStrLen(str, size, lenOut);
+    SSF_REQUIRE(textStr != NULL);
+    SSF_REQUIRE(lenOut != NULL);
+
+    return SSFStrLen(textStr, textSize, lenOut);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if str[0..len) is a non-empty token.                                             */
+/* Returns true if textStr[0..textLen) is a non-empty token.                                     */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFHTTPHdrIsToken(SSFCStrIn_t str, size_t len)
+static bool _SSFHTTPHdrIsToken(SSFCStrIn_t textStr, size_t textLen)
 {
     size_t i;
 
-    if (len == 0) return false;
-    for (i = 0; i < len; i++) { if (_SSFHTTPHdrIsTChar((uint8_t)str[i]) == false) return false; }
+    SSF_REQUIRE(textStr != NULL);
+
+    if (textLen == 0) return false;
+    for (i = 0; i < textLen; i++)
+    { if (_SSFHTTPHdrIsTChar((uint8_t)textStr[i]) == false) return false; }
     return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if str[0..len) is a non-empty request target: URI characters (RFC 3986           */
-/* unreserved, gen-delims except '#', sub-delims) with well-formed %XX escapes.                  */
+/* Returns true if textStr[0..textLen) is a non-empty request target with valid %XX escapes.     */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFHTTPHdrIsTarget(SSFCStrIn_t str, size_t len)
+static bool _SSFHTTPHdrIsTarget(SSFCStrIn_t textStr, size_t textLen)
 {
     size_t i;
 
-    if (len == 0) return false;
-    for (i = 0; i < len; i++)
-    {
-        uint8_t c = (uint8_t)str[i];
+    SSF_REQUIRE(textStr != NULL);
 
+    if (textLen == 0) return false;
+    for (i = 0; i < textLen; i++)
+    {
+        uint8_t c = (uint8_t)textStr[i];
+
+        /* Start of a percent escape? */
         if (c == '%')
         {
-            if ((i + 2u) >= len) return false;
-            if ((_SSFHTTPHdrIsHex((uint8_t)str[i + 1u]) == false) ||
-                (_SSFHTTPHdrIsHex((uint8_t)str[i + 2u]) == false))
+            /* Yes, two hex digits must follow */
+            if ((i + 2u) >= textLen) return false;
+            if ((_SSFHTTPHdrIsHex((uint8_t)textStr[i + 1u]) == false) ||
+                (_SSFHTTPHdrIsHex((uint8_t)textStr[i + 2u]) == false))
             { return false; }
             i += 2u;
             continue;
@@ -161,16 +182,18 @@ static bool _SSFHTTPHdrIsTarget(SSFCStrIn_t str, size_t len)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if str[0..len) is a non-empty host: letters, digits, '-', '.', '_', '~'.         */
+/* Returns true if textStr[0..textLen) is a non-empty host: letters, digits, '-', '.', '_', '~'. */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFHTTPHdrIsHost(SSFCStrIn_t str, size_t len)
+static bool _SSFHTTPHdrIsHost(SSFCStrIn_t textStr, size_t textLen)
 {
     size_t i;
 
-    if (len == 0) return false;
-    for (i = 0; i < len; i++)
+    SSF_REQUIRE(textStr != NULL);
+
+    if (textLen == 0) return false;
+    for (i = 0; i < textLen; i++)
     {
-        uint8_t c = (uint8_t)str[i];
+        uint8_t c = (uint8_t)textStr[i];
 
         if (((c >= 'a') && (c <= 'z')) || ((c >= 'A') && (c <= 'Z')) || ((c >= '0') && (c <= '9')))
         { continue; }
@@ -180,35 +203,41 @@ static bool _SSFHTTPHdrIsHost(SSFCStrIn_t str, size_t len)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if str[0..len) is a field value: value characters, not starting or ending with   */
-/* a space or tab. An empty value is valid.                                                      */
+/* Returns true if textStr[0..textLen) is a field value, maybe empty, with no edge whitespace.   */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFHTTPHdrIsValue(SSFCStrIn_t str, size_t len)
+static bool _SSFHTTPHdrIsValue(SSFCStrIn_t textStr, size_t textLen)
 {
     size_t i;
 
-    if (len == 0) return true;
-    if ((str[0] == ' ') || (str[0] == '\t') || (str[len - 1u] == ' ') || (str[len - 1u] == '\t'))
+    SSF_REQUIRE(textStr != NULL);
+
+    if (textLen == 0) return true;
+    if ((textStr[0] == ' ') || (textStr[0] == '\t') || (textStr[textLen - 1u] == ' ') ||
+        (textStr[textLen - 1u] == '\t'))
     { return false; }
-    for (i = 0; i < len; i++)
-    { if (_SSFHTTPHdrIsValueChar((uint8_t)str[i]) == false) return false; }
+    for (i = 0; i < textLen; i++)
+    { if (_SSFHTTPHdrIsValueChar((uint8_t)textStr[i]) == false) return false; }
     return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Appends len bytes at buf[*pos]; caller has checked they fit.                                  */
+/* Appends srcLen bytes of src at buf[*posInOut]; caller has checked they fit.                   */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFHTTPHdrPut(uint8_t *buf, size_t *pos, const void *src, size_t len)
+static void _SSFHTTPHdrPut(uint8_t *buf, size_t *posInOut, const void *src, size_t srcLen)
 {
-    memcpy(&buf[*pos], src, len);
-    *pos += len;
+    SSF_REQUIRE(buf != NULL);
+    SSF_REQUIRE(posInOut != NULL);
+    SSF_REQUIRE((src != NULL) || (srcLen == 0));
+
+    memcpy(&buf[*posInOut], src, srcLen);
+    *posInOut += srcLen;
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true with the request line and Host field written at buf[0], else false.              */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFHTTPHdrReqBegin(uint8_t *buf, size_t size, size_t *lenOut, SSFCStrIn_t method,
-                        SSFCStrIn_t target, SSFCStrIn_t host, uint16_t portOpt)
+bool SSFHTTPHdrReqBegin(uint8_t *buf, size_t bufSize, size_t *lenOut, SSFCStrIn_t methodStr,
+                        SSFCStrIn_t targetStr, SSFCStrIn_t hostStr, uint16_t portOpt)
 {
     size_t methodLen;
     size_t targetLen;
@@ -220,42 +249,44 @@ bool SSFHTTPHdrReqBegin(uint8_t *buf, size_t size, size_t *lenOut, SSFCStrIn_t m
 
     SSF_REQUIRE(buf != NULL);
     SSF_REQUIRE(lenOut != NULL);
-    SSF_REQUIRE(method != NULL);
-    SSF_REQUIRE(target != NULL);
-    SSF_REQUIRE(host != NULL);
+    SSF_REQUIRE(methodStr != NULL);
+    SSF_REQUIRE(targetStr != NULL);
+    SSF_REQUIRE(hostStr != NULL);
 
     *lenOut = 0;
     /* Each NUL scan is bounded by the whole buffer: a longer string cannot fit anyway. */
-    if ((_SSFHTTPHdrLen(method, size + 1u, &methodLen) == false) ||
-        (_SSFHTTPHdrLen(target, size + 1u, &targetLen) == false) ||
-        (_SSFHTTPHdrLen(host, size + 1u, &hostLen) == false))
+    if ((_SSFHTTPHdrLen(methodStr, bufSize + 1u, &methodLen) == false) ||
+        (_SSFHTTPHdrLen(targetStr, bufSize + 1u, &targetLen) == false) ||
+        (_SSFHTTPHdrLen(hostStr, bufSize + 1u, &hostLen) == false))
     { return false; }
-    if ((_SSFHTTPHdrIsToken(method, methodLen) == false) ||
-        (_SSFHTTPHdrIsTarget(target, targetLen) == false) ||
-        (_SSFHTTPHdrIsHost(host, hostLen) == false))
+    if ((_SSFHTTPHdrIsToken(methodStr, methodLen) == false) ||
+        (_SSFHTTPHdrIsTarget(targetStr, targetLen) == false) ||
+        (_SSFHTTPHdrIsHost(hostStr, hostLen) == false))
     { return false; }
 
+    /* Port specified? */
     if (portOpt != 0)
     {
         uint16_t p = portOpt;
         size_t i;
 
+        /* Yes, format ":port" right to left */
         portText[0] = ':';
         for (portLen = 1; p > 0; p = (uint16_t)(p / 10u)) portLen++;
         for (i = portLen - 1u, p = portOpt; i > 0; i--, p = (uint16_t)(p / 10u))
         { portText[i] = (char)('0' + (p % 10u)); }
     }
 
-    need = methodLen + 1u + targetLen + (sizeof(SSF_HTTP_HDR_VERSION_TEXT) - 1u) +
-           (sizeof(SSF_HTTP_HDR_HOST_TEXT) - 1u) + hostLen + portLen + 2u;
-    if (need > size) return false;
+    need = (methodLen + 1u + targetLen + (sizeof(SSF_HTTP_HDR_VERSION_TEXT) - 1u) +
+            (sizeof(SSF_HTTP_HDR_HOST_TEXT) - 1u) + hostLen + portLen + 2u);
+    if (need > bufSize) return false;
 
-    _SSFHTTPHdrPut(buf, &pos, method, methodLen);
+    _SSFHTTPHdrPut(buf, &pos, methodStr, methodLen);
     _SSFHTTPHdrPut(buf, &pos, " ", 1);
-    _SSFHTTPHdrPut(buf, &pos, target, targetLen);
+    _SSFHTTPHdrPut(buf, &pos, targetStr, targetLen);
     _SSFHTTPHdrPut(buf, &pos, SSF_HTTP_HDR_VERSION_TEXT, sizeof(SSF_HTTP_HDR_VERSION_TEXT) - 1u);
     _SSFHTTPHdrPut(buf, &pos, SSF_HTTP_HDR_HOST_TEXT, sizeof(SSF_HTTP_HDR_HOST_TEXT) - 1u);
-    _SSFHTTPHdrPut(buf, &pos, host, hostLen);
+    _SSFHTTPHdrPut(buf, &pos, hostStr, hostLen);
     _SSFHTTPHdrPut(buf, &pos, portText, portLen);
     _SSFHTTPHdrPut(buf, &pos, "\r\n", 2);
     SSF_ASSERT(pos == need);
@@ -266,8 +297,8 @@ bool SSFHTTPHdrReqBegin(uint8_t *buf, size_t size, size_t *lenOut, SSFCStrIn_t m
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true with "name: value CRLF" appended, else false with *lenInOut unchanged.           */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFHTTPHdrReqAddField(uint8_t *buf, size_t size, size_t *lenInOut, SSFCStrIn_t name,
-                           SSFCStrIn_t value)
+bool SSFHTTPHdrReqAddField(uint8_t *buf, size_t bufSize, size_t *lenInOut, SSFCStrIn_t nameStr,
+                           SSFCStrIn_t valueStr)
 {
     size_t nameLen;
     size_t valueLen;
@@ -276,24 +307,24 @@ bool SSFHTTPHdrReqAddField(uint8_t *buf, size_t size, size_t *lenInOut, SSFCStrI
 
     SSF_REQUIRE(buf != NULL);
     SSF_REQUIRE(lenInOut != NULL);
-    SSF_REQUIRE(*lenInOut <= size);
-    SSF_REQUIRE(name != NULL);
-    SSF_REQUIRE(value != NULL);
+    SSF_REQUIRE(*lenInOut <= bufSize);
+    SSF_REQUIRE(nameStr != NULL);
+    SSF_REQUIRE(valueStr != NULL);
 
-    left = size - *lenInOut;
-    if ((_SSFHTTPHdrLen(name, left + 1u, &nameLen) == false) ||
-        (_SSFHTTPHdrLen(value, left + 1u, &valueLen) == false))
+    left = bufSize - *lenInOut;
+    if ((_SSFHTTPHdrLen(nameStr, left + 1u, &nameLen) == false) ||
+        (_SSFHTTPHdrLen(valueStr, left + 1u, &valueLen) == false))
     { return false; }
-    if ((_SSFHTTPHdrIsToken(name, nameLen) == false) ||
-        (_SSFHTTPHdrIsValue(value, valueLen) == false))
+    if ((_SSFHTTPHdrIsToken(nameStr, nameLen) == false) ||
+        (_SSFHTTPHdrIsValue(valueStr, valueLen) == false))
     { return false; }
-    if (_SSFHTTPHdrEquals((const uint8_t *)name, nameLen, "host", true)) return false;
+    if (_SSFHTTPHdrEquals((const uint8_t *)nameStr, nameLen, "host", true)) return false;
     if ((nameLen + 2u + valueLen + 2u) > left) return false;
 
     pos = *lenInOut;
-    _SSFHTTPHdrPut(buf, &pos, name, nameLen);
+    _SSFHTTPHdrPut(buf, &pos, nameStr, nameLen);
     _SSFHTTPHdrPut(buf, &pos, ": ", 2);
-    _SSFHTTPHdrPut(buf, &pos, value, valueLen);
+    _SSFHTTPHdrPut(buf, &pos, valueStr, valueLen);
     _SSFHTTPHdrPut(buf, &pos, "\r\n", 2);
     *lenInOut = pos;
     return true;
@@ -302,15 +333,15 @@ bool SSFHTTPHdrReqAddField(uint8_t *buf, size_t size, size_t *lenInOut, SSFCStrI
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true with the empty line appended, else false with *lenInOut unchanged.               */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFHTTPHdrReqEnd(uint8_t *buf, size_t size, size_t *lenInOut)
+bool SSFHTTPHdrReqEnd(uint8_t *buf, size_t bufSize, size_t *lenInOut)
 {
     size_t pos;
 
     SSF_REQUIRE(buf != NULL);
     SSF_REQUIRE(lenInOut != NULL);
-    SSF_REQUIRE(*lenInOut <= size);
+    SSF_REQUIRE(*lenInOut <= bufSize);
 
-    if ((size - *lenInOut) < 2u) return false;
+    if ((bufSize - *lenInOut) < 2u) return false;
     pos = *lenInOut;
     _SSFHTTPHdrPut(buf, &pos, "\r\n", 2);
     *lenInOut = pos;
@@ -320,12 +351,12 @@ bool SSFHTTPHdrReqEnd(uint8_t *buf, size_t size, size_t *lenInOut)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns COMPLETE with *respOut filled, INCOMPLETE if valid so far, else MALFORMED.            */
 /* --------------------------------------------------------------------------------------------- */
-SSFHTTPHdrParse_t SSFHTTPHdrParseResponse(const uint8_t *buf, size_t len,
+SSFHTTPHdrParse_t SSFHTTPHdrParseResponse(const uint8_t *buf, size_t bufLen,
                                           SSFHTTPHdrResponse_t *respOut)
 {
     static const char statusPrefix[] = "HTTP/";
     SSFHTTPHdrState_t st = SSF_HTTP_HDR_ST_STATUS;
-    size_t lim = (len > SSF_HTTP_HDR_MAX_HEAD_SIZE) ? SSF_HTTP_HDR_MAX_HEAD_SIZE : len;
+    size_t lim = (bufLen > SSF_HTTP_HDR_MAX_HEAD_SIZE) ? SSF_HTTP_HDR_MAX_HEAD_SIZE : bufLen;
     size_t i;
     size_t nameOff = 0;
     size_t nameLen = 0;
@@ -334,7 +365,7 @@ SSFHTTPHdrParse_t SSFHTTPHdrParseResponse(const uint8_t *buf, size_t len,
     bool isValueStarted = false;
     uint16_t status = 0;
 
-    SSF_REQUIRE((buf != NULL) || (len == 0));
+    SSF_REQUIRE((buf != NULL) || (bufLen == 0));
     SSF_REQUIRE(respOut != NULL);
 
     memset(respOut, 0, sizeof(*respOut));
@@ -403,16 +434,22 @@ SSFHTTPHdrParse_t SSFHTTPHdrParseResponse(const uint8_t *buf, size_t len,
             break;
 
         case SSF_HTTP_HDR_ST_VALUE:
+            /* End of the field line? */
             if (c == '\r')
             {
                 SSFHTTPHdrFieldRef_t *f;
 
+                /* Yes, record the field */
                 if (respOut->fieldCount >= SSF_HTTP_CONFIG_MAX_FIELDS)
                 { return SSF_HTTP_HDR_MALFORMED; }
                 f = &respOut->fields[respOut->fieldCount];
                 f->nameOff = (uint16_t)nameOff;
                 f->nameLen = (uint16_t)nameLen;
-                if (isValueStarted == false) valueOff = valueEnd = i;
+                if (isValueStarted == false)
+                {
+                    valueOff = i;
+                    valueEnd = i;
+                }
                 f->valueOff = (uint16_t)valueOff;
                 f->valueLen = (uint16_t)(valueEnd - valueOff);
                 respOut->fieldCount++;
@@ -435,22 +472,28 @@ SSFHTTPHdrParse_t SSFHTTPHdrParseResponse(const uint8_t *buf, size_t len,
             SSF_ERROR();
         }
     }
-    return (len > lim) ? SSF_HTTP_HDR_MALFORMED : SSF_HTTP_HDR_INCOMPLETE;
+    return (bufLen > lim) ? SSF_HTTP_HDR_MALFORMED : SSF_HTTP_HDR_INCOMPLETE;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if field i of resp is named name, case-insensitively.                            */
+/* Returns true if field i of resp is named nameStr, case-insensitively.                         */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFHTTPHdrIsNamed(const uint8_t *buf, const SSFHTTPHdrResponse_t *resp, uint16_t i,
-                               SSFCStrIn_t name)
+                               SSFCStrIn_t nameStr)
 {
-    return _SSFHTTPHdrEquals(&buf[resp->fields[i].nameOff], resp->fields[i].nameLen, name, true);
+    SSF_REQUIRE(buf != NULL);
+    SSF_REQUIRE(resp != NULL);
+    SSF_REQUIRE(i < resp->fieldCount);
+    SSF_REQUIRE(nameStr != NULL);
+
+    return _SSFHTTPHdrEquals(&buf[resp->fields[i].nameOff], resp->fields[i].nameLen, nameStr,
+                             true);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true with the next field named name at or after *indexInOut, else false.              */
+/* Returns true with the next field named nameStr at or after *indexInOut, else false.           */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFHTTPHdrFindField(const uint8_t *buf, const SSFHTTPHdrResponse_t *resp, SSFCStrIn_t name,
+bool SSFHTTPHdrFindField(const uint8_t *buf, const SSFHTTPHdrResponse_t *resp, SSFCStrIn_t nameStr,
                          uint16_t *indexInOut, const uint8_t **valueOut, size_t *valueLenOut)
 {
     uint16_t i;
@@ -458,15 +501,17 @@ bool SSFHTTPHdrFindField(const uint8_t *buf, const SSFHTTPHdrResponse_t *resp, S
     SSF_REQUIRE(buf != NULL);
     SSF_REQUIRE(resp != NULL);
     SSF_REQUIRE(resp->fieldCount <= SSF_HTTP_CONFIG_MAX_FIELDS);
-    SSF_REQUIRE(name != NULL);
+    SSF_REQUIRE(nameStr != NULL);
     SSF_REQUIRE(indexInOut != NULL);
     SSF_REQUIRE(valueOut != NULL);
     SSF_REQUIRE(valueLenOut != NULL);
 
     for (i = *indexInOut; i < resp->fieldCount; i++)
     {
-        if (_SSFHTTPHdrIsNamed(buf, resp, i, name))
+        /* Field has the wanted name? */
+        if (_SSFHTTPHdrIsNamed(buf, resp, i, nameStr))
         {
+            /* Yes, return its value and resume point */
             *valueOut = &buf[resp->fields[i].valueOff];
             *valueLenOut = resp->fields[i].valueLen;
             *indexInOut = (uint16_t)(i + 1u);
@@ -477,10 +522,10 @@ bool SSFHTTPHdrFindField(const uint8_t *buf, const SSFHTTPHdrResponse_t *resp, S
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns the number of fields named name.                                                      */
+/* Returns the number of fields named nameStr.                                                   */
 /* --------------------------------------------------------------------------------------------- */
 uint16_t SSFHTTPHdrFieldCount(const uint8_t *buf, const SSFHTTPHdrResponse_t *resp,
-                              SSFCStrIn_t name)
+                              SSFCStrIn_t nameStr)
 {
     uint16_t i;
     uint16_t n = 0;
@@ -488,34 +533,17 @@ uint16_t SSFHTTPHdrFieldCount(const uint8_t *buf, const SSFHTTPHdrResponse_t *re
     SSF_REQUIRE(buf != NULL);
     SSF_REQUIRE(resp != NULL);
     SSF_REQUIRE(resp->fieldCount <= SSF_HTTP_CONFIG_MAX_FIELDS);
-    SSF_REQUIRE(name != NULL);
+    SSF_REQUIRE(nameStr != NULL);
 
-    for (i = 0; i < resp->fieldCount; i++) { if (_SSFHTTPHdrIsNamed(buf, resp, i, name)) n++; }
+    for (i = 0; i < resp->fieldCount; i++) { if (_SSFHTTPHdrIsNamed(buf, resp, i, nameStr)) n++; }
     return n;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if exactly one field is named name and its value equals value.                   */
+/* Returns true if exactly one field is named nameStr and its value equals valueStr.             */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFHTTPHdrFieldIsOnly(const uint8_t *buf, const SSFHTTPHdrResponse_t *resp,
-                           SSFCStrIn_t name, SSFCStrIn_t value, bool isCaseInsensitive)
-{
-    uint16_t idx = 0;
-    const uint8_t *v;
-    size_t vLen;
-
-    SSF_REQUIRE(value != NULL);
-
-    if (SSFHTTPHdrFieldCount(buf, resp, name) != 1u) return false;
-    if (SSFHTTPHdrFindField(buf, resp, name, &idx, &v, &vLen) == false) return false;
-    return _SSFHTTPHdrEquals(v, vLen, value, isCaseInsensitive);
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* Returns true if a list element of any field named name equals token case-insensitively.       */
-/* --------------------------------------------------------------------------------------------- */
-bool SSFHTTPHdrFieldHasToken(const uint8_t *buf, const SSFHTTPHdrResponse_t *resp,
-                             SSFCStrIn_t name, SSFCStrIn_t token)
+                           SSFCStrIn_t nameStr, SSFCStrIn_t valueStr, bool isCaseInsensitive)
 {
     uint16_t idx = 0;
     const uint8_t *v;
@@ -523,11 +551,31 @@ bool SSFHTTPHdrFieldHasToken(const uint8_t *buf, const SSFHTTPHdrResponse_t *res
 
     SSF_REQUIRE(buf != NULL);
     SSF_REQUIRE(resp != NULL);
-    SSF_REQUIRE(name != NULL);
-    SSF_REQUIRE(token != NULL);
+    SSF_REQUIRE(nameStr != NULL);
+    SSF_REQUIRE(valueStr != NULL);
 
-    if (token[0] == 0) return false;
-    while (SSFHTTPHdrFindField(buf, resp, name, &idx, &v, &vLen))
+    if (SSFHTTPHdrFieldCount(buf, resp, nameStr) != 1u) return false;
+    if (SSFHTTPHdrFindField(buf, resp, nameStr, &idx, &v, &vLen) == false) return false;
+    return _SSFHTTPHdrEquals(v, vLen, valueStr, isCaseInsensitive);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if a list element of any field named nameStr equals tokenStr case-insensitively. */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFHTTPHdrFieldHasToken(const uint8_t *buf, const SSFHTTPHdrResponse_t *resp,
+                             SSFCStrIn_t nameStr, SSFCStrIn_t tokenStr)
+{
+    uint16_t idx = 0;
+    const uint8_t *v;
+    size_t vLen;
+
+    SSF_REQUIRE(buf != NULL);
+    SSF_REQUIRE(resp != NULL);
+    SSF_REQUIRE(nameStr != NULL);
+    SSF_REQUIRE(tokenStr != NULL);
+
+    if (tokenStr[0] == 0) return false;
+    while (SSFHTTPHdrFindField(buf, resp, nameStr, &idx, &v, &vLen))
     {
         size_t i = 0;
 
@@ -542,7 +590,7 @@ bool SSFHTTPHdrFieldHasToken(const uint8_t *buf, const SSFHTTPHdrResponse_t *res
             while ((i < vLen) && (v[i] != ',')) i++;
             end = i;
             while ((end > start) && ((v[end - 1u] == ' ') || (v[end - 1u] == '\t'))) end--;
-            if ((end > start) && _SSFHTTPHdrEquals(&v[start], end - start, token, true))
+            if ((end > start) && _SSFHTTPHdrEquals(&v[start], end - start, tokenStr, true))
             { return true; }
             i++;                                            /* Past the comma */
         }

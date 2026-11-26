@@ -46,7 +46,7 @@ void *smpTestPtrs[SMP_TEST_BLOCKS];
 void *testPtr;
 
 /* --------------------------------------------------------------------------------------------- */
-/* Performs unit test on ssfll's external interface.                                             */
+/* Performs unit test on ssfmpool's external interface.                                          */
 /* --------------------------------------------------------------------------------------------- */
 void SSFMPoolUnitTest(void)
 {
@@ -84,13 +84,13 @@ void SSFMPoolUnitTest(void)
     SSF_ASSERT_TEST(SSFMPoolIsFull(NULL));
 
     /* Alloc all the blocks */
-    for (i = 0; i < SMP_TEST_BLOCKS - 1; i++)
+    for (i = 0; i < (SMP_TEST_BLOCKS - 1); i++)
     {
         smpTestPtrs[i] = SSFMPoolAlloc(&smpTestPool, i % SMP_TEST_BLOCK_SIZE, (uint8_t)i);
         SSF_ASSERT(smpTestPtrs[i] != NULL);
         SSF_ASSERT(SSFMPoolBlockSize(&smpTestPool) == SMP_TEST_BLOCK_SIZE);
         SSF_ASSERT(SSFMPoolSize(&smpTestPool) == SMP_TEST_BLOCKS);
-        SSF_ASSERT(SSFMPoolLen(&smpTestPool) == SMP_TEST_BLOCKS - (i + 1));
+        SSF_ASSERT(SSFMPoolLen(&smpTestPool) == (SMP_TEST_BLOCKS - (i + 1)));
         SSF_ASSERT(SSFMPoolIsEmpty(&smpTestPool) == false);
         SSF_ASSERT(SSFMPoolIsFull(&smpTestPool) == false);
     }
@@ -104,7 +104,7 @@ void SSFMPoolUnitTest(void)
     SSF_ASSERT_TEST(SSFMPoolAlloc(&smpTestPool, SMP_TEST_BLOCK_SIZE, 0));
 
     /* Free all the blocks */
-    for (i = 0; i < SMP_TEST_BLOCKS - 1; i++)
+    for (i = 0; i < (SMP_TEST_BLOCKS - 1); i++)
     {
         smpTestPtrs[i] = SSFMPoolFree(&smpTestPool, smpTestPtrs[i]);
         SSF_ASSERT(smpTestPtrs[i] == NULL);
@@ -210,10 +210,12 @@ void SSFMPoolUnitTest(void)
             {
                 smpTestPtrs[i] = SSFMPoolAlloc(&smpTestPool, sizes[s], (uint8_t)i);
                 SSF_ASSERT(((uintptr_t)smpTestPtrs[i] % SSF_MPOOL_ALIGN) == 0u);
+                /* Is the block large enough to hold a uint64_t? */
                 if (sizes[s] >= sizeof(uint64_t))
                 {
+                    /* Yes, write and read back a uint64_t through the aligned block */
                     *(uint64_t *)smpTestPtrs[i] = 0x0123456789ABCDEFull;
-                    SSF_ASSERT(*(const uint64_t *)smpTestPtrs[i] == 0x0123456789ABCDEFull);
+                    SSF_ASSERT((*(const uint64_t *)smpTestPtrs[i]) == 0x0123456789ABCDEFull);
                 }
             }
             for (i = 0; i < SMP_TEST_BLOCKS; i++)

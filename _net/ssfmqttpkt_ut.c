@@ -399,7 +399,7 @@ static void _SSFMQTTPktUTEncodePublish(void)
     SSF_ASSERT(pub.dup == false);
     SSF_ASSERT(pub.packetId == 0);
     SSF_ASSERT(pub.topic == &_utBuf[4]);
-    SSF_ASSERT(pub.topicLen == sizeof(topic) - 1);
+    SSF_ASSERT(pub.topicLen == (sizeof(topic) - 1));
     SSF_ASSERT(memcmp(pub.topic, topic, pub.topicLen) == 0);
     SSF_ASSERT(pub.payload == &_utBuf[7]);
     SSF_ASSERT(pub.payloadLen == sizeof(payload));
@@ -416,7 +416,7 @@ static void _SSFMQTTPktUTEncodePublish(void)
     SSF_ASSERT(pub.dup == false);
     SSF_ASSERT(pub.packetId == 0x0102);
     SSF_ASSERT(pub.topic == &_utBuf[4]);
-    SSF_ASSERT(pub.topicLen == sizeof(topic) - 1);
+    SSF_ASSERT(pub.topicLen == (sizeof(topic) - 1));
     SSF_ASSERT(pub.payload == &_utBuf[9]);
     SSF_ASSERT(pub.payloadLen == sizeof(payload));
     SSF_ASSERT(memcmp(pub.payload, payload, pub.payloadLen) == 0);
@@ -759,8 +759,7 @@ static void _SSFMQTTPktUTDecodePingResp(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Tests topic and filter validation: length limits, termination, printable ASCII only, no       */
-/* wildcard in a topic name, and wildcard placement in a filter.                                 */
+/* Tests topic and filter validation: limits, termination, character set and wildcards.          */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTPktUTValidTopic(void)
 {

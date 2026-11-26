@@ -61,8 +61,7 @@
 #define SSF_MQTT_SUBSCRIBE_FLAGS         (0x02u)        /* Mandatory reserved bits */
 #define SSF_MQTT_FLAGS_MASK              (0x0Fu)
 
-/* Remaining length is a variable length integer: 7 value bits per byte, top bit set when another */
-/* byte follows. One byte therefore covers 0..127.                                                */
+/* Remaining length variable length integer: 7 value bits per byte, top bit means more follow */
 #define SSF_MQTT_VLI_BITS                (7u)
 #define SSF_MQTT_VLI_BASE                (1u << SSF_MQTT_VLI_BITS)          /* 128 */
 #define SSF_MQTT_VLI_VALUE_MASK          ((uint8_t)(SSF_MQTT_VLI_BASE - 1u)) /* 0x7F */
@@ -71,10 +70,7 @@
 /* --------------------------------------------------------------------------------------------- */
 /* Local types                                                                                   */
 /* --------------------------------------------------------------------------------------------- */
-/* Bounded writer over the caller's buffer. The body is written from offset 0; _SSFMQTTPktWriterFinish()  */
-/* then derives the remaining length from what was written, shifts the body up and prepends the */
-/* fixed header, so no encoder computes a length twice. Overflow is recorded during writes and   */
-/* asserted once at finish.                                                                      */
+/* Bounded writer: body written from offset 0, fixed header prepended at finish */
 typedef struct
 {
     uint8_t *buf;
@@ -90,14 +86,14 @@ typedef struct
 /* --------------------------------------------------------------------------------------------- */
 /* Initializes a writer over buf.                                                                */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFMQTTPktWriterInit(SSFMQTTPktWriter_t *w, uint8_t *buf, size_t size)
+static void _SSFMQTTPktWriterInit(SSFMQTTPktWriter_t *w, uint8_t *buf, size_t bufSize)
 {
     SSF_REQUIRE(w != NULL);
     SSF_REQUIRE(buf != NULL);
-    SSF_REQUIRE(size > 0);
+    SSF_REQUIRE(bufSize > 0);
 
     w->buf = buf;
-    w->size = size;
+    w->size = bufSize;
     w->len = 0;
     w->isOverflow = false;
 }
@@ -108,9 +104,19 @@ static void _SSFMQTTPktWriterInit(SSFMQTTPktWriter_t *w, uint8_t *buf, size_t si
 static void _SSFMQTTPktPutU8(SSFMQTTPktWriter_t *w, uint8_t v)
 {
     SSF_REQUIRE(w != NULL);
+    SSF_REQUIRE(w->buf != NULL);
 
-    if (w->len < w->size) w->buf[w->len] = v;
-    else w->isOverflow = true;
+    /* Is there room for the byte? */
+    if (w->len < w->size)
+    {
+        /* Yes, write it */
+        w->buf[w->len] = v;
+    }
+    else
+    {
+        /* No, record overflow */
+        w->isOverflow = true;
+    }
     w->len++;
 }
 
@@ -126,40 +132,55 @@ static void _SSFMQTTPktPutU16(SSFMQTTPktWriter_t *w, uint16_t v)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Appends n bytes.                                                                              */
+/* Appends dataLen bytes.                                                                        */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFMQTTPktPutBytes(SSFMQTTPktWriter_t *w, const uint8_t *p, size_t n)
+static void _SSFMQTTPktPutBytes(SSFMQTTPktWriter_t *w, const uint8_t *data, size_t dataLen)
 {
     SSF_REQUIRE(w != NULL);
-    SSF_REQUIRE((p != NULL) || (n == 0));
+    SSF_REQUIRE(w->buf != NULL);
+    SSF_REQUIRE((data != NULL) || (dataLen == 0));
 
-    if ((n > 0) && ((w->len + n) <= w->size)) memcpy(&w->buf[w->len], p, n);
-    else if (n > 0) w->isOverflow = true;
-    w->len += n;
+    /* Are there bytes to append? */
+    if (dataLen > 0)
+    {
+        /* Yes, do they fit? */
+        if ((w->len + dataLen) <= w->size)
+        {
+            /* Yes, write them */
+            memcpy(&w->buf[w->len], data, dataLen);
+        }
+        else
+        {
+            /* No, record overflow */
+            w->isOverflow = true;
+        }
+    }
+    w->len += dataLen;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Appends a 16-bit big endian length followed by n bytes.                                       */
+/* Appends a 16-bit big endian length followed by dataLen bytes.                                 */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFMQTTPktPutField(SSFMQTTPktWriter_t *w, const uint8_t *p, size_t n)
+static void _SSFMQTTPktPutField(SSFMQTTPktWriter_t *w, const uint8_t *data, size_t dataLen)
 {
     SSF_REQUIRE(w != NULL);
-    SSF_REQUIRE((p != NULL) || (n == 0));
+    SSF_REQUIRE((data != NULL) || (dataLen == 0));
+    SSF_REQUIRE(dataLen <= SSF_MQTT_PKT_MAX_STRING_LEN);
 
-    _SSFMQTTPktPutU16(w, (uint16_t)n);
-    _SSFMQTTPktPutBytes(w, p, n);
+    _SSFMQTTPktPutU16(w, (uint16_t)dataLen);
+    _SSFMQTTPktPutBytes(w, data, dataLen);
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns the length of a NUL terminated string field; asserts if unterminated or too long.     */
 /* --------------------------------------------------------------------------------------------- */
-static size_t _SSFMQTTPktFieldLen(SSFCStrIn_t cstr, size_t cstrSize)
+static size_t _SSFMQTTPktFieldLen(SSFCStrIn_t fieldStr, size_t fieldSize)
 {
     size_t len;
 
-    SSF_REQUIRE(cstr != NULL);
-    SSF_REQUIRE(cstrSize > 0);
-    SSF_REQUIRE(SSFStrLen(cstr, cstrSize, &len));
+    SSF_REQUIRE(fieldStr != NULL);
+    SSF_REQUIRE(fieldSize > 0);
+    SSF_REQUIRE(SSFStrLen(fieldStr, fieldSize, &len));
     SSF_REQUIRE(len <= SSF_MQTT_PKT_MAX_STRING_LEN);
     return len;
 }
@@ -173,7 +194,11 @@ static size_t _SSFMQTTPktFixedHeaderLen(size_t remaining)
 
     SSF_REQUIRE(remaining <= SSF_MQTT_PKT_MAX_REMAINING_LEN);
 
-    while (remaining >= SSF_MQTT_VLI_BASE) { remaining >>= SSF_MQTT_VLI_BITS; n++; }
+    while (remaining >= SSF_MQTT_VLI_BASE)
+    {
+        remaining >>= SSF_MQTT_VLI_BITS;
+        n++;
+    }
     return n;
 }
 
@@ -181,11 +206,12 @@ static size_t _SSFMQTTPktFixedHeaderLen(size_t remaining)
 /* Returns the fixed header length after writing it at p.                                        */
 /* --------------------------------------------------------------------------------------------- */
 static size_t _SSFMQTTPktWriteFixedHeader(uint8_t *p, SSFMQTTPktType_t type, uint8_t flags,
-                                size_t remaining)
+                                          size_t remaining)
 {
     size_t n = 0;
 
     SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE((type > SSF_MQTT_PKT_RESERVED_0) && (type < SSF_MQTT_PKT_RESERVED_15));
     SSF_REQUIRE(remaining <= SSF_MQTT_PKT_MAX_REMAINING_LEN);
 
     p[n++] = (uint8_t)(((uint8_t)type << 4) | (flags & SSF_MQTT_FLAGS_MASK));
@@ -203,12 +229,13 @@ static size_t _SSFMQTTPktWriteFixedHeader(uint8_t *p, SSFMQTTPktType_t type, uin
 /* Prepends the fixed header to the written body and sets *lenOut to the packet length.          */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTPktWriterFinish(SSFMQTTPktWriter_t *w, SSFMQTTPktType_t type, uint8_t flags,
-                          size_t *lenOut)
+                                    size_t *lenOut)
 {
     size_t remaining;
     size_t hdrLen;
 
     SSF_REQUIRE(w != NULL);
+    SSF_REQUIRE(w->buf != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
     remaining = w->len;
@@ -225,28 +252,28 @@ static void _SSFMQTTPktWriterFinish(SSFMQTTPktWriter_t *w, SSFMQTTPktType_t type
 /* --------------------------------------------------------------------------------------------- */
 /* Returns the frame state of buf, outputting header and remaining lengths once they are known.  */
 /* --------------------------------------------------------------------------------------------- */
-static SSFMQTTPktFrame_t _SSFMQTTPktParseFixedHeader(const uint8_t *buf, size_t len, size_t *hdrLenOut,
-                                           size_t *remainingOut)
+static SSFMQTTPktFrame_t _SSFMQTTPktParseFixedHeader(const uint8_t *buf, size_t bufLen,
+                                                     size_t *hdrLenOut, size_t *remainingOut)
 {
     size_t remaining = 0;
     uint32_t mult = 1;
     size_t i;
 
-    SSF_REQUIRE((buf != NULL) || (len == 0));
+    SSF_REQUIRE((buf != NULL) || (bufLen == 0));
     SSF_REQUIRE(hdrLenOut != NULL);
     SSF_REQUIRE(remainingOut != NULL);
 
     *hdrLenOut = 0;
     *remainingOut = 0;
-    if (len == 0) return SSF_MQTT_PKT_FRAME_INCOMPLETE;
+    if (bufLen == 0) return SSF_MQTT_PKT_FRAME_INCOMPLETE;
     if ((SSF_MQTT_PKT_TYPE(buf[0]) == SSF_MQTT_PKT_RESERVED_0) ||
         (SSF_MQTT_PKT_TYPE(buf[0]) == SSF_MQTT_PKT_RESERVED_15))
     { return SSF_MQTT_PKT_FRAME_MALFORMED; }
 
     for (i = 1; i < SSF_MQTT_PKT_MAX_FIXED_HDR_LEN; i++)
     {
-        if (i >= len) return SSF_MQTT_PKT_FRAME_INCOMPLETE;
-        remaining += (size_t)(buf[i] & SSF_MQTT_VLI_VALUE_MASK) * mult;
+        if (i >= bufLen) return SSF_MQTT_PKT_FRAME_INCOMPLETE;
+        remaining += ((size_t)(buf[i] & SSF_MQTT_VLI_VALUE_MASK)) * mult;
         if ((buf[i] & SSF_MQTT_VLI_CONTINUE) == 0) break;
         mult *= SSF_MQTT_VLI_BASE;
     }
@@ -254,7 +281,7 @@ static SSFMQTTPktFrame_t _SSFMQTTPktParseFixedHeader(const uint8_t *buf, size_t 
 
     *hdrLenOut = i + 1;
     *remainingOut = remaining;
-    return ((*hdrLenOut + remaining) <= len) ? SSF_MQTT_PKT_FRAME_COMPLETE :
+    return ((*hdrLenOut + remaining) <= bufLen) ? SSF_MQTT_PKT_FRAME_COMPLETE :
                                                SSF_MQTT_PKT_FRAME_INCOMPLETE;
 }
 
@@ -262,7 +289,8 @@ static SSFMQTTPktFrame_t _SSFMQTTPktParseFixedHeader(const uint8_t *buf, size_t 
 /* Returns true if pkt is one complete packet of type with the given flags, else false.          */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFMQTTPktCheckPacket(const uint8_t *pkt, size_t pktLen, SSFMQTTPktType_t type,
-                         uint8_t flags, uint8_t flagsMask, size_t *bodyOut, size_t *remainingOut)
+                                   uint8_t flags, uint8_t flagsMask, size_t *bodyOut,
+                                   size_t *remainingOut)
 {
     size_t hdrLen;
     size_t remaining;
@@ -293,46 +321,44 @@ static uint16_t _SSFMQTTPktGetU16(const uint8_t *p)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if len is a legal topic or filter length, else false.                            */
+/* Returns true if len is a legal topic name or topic filter length, else false.                 */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFMQTTPktIsTopicLenOk(size_t len)
 {
-    return (len >= 1) && (len <= SSF_MQTT_PKT_MAX_STRING_LEN);
+    return ((len >= 1) && (len <= SSF_MQTT_PKT_MAX_STRING_LEN));
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if the len chars of str are all printable ASCII (0x20..0x7E), else false. The    */
-/* client sends only these, so it never sends ill-formed UTF-8 (1.5.3) or a control character.   */
+/* Returns true if the first strLen chars of str are all printable ASCII, else false.            */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFMQTTPktIsPrintable(SSFCStrIn_t str, size_t len)
+static bool _SSFMQTTPktIsPrintable(SSFCStrIn_t str, size_t strLen)
 {
     size_t i;
 
     SSF_REQUIRE(str != NULL);
 
-    for (i = 0; i < len; i++)
+    for (i = 0; i < strLen; i++)
     {
-        uint8_t c = (uint8_t)str[i];                 /* Same result for signed or unsigned char */
+        uint8_t c = (uint8_t)str[i];
         if ((c < 0x20u) || (c > 0x7Eu)) return false;
     }
     return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if an inbound topic has a legal length, no embedded NUL and no wildcard, else    */
-/* false. UTF-8 well-formedness is not checked: the bytes are passed to the app as received.     */
+/* Returns true if an inbound topic has a legal length, no NUL and no wildcard, else false.      */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFMQTTPktIsInboundTopicOk(const uint8_t *t, size_t len)
+static bool _SSFMQTTPktIsInboundTopicOk(const uint8_t *topic, size_t topicLen)
 {
     size_t i;
 
-    SSF_REQUIRE((t != NULL) || (len == 0));
+    SSF_REQUIRE((topic != NULL) || (topicLen == 0));
 
-    if (_SSFMQTTPktIsTopicLenOk(len) == false) return false;
-    for (i = 0; i < len; i++)
+    if (_SSFMQTTPktIsTopicLenOk(topicLen) == false) return false;
+    for (i = 0; i < topicLen; i++)
     {
-        if (t[i] == 0) return false;                                        /* U+0000 (1.5.3) */
-        if ((t[i] == (uint8_t)'+') || (t[i] == (uint8_t)'#')) return false;   /* 3.3.2.1 */
+        if (topic[i] == 0) return false;
+        if ((topic[i] == (uint8_t)'+') || (topic[i] == (uint8_t)'#')) return false;
     }
     return true;
 }
@@ -344,16 +370,16 @@ static bool _SSFMQTTPktIsInboundTopicOk(const uint8_t *t, size_t len)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns the frame state of buf and sets *pktLenOut to the packet length when known.           */
 /* --------------------------------------------------------------------------------------------- */
-SSFMQTTPktFrame_t SSFMQTTPktFrame(const uint8_t *buf, size_t len, size_t *pktLenOut)
+SSFMQTTPktFrame_t SSFMQTTPktFrame(const uint8_t *buf, size_t bufLen, size_t *pktLenOut)
 {
     size_t hdrLen;
     size_t remaining;
     SSFMQTTPktFrame_t fr;
 
-    SSF_REQUIRE((buf != NULL) || (len == 0));
+    SSF_REQUIRE((buf != NULL) || (bufLen == 0));
     SSF_REQUIRE(pktLenOut != NULL);
 
-    fr = _SSFMQTTPktParseFixedHeader(buf, len, &hdrLen, &remaining);
+    fr = _SSFMQTTPktParseFixedHeader(buf, bufLen, &hdrLen, &remaining);
     *pktLenOut = (hdrLen == 0) ? 0 : (hdrLen + remaining);
     return fr;
 }
@@ -365,22 +391,23 @@ SSFMQTTPktFrame_t SSFMQTTPktFrame(const uint8_t *buf, size_t len, size_t *pktLen
 /* --------------------------------------------------------------------------------------------- */
 /* Asserts unless the CONNECT arguments are encodable (shared by the encoder and ConnectLen).    */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFMQTTPktConnectRequire(SSFCStrIn_t clientId, size_t clientIdSize,
+static void _SSFMQTTPktConnectRequire(SSFCStrIn_t clientIdStr, size_t clientIdSize,
                                       const SSFMQTTPktWill_t *willOpt, size_t willTopicSize,
-                                      SSFCStrIn_t usernameOpt, size_t usernameSize,
+                                      SSFCStrIn_t usernameStrOpt, size_t usernameSize,
                                       const uint8_t *passwordOpt, size_t passwordLen)
 {
-    SSF_REQUIRE(clientId != NULL);
-    /* Client id and user name: printable ASCII (the password is binary) */
-    SSF_REQUIRE(_SSFMQTTPktIsPrintable(clientId, _SSFMQTTPktFieldLen(clientId, clientIdSize)));
-    SSF_REQUIRE((usernameOpt == NULL) ||
-                _SSFMQTTPktIsPrintable(usernameOpt, _SSFMQTTPktFieldLen(usernameOpt,
+    SSF_REQUIRE(clientIdStr != NULL);
+    SSF_REQUIRE(_SSFMQTTPktIsPrintable(clientIdStr, _SSFMQTTPktFieldLen(clientIdStr, clientIdSize)));
+    SSF_REQUIRE((usernameStrOpt == NULL) ||
+                _SSFMQTTPktIsPrintable(usernameStrOpt, _SSFMQTTPktFieldLen(usernameStrOpt,
                                                                         usernameSize)));
-    SSF_REQUIRE((passwordOpt == NULL) || (usernameOpt != NULL));
+    SSF_REQUIRE((passwordOpt == NULL) || (usernameStrOpt != NULL));
     SSF_REQUIRE((passwordOpt != NULL) || (passwordLen == 0));
     SSF_REQUIRE(passwordLen <= SSF_MQTT_PKT_MAX_STRING_LEN);
+    /* Is a will supplied? */
     if (willOpt != NULL)
     {
+        /* Yes, check its fields */
         SSF_REQUIRE(willOpt->topic != NULL);
         SSF_REQUIRE(SSFMQTTPktIsValidTopic(willOpt->topic, willTopicSize));
         SSF_REQUIRE((willOpt->qos == SSF_MQTTC_QOS_0) || (willOpt->qos == SSF_MQTTC_QOS_1));
@@ -391,9 +418,9 @@ static void _SSFMQTTPktConnectRequire(SSFCStrIn_t clientId, size_t clientIdSize,
 /* --------------------------------------------------------------------------------------------- */
 /* Encodes a CONNECT packet.                                                                     */
 /* --------------------------------------------------------------------------------------------- */
-void SSFMQTTPktEncodeConnect(uint8_t *buf, size_t size, size_t *lenOut, SSFCStrIn_t clientId,
+void SSFMQTTPktEncodeConnect(uint8_t *buf, size_t size, size_t *lenOut, SSFCStrIn_t clientIdStr,
                              size_t clientIdSize, const SSFMQTTPktWill_t *willOpt,
-                             size_t willTopicSize, SSFCStrIn_t usernameOpt, size_t usernameSize,
+                             size_t willTopicSize, SSFCStrIn_t usernameStrOpt, size_t usernameSize,
                              const uint8_t *passwordOpt, size_t passwordLen,
                              uint16_t keepAliveSec)
 {
@@ -403,32 +430,41 @@ void SSFMQTTPktEncodeConnect(uint8_t *buf, size_t size, size_t *lenOut, SSFCStrI
     SSF_REQUIRE(buf != NULL);
     SSF_REQUIRE(size > 0);
     SSF_REQUIRE(lenOut != NULL);
-    _SSFMQTTPktConnectRequire(clientId, clientIdSize, willOpt, willTopicSize, usernameOpt,
+    _SSFMQTTPktConnectRequire(clientIdStr, clientIdSize, willOpt, willTopicSize, usernameStrOpt,
                               usernameSize, passwordOpt, passwordLen);
 
+    /* Is a will supplied? */
     if (willOpt != NULL)
     {
+        /* Yes, set the will flags */
         flags |= SSF_MQTT_CONNECT_FLAG_WILL;
         flags |= (uint8_t)((uint8_t)willOpt->qos << SSF_MQTT_CONNECT_WILL_QOS_SHIFT);
         if (willOpt->retain) flags |= SSF_MQTT_CONNECT_FLAG_WILL_RETAIN;
     }
-    if (usernameOpt != NULL) flags |= SSF_MQTT_CONNECT_FLAG_USERNAME;
+    if (usernameStrOpt != NULL) flags |= SSF_MQTT_CONNECT_FLAG_USERNAME;
     if (passwordOpt != NULL) flags |= SSF_MQTT_CONNECT_FLAG_PASSWORD;
 
     _SSFMQTTPktWriterInit(&w, buf, size);
-    _SSFMQTTPktPutField(&w, (const uint8_t *)SSF_MQTT_PROTOCOL_NAME, sizeof(SSF_MQTT_PROTOCOL_NAME) - 1);
+    _SSFMQTTPktPutField(&w, (const uint8_t *)SSF_MQTT_PROTOCOL_NAME,
+                        (sizeof(SSF_MQTT_PROTOCOL_NAME) - 1u));
     _SSFMQTTPktPutU8(&w, SSF_MQTT_PROTOCOL_LEVEL);
     _SSFMQTTPktPutU8(&w, flags);
     _SSFMQTTPktPutU16(&w, keepAliveSec);
-    _SSFMQTTPktPutField(&w, (const uint8_t *)clientId, _SSFMQTTPktFieldLen(clientId, clientIdSize));
-    if (willOpt != NULL)            /* Will topic and message follow the client id (3.1.3) */
+    _SSFMQTTPktPutField(&w, (const uint8_t *)clientIdStr,
+                        _SSFMQTTPktFieldLen(clientIdStr, clientIdSize));
+    /* Is a will supplied? */
+    if (willOpt != NULL)
     {
+        /* Yes, write its topic and message after the client id (3.1.3) */
         _SSFMQTTPktPutField(&w, (const uint8_t *)willOpt->topic,
                             _SSFMQTTPktFieldLen(willOpt->topic, willTopicSize));
         _SSFMQTTPktPutField(&w, willOpt->payloadOpt, willOpt->payloadLen);
     }
-    if (usernameOpt != NULL)
-    { _SSFMQTTPktPutField(&w, (const uint8_t *)usernameOpt, _SSFMQTTPktFieldLen(usernameOpt, usernameSize)); }
+    if (usernameStrOpt != NULL)
+    {
+        _SSFMQTTPktPutField(&w, (const uint8_t *)usernameStrOpt,
+                            _SSFMQTTPktFieldLen(usernameStrOpt, usernameSize));
+    }
     if (passwordOpt != NULL) _SSFMQTTPktPutField(&w, passwordOpt, passwordLen);
     _SSFMQTTPktWriterFinish(&w, SSF_MQTT_PKT_CONNECT, 0, lenOut);
 }
@@ -436,27 +472,30 @@ void SSFMQTTPktEncodeConnect(uint8_t *buf, size_t size, size_t *lenOut, SSFCStrI
 /* --------------------------------------------------------------------------------------------- */
 /* Returns the encoded CONNECT length for the same arguments as SSFMQTTPktEncodeConnect().       */
 /* --------------------------------------------------------------------------------------------- */
-size_t SSFMQTTPktConnectLen(SSFCStrIn_t clientId, size_t clientIdSize,
+size_t SSFMQTTPktConnectLen(SSFCStrIn_t clientIdStr, size_t clientIdSize,
                             const SSFMQTTPktWill_t *willOpt, size_t willTopicSize,
-                            SSFCStrIn_t usernameOpt, size_t usernameSize,
+                            SSFCStrIn_t usernameStrOpt, size_t usernameSize,
                             const uint8_t *passwordOpt, size_t passwordLen)
 {
     size_t remaining;
 
-    _SSFMQTTPktConnectRequire(clientId, clientIdSize, willOpt, willTopicSize, usernameOpt,
+    _SSFMQTTPktConnectRequire(clientIdStr, clientIdSize, willOpt, willTopicSize, usernameStrOpt,
                               usernameSize, passwordOpt, passwordLen);
 
     /* Protocol name field, level, flags, keep-alive; then the client id field */
     remaining = (2u + (sizeof(SSF_MQTT_PROTOCOL_NAME) - 1u) + 1u + 1u + 2u) +
-                (2u + _SSFMQTTPktFieldLen(clientId, clientIdSize));
+                (2u + _SSFMQTTPktFieldLen(clientIdStr, clientIdSize));
+    /* Is a will supplied? */
     if (willOpt != NULL)
     {
-        remaining += 2u + _SSFMQTTPktFieldLen(willOpt->topic, willTopicSize);
-        remaining += 2u + (size_t)willOpt->payloadLen;
+        /* Yes, add its topic and message fields */
+        remaining += (2u + _SSFMQTTPktFieldLen(willOpt->topic, willTopicSize));
+        remaining += (2u + (size_t)willOpt->payloadLen);
     }
-    if (usernameOpt != NULL) remaining += 2u + _SSFMQTTPktFieldLen(usernameOpt, usernameSize);
-    if (passwordOpt != NULL) remaining += 2u + passwordLen;
-    /* At most 10 + 5 * (2 + 65535) bytes, well under the 4-byte remaining length limit */
+    if (usernameStrOpt != NULL)
+    { remaining += (2u + _SSFMQTTPktFieldLen(usernameStrOpt, usernameSize)); }
+    if (passwordOpt != NULL) remaining += (2u + passwordLen);
+    /* At most 10 + 5 * (2 + 65535) bytes, well under the remaining length limit */
     return _SSFMQTTPktFixedHeaderLen(remaining) + remaining;
 }
 
@@ -470,7 +509,7 @@ size_t SSFMQTTPktPublishLen(size_t topicLen, size_t payloadLen, SSFMQTTCQoS_t qo
     SSF_REQUIRE((topicLen >= 1) && (topicLen <= SSF_MQTT_PKT_MAX_STRING_LEN));
     SSF_REQUIRE((qos == SSF_MQTTC_QOS_0) || (qos == SSF_MQTTC_QOS_1));
 
-    remaining = 2 + topicLen + payloadLen;
+    remaining = (2u + topicLen + payloadLen);
     if (qos != SSF_MQTTC_QOS_0) remaining += 2;
     if (remaining > SSF_MQTT_PKT_MAX_REMAINING_LEN) return 0;
     return _SSFMQTTPktFixedHeaderLen(remaining) + remaining;
@@ -479,7 +518,7 @@ size_t SSFMQTTPktPublishLen(size_t topicLen, size_t payloadLen, SSFMQTTCQoS_t qo
 /* --------------------------------------------------------------------------------------------- */
 /* Encodes a PUBLISH packet.                                                                     */
 /* --------------------------------------------------------------------------------------------- */
-void SSFMQTTPktEncodePublish(uint8_t *buf, size_t size, size_t *lenOut, SSFCStrIn_t topic,
+void SSFMQTTPktEncodePublish(uint8_t *buf, size_t size, size_t *lenOut, SSFCStrIn_t topicStr,
                              size_t topicSize, const uint8_t *payload, size_t payloadLen,
                              SSFMQTTCQoS_t qos, bool retain, uint16_t packetId)
 {
@@ -489,16 +528,16 @@ void SSFMQTTPktEncodePublish(uint8_t *buf, size_t size, size_t *lenOut, SSFCStrI
     SSF_REQUIRE(buf != NULL);
     SSF_REQUIRE(size > 0);
     SSF_REQUIRE(lenOut != NULL);
-    SSF_REQUIRE(topic != NULL);
+    SSF_REQUIRE(topicStr != NULL);
     SSF_REQUIRE((payload != NULL) || (payloadLen == 0));
     SSF_REQUIRE((qos == SSF_MQTTC_QOS_0) || (qos == SSF_MQTTC_QOS_1));
     SSF_REQUIRE((qos == SSF_MQTTC_QOS_0) || (packetId != 0));
-    SSF_REQUIRE(SSFMQTTPktIsValidTopic(topic, topicSize));
+    SSF_REQUIRE(SSFMQTTPktIsValidTopic(topicStr, topicSize));
 
-    flags = (uint8_t)((uint8_t)qos << SSF_MQTT_PUBLISH_QOS_SHIFT);   /* Never DUP: no resend */
+    flags = (uint8_t)((uint8_t)qos << SSF_MQTT_PUBLISH_QOS_SHIFT);
     if (retain) flags |= SSF_MQTT_PUBLISH_FLAG_RETAIN;
     _SSFMQTTPktWriterInit(&w, buf, size);
-    _SSFMQTTPktPutField(&w, (const uint8_t *)topic, _SSFMQTTPktFieldLen(topic, topicSize));
+    _SSFMQTTPktPutField(&w, (const uint8_t *)topicStr, _SSFMQTTPktFieldLen(topicStr, topicSize));
     if (qos != SSF_MQTTC_QOS_0) _SSFMQTTPktPutU16(&w, packetId);
     _SSFMQTTPktPutBytes(&w, payload, payloadLen);
     _SSFMQTTPktWriterFinish(&w, SSF_MQTT_PKT_PUBLISH, flags, lenOut);
@@ -600,12 +639,12 @@ bool SSFMQTTPktDecodeConnAck(const uint8_t *pkt, size_t pktLen, bool *sessionPre
     SSF_REQUIRE(codeOut != NULL);
 
     if (_SSFMQTTPktCheckPacket(pkt, pktLen, SSF_MQTT_PKT_CONNACK, 0, SSF_MQTT_FLAGS_MASK, &body,
-                      &remaining) == false)
+                               &remaining) == false)
     { return false; }
     if (remaining != 2) return false;
     if ((pkt[body] & 0xFEu) != 0) return false;      /* Connect Acknowledge Flags reserved bits */
     *sessionPresentOut = ((pkt[body] & 0x01u) != 0);
-    *codeOut = pkt[body + 1];
+    *codeOut = pkt[body + 1u];
     return true;
 }
 
@@ -627,17 +666,17 @@ bool SSFMQTTPktDecodeSubAck(const uint8_t *pkt, size_t pktLen, uint16_t *packetI
     SSF_REQUIRE(countOut != NULL);
 
     if (_SSFMQTTPktCheckPacket(pkt, pktLen, SSF_MQTT_PKT_SUBACK, 0, SSF_MQTT_FLAGS_MASK, &body,
-                      &remaining) == false)
+                               &remaining) == false)
     { return false; }
     if (remaining < 3) return false;                 /* Packet id and at least one return code */
-    count = remaining - 2;
+    count = (remaining - 2u);
     if (count > codesSize) return false;
 
     *packetIdOut = _SSFMQTTPktGetU16(&pkt[body]);
     if (*packetIdOut == 0) return false;
     for (i = 0; i < count; i++)
     {
-        uint8_t c = pkt[body + 2 + i];
+        uint8_t c = pkt[body + 2u + i];
         if ((c != (uint8_t)SSF_MQTTC_QOS_0) && (c != (uint8_t)SSF_MQTTC_QOS_1) &&
             (c != (uint8_t)SSF_MQTTC_QOS_2) && (c != SSF_MQTT_PKT_SUBACK_FAILURE))
         { return false; }
@@ -660,7 +699,7 @@ bool SSFMQTTPktDecodePubAck(const uint8_t *pkt, size_t pktLen, uint16_t *packetI
     SSF_REQUIRE(packetIdOut != NULL);
 
     if (_SSFMQTTPktCheckPacket(pkt, pktLen, SSF_MQTT_PKT_PUBACK, 0, SSF_MQTT_FLAGS_MASK, &body,
-                      &remaining) == false)
+                               &remaining) == false)
     { return false; }
     if (remaining != 2) return false;
     *packetIdOut = _SSFMQTTPktGetU16(&pkt[body]);
@@ -668,7 +707,7 @@ bool SSFMQTTPktDecodePubAck(const uint8_t *pkt, size_t pktLen, uint16_t *packetI
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if pkt is exactly a PINGRESP, D0 00 (flags 0, 2.2.2; no body, 3.13), else false. */
+/* Returns true if pkt is exactly a PINGRESP (D0 00), else false.                                */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFMQTTPktDecodePingResp(const uint8_t *pkt, size_t pktLen)
 {
@@ -700,15 +739,16 @@ bool SSFMQTTPktDecodePublish(const uint8_t *pkt, size_t pktLen, SSFMQTTPktPublis
     SSF_REQUIRE(pubOut != NULL);
 
     /* Flags are data for PUBLISH, so none are checked here */
-    if (_SSFMQTTPktCheckPacket(pkt, pktLen, SSF_MQTT_PKT_PUBLISH, 0, 0, &body, &remaining) == false) return false;
-    end = body + remaining;
+    if (_SSFMQTTPktCheckPacket(pkt, pktLen, SSF_MQTT_PKT_PUBLISH, 0, 0, &body, &remaining) == false)
+    { return false; }
+    end = (body + remaining);
 
     qosBits = (uint8_t)((pkt[0] & SSF_MQTT_PUBLISH_QOS_MASK) >> SSF_MQTT_PUBLISH_QOS_SHIFT);
-    if (qosBits > (uint8_t)SSF_MQTTC_QOS_2) return false;              /* QoS 3 is malformed */
+    if (qosBits > (uint8_t)SSF_MQTTC_QOS_2) return false;
     pubOut->qos = (SSFMQTTCQoS_t)qosBits;
     pubOut->retain = ((pkt[0] & SSF_MQTT_PUBLISH_FLAG_RETAIN) != 0);
     pubOut->dup = ((pkt[0] & SSF_MQTT_PUBLISH_FLAG_DUP) != 0);
-    if ((pubOut->qos == SSF_MQTTC_QOS_0) && pubOut->dup) return false;   /* DUP must be 0 at QoS 0 */
+    if ((pubOut->qos == SSF_MQTTC_QOS_0) && (pubOut->dup)) return false;
 
     /* Topic name */
     pos = body;
@@ -722,8 +762,10 @@ bool SSFMQTTPktDecodePublish(const uint8_t *pkt, size_t pktLen, SSFMQTTPktPublis
 
     /* Packet identifier, QoS 1 and 2 only */
     pubOut->packetId = 0;
+    /* Does the QoS carry a packet identifier? */
     if (pubOut->qos != SSF_MQTTC_QOS_0)
     {
+        /* Yes, read it */
         if ((end - pos) < 2) return false;
         pubOut->packetId = _SSFMQTTPktGetU16(&pkt[pos]);
         if (pubOut->packetId == 0) return false;
@@ -731,7 +773,7 @@ bool SSFMQTTPktDecodePublish(const uint8_t *pkt, size_t pktLen, SSFMQTTPktPublis
     }
 
     /* Payload is the rest */
-    pubOut->payloadLen = end - pos;
+    pubOut->payloadLen = (end - pos);
     pubOut->payload = (pubOut->payloadLen > 0) ? &pkt[pos] : NULL;
     return true;
 }
@@ -741,47 +783,46 @@ bool SSFMQTTPktDecodePublish(const uint8_t *pkt, size_t pktLen, SSFMQTTPktPublis
 /* --------------------------------------------------------------------------------------------- */
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if topic is NUL terminated within topicSize and 1..65535 bytes, else false.      */
+/* Returns true if topicStr is a valid outbound topic name within topicSize, else false.         */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFMQTTPktIsValidTopic(SSFCStrIn_t topic, size_t topicSize)
+bool SSFMQTTPktIsValidTopic(SSFCStrIn_t topicStr, size_t topicSize)
 {
     size_t len;
     size_t i;
 
-    SSF_REQUIRE(topic != NULL);
+    SSF_REQUIRE(topicStr != NULL);
     SSF_REQUIRE(topicSize > 0);
 
-    if (SSFStrLen(topic, topicSize, &len) == false) return false;
-    if ((_SSFMQTTPktIsTopicLenOk(len) == false) || (_SSFMQTTPktIsPrintable(topic, len) == false))
+    if (SSFStrLen(topicStr, topicSize, &len) == false) return false;
+    if ((_SSFMQTTPktIsTopicLenOk(len) == false) || (_SSFMQTTPktIsPrintable(topicStr, len) == false))
     { return false; }
     for (i = 0; i < len; i++)
-    { if ((topic[i] == '+') || (topic[i] == '#')) return false; }   /* No wildcard (3.3.2.1) */
+    { if ((topicStr[i] == '+') || (topicStr[i] == '#')) return false; }
     return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if filter is a valid topic filter: as a topic name, but '#' may be the whole     */
-/* last level and '+' a whole level (4.7.1).                                                    */
+/* Returns true if filterStr is a valid outbound topic filter within filterSize, else false.     */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFMQTTPktIsValidFilter(SSFCStrIn_t filter, size_t filterSize)
+bool SSFMQTTPktIsValidFilter(SSFCStrIn_t filterStr, size_t filterSize)
 {
     size_t len;
     size_t i;
     bool isLevelStart = true;
 
-    SSF_REQUIRE(filter != NULL);
+    SSF_REQUIRE(filterStr != NULL);
     SSF_REQUIRE(filterSize > 0);
 
-    if (SSFStrLen(filter, filterSize, &len) == false) return false;
-    if ((_SSFMQTTPktIsTopicLenOk(len) == false) || (_SSFMQTTPktIsPrintable(filter, len) == false))
+    if (SSFStrLen(filterStr, filterSize, &len) == false) return false;
+    if ((_SSFMQTTPktIsTopicLenOk(len) == false) || (_SSFMQTTPktIsPrintable(filterStr, len) == false))
     { return false; }
     for (i = 0; i < len; i++)
     {
-        if ((filter[i] == '#') && ((isLevelStart == false) || ((i + 1u) != len))) return false;
-        if ((filter[i] == '+') && ((isLevelStart == false) ||
-                                   (((i + 1u) < len) && (filter[i + 1u] != '/'))))
+        if ((filterStr[i] == '#') && ((isLevelStart == false) || ((i + 1u) != len))) return false;
+        if ((filterStr[i] == '+') && ((isLevelStart == false) ||
+                                      (((i + 1u) < len) && (filterStr[i + 1u] != '/'))))
         { return false; }
-        isLevelStart = (filter[i] == '/');
+        isLevelStart = (filterStr[i] == '/');
     }
     return true;
 }

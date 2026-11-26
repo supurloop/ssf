@@ -89,13 +89,13 @@ typedef int SSFNetSockUTFd_t;
 
 typedef struct
 {
-    SSFNetSockUTFd_t v4;             /* 127.0.0.1:port                                          */
-    SSFNetSockUTFd_t v6;             /* [::1]:port, or invalid where IPv6 loopback is missing   */
+    SSFNetSockUTFd_t v4;             /* 127.0.0.1:port */
+    SSFNetSockUTFd_t v6;             /* [::1]:port, or invalid where IPv6 loopback is missing */
     uint16_t port;
 } SSFNetSockUTListener_t;
 
 static SSFNetSock_t _utSocks[SSF_NETSOCK_UT_INSTANCES];
-extern bool _ssfNetSockUTNoCancel;   /* ssfnetsock.c test hook                                  */
+extern bool _ssfNetSockUTNoCancel;   /* ssfnetsock.c test hook */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Opens loopback listeners on one ephemeral port for IPv4 and, if available, IPv6.              */
@@ -106,6 +106,8 @@ static void _SSFNetSockUTListen(SSFNetSockUTListener_t *l)
     struct sockaddr_in6 sin6;
     socklen_t len = (socklen_t)sizeof(sin);
     int on = 1;
+
+    SSF_REQUIRE(l != NULL);
 
     l->v4 = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     SSF_ASSERT(l->v4 != SSF_NETSOCK_UT_INVALID);
@@ -119,15 +121,18 @@ static void _SSFNetSockUTListen(SSFNetSockUTListener_t *l)
                          ((const uint8_t *)&sin.sin_port)[1]);
 
     l->v6 = socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
+    /* No IPv6 socket available? */
     if (l->v6 == SSF_NETSOCK_UT_INVALID) return;
     (void)setsockopt(l->v6, IPPROTO_IPV6, IPV6_V6ONLY, (const char *)&on, (socklen_t)sizeof(on));
     memset(&sin6, 0, sizeof(sin6));
     sin6.sin6_family = AF_INET6;
     sin6.sin6_port = sin.sin_port;
     SSF_ASSERT(inet_pton(AF_INET6, "::1", &sin6.sin6_addr) == 1);
+    /* IPv6 loopback unusable? */
     if ((bind(l->v6, (struct sockaddr *)&sin6, (socklen_t)sizeof(sin6)) != 0) ||
         (listen(l->v6, 8) != 0))
     {
+        /* Yes, run IPv4 only */
         (void)SSF_NETSOCK_UT_CLOSE(l->v6);
         l->v6 = SSF_NETSOCK_UT_INVALID;
     }
@@ -138,6 +143,8 @@ static void _SSFNetSockUTListen(SSFNetSockUTListener_t *l)
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFNetSockUTUnlisten(SSFNetSockUTListener_t *l)
 {
+    SSF_REQUIRE(l != NULL);
+
     (void)SSF_NETSOCK_UT_CLOSE(l->v4);
     if (l->v6 != SSF_NETSOCK_UT_INVALID) (void)SSF_NETSOCK_UT_CLOSE(l->v6);
 }
@@ -152,13 +159,16 @@ static SSFNetSockUTFd_t _SSFNetSockUTAccept(const SSFNetSockUTListener_t *l)
     SSFNetSockUTFd_t peer;
     int max6;
 
+    SSF_REQUIRE(l != NULL);
+
     FD_ZERO(&rfds);
     FD_SET(l->v4, &rfds);
     if (l->v6 != SSF_NETSOCK_UT_INVALID) FD_SET(l->v6, &rfds);
-    max6 = (l->v6 != SSF_NETSOCK_UT_INVALID) ? (int)l->v6 : 0;
+    max6 = ((l->v6 != SSF_NETSOCK_UT_INVALID) ? ((int)l->v6) : 0);
     tv.tv_sec = 5;
     tv.tv_usec = 0;
     SSF_ASSERT(select(SSF_NETSOCK_UT_NFDS((int)l->v4, max6), &rfds, NULL, NULL, &tv) > 0);
+    /* Connection arrived on the IPv4 listener? */
     if (FD_ISSET(l->v4, &rfds)) peer = accept(l->v4, NULL, NULL);
     else peer = accept(l->v6, NULL, NULL);
     SSF_ASSERT(peer != SSF_NETSOCK_UT_INVALID);
@@ -170,9 +180,12 @@ static SSFNetSockUTFd_t _SSFNetSockUTAccept(const SSFNetSockUTListener_t *l)
 /* --------------------------------------------------------------------------------------------- */
 static SSFNetIOResult_t _SSFNetSockUTPollOpen(SSFNetSock_t *s, SSFPortTick_t ticks)
 {
-    SSFPortTick_t end = SSFPortGetTick64() + ticks;
+    SSFPortTick_t end;
     SSFNetIOResult_t r;
 
+    SSF_REQUIRE(s != NULL);
+
+    end = (SSFPortGetTick64() + ticks);
     do
     {
         r = s->transport.pollOpen(&s->transport);
@@ -184,13 +197,17 @@ static SSFNetIOResult_t _SSFNetSockUTPollOpen(SSFNetSock_t *s, SSFPortTick_t tic
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true once open() succeeds, retrying while abandoned lookups finish and are reaped.    */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFNetSockUTOpenRetry(SSFNetSock_t *s, const char *host, uint16_t port)
+static bool _SSFNetSockUTOpenRetry(SSFNetSock_t *s, const char *hostStr, uint16_t port)
 {
-    SSFPortTick_t end = SSFPortGetTick64() + SSF_NETSOCK_UT_WAIT_TICKS;
+    SSFPortTick_t end;
 
+    SSF_REQUIRE(s != NULL);
+    SSF_REQUIRE(hostStr != NULL);
+
+    end = (SSFPortGetTick64() + SSF_NETSOCK_UT_WAIT_TICKS);
     do
     {
-        if (s->transport.open(&s->transport, host, strlen(host) + 1, port)) return true;
+        if (s->transport.open(&s->transport, hostStr, (strlen(hostStr) + 1), port)) return true;
     } while (SSFPortGetTick64() < end);
     return false;
 }
@@ -208,6 +225,9 @@ static void _SSFNetSockUTEcho(SSFNetSock_t *s, const SSFNetSockUTListener_t *l)
     SSFPortTick_t end;
     SSFNetIOResult_t r;
 
+    SSF_REQUIRE(s != NULL);
+    SSF_REQUIRE(l != NULL);
+
     peer = _SSFNetSockUTAccept(l);
     SSF_ASSERT(s->transport.send(&s->transport, ping, sizeof(ping), &sent) == SSF_NET_IO_SUCCESS);
     SSF_ASSERT(sent == sizeof(ping));
@@ -216,28 +236,31 @@ static void _SSFNetSockUTEcho(SSFNetSock_t *s, const SSFNetSockUTListener_t *l)
     SSF_ASSERT(send(peer, (const char *)ping, (int)sizeof(ping), 0) == (int)sizeof(ping));
 
     memset(buf, 0, sizeof(buf));
-    end = SSFPortGetTick64() + SSF_NETSOCK_UT_WAIT_TICKS;
+    end = (SSFPortGetTick64() + SSF_NETSOCK_UT_WAIT_TICKS);
     do
     {
         size_t n = 0;
 
-        r = s->transport.recv(&s->transport, buf + got, sizeof(buf) - got, &n);
+        r = s->transport.recv(&s->transport, (buf + got), (sizeof(buf) - got), &n);
         SSF_ASSERT((r == SSF_NET_IO_SUCCESS) || (r == SSF_NET_IO_WANT_READ));
         got += n;
     } while ((got < sizeof(buf)) && (SSFPortGetTick64() < end));
     SSF_ASSERT(got == sizeof(buf));
     SSF_ASSERT(memcmp(buf, ping, sizeof(ping)) == 0);
 
-    /* shutdown(): accepted bytes are already in the kernel, so SUCCESS at once, and again on   */
-    /* repeat; recv() stays valid (the CLOSED below is read after it).                          */
+    /* shutdown() succeeds at once and on repeat, and recv() stays valid after it */
     SSF_ASSERT(s->transport.shutdown(&s->transport) == SSF_NET_IO_SUCCESS);
     SSF_ASSERT(s->transport.shutdown(&s->transport) == SSF_NET_IO_SUCCESS);
 
     /* Peer close is reported as CLOSED */
     (void)SSF_NETSOCK_UT_CLOSE(peer);
-    end = SSFPortGetTick64() + SSF_NETSOCK_UT_WAIT_TICKS;
-    do { size_t n = 0; r = s->transport.recv(&s->transport, buf, sizeof(buf), &n); }
-    while ((r == SSF_NET_IO_WANT_READ) && (SSFPortGetTick64() < end));
+    end = (SSFPortGetTick64() + SSF_NETSOCK_UT_WAIT_TICKS);
+    do
+    {
+        size_t n = 0;
+
+        r = s->transport.recv(&s->transport, buf, sizeof(buf), &n);
+    } while ((r == SSF_NET_IO_WANT_READ) && (SSFPortGetTick64() < end));
     SSF_ASSERT(r == SSF_NET_IO_CLOSED);
 
     s->transport.close(&s->transport);
@@ -283,9 +306,7 @@ void SSFNetSockUnitTest(void)
     SSF_ASSERT(t->pollOpen(t) == SSF_NET_IO_SUCCESS);          /* Stays connected */
     _SSFNetSockUTEcho(s, &l);
 
-    /* Closing with received data still unread must end with FIN, not RST: the peer has to be   */
-    /* able to read the client's last bytes (a TLS alert sent just before close()). An RST makes */
-    /* the peer's stack drop them unread.                                                        */
+    /* close() with received data unread ends with FIN, not RST, so the peer reads the last bytes */
     {
         static const uint8_t flight[64] = { 0 };
         SSFNetSockUTFd_t peer;
@@ -298,7 +319,7 @@ void SSFNetSockUnitTest(void)
         SSF_ASSERT(_SSFNetSockUTPollOpen(s, SSF_NETSOCK_UT_WAIT_TICKS) == SSF_NET_IO_SUCCESS);
         peer = _SSFNetSockUTAccept(&l);
         SSF_ASSERT(send(peer, (const char *)flight, (int)sizeof(flight), 0) == (int)sizeof(flight));
-        end = SSFPortGetTick64() + SSF_NETSOCK_UT_WAIT_TICKS;  /* Flight reaches the client */
+        end = (SSFPortGetTick64() + SSF_NETSOCK_UT_WAIT_TICKS); /* Flight reaches the client */
         while (SSFPortGetTick64() < end)
         {
             fd_set rfds;
@@ -310,7 +331,7 @@ void SSFNetSockUnitTest(void)
         }
         SSF_ASSERT(t->send(t, (const uint8_t *)"X", 1, &sent) == SSF_NET_IO_SUCCESS);
         t->close(t);                                           /* Flight still unread */
-        end = SSFPortGetTick64() + (SSF_TICKS_PER_SEC / 5u);   /* FIN or RST reaches the peer */
+        end = (SSFPortGetTick64() + (SSF_TICKS_PER_SEC / 5u)); /* FIN or RST reaches the peer */
         while (SSFPortGetTick64() < end) { }
         n = recv(peer, (char *)b, (int)sizeof(b), 0);
         SSF_ASSERT(n == 1);
@@ -327,16 +348,17 @@ void SSFNetSockUnitTest(void)
     SSF_ASSERT(s->state == SSF_NETSOCK_STATE_CLOSED);
     SSF_ASSERT(s->lookup == SSF_NETSOCK_NO_LOOKUP);
 
-    /* ... and a host name never connects over IPv6: with only [::1] listening, "localhost"   */
-    /* (which also resolves to ::1 where IPv6 loopback exists) must fail, not reach it.        */
+    /* A host name never connects over IPv6: with only [::1] listening "localhost" must fail */
     {
         SSFNetSockUTListener_t v6only;
         SSFNetIOResult_t r;
 
         _SSFNetSockUTListen(&v6only);
+        /* IPv6 loopback available? */
         if (v6only.v6 != SSF_NETSOCK_UT_INVALID)
         {
-            (void)SSF_NETSOCK_UT_CLOSE(v6only.v4);         /* Leave only [::1]:port */
+            /* Yes, leave only [::1]:port listening */
+            (void)SSF_NETSOCK_UT_CLOSE(v6only.v4);
             v6only.v4 = SSF_NETSOCK_UT_INVALID;
             SSF_ASSERT(_SSFNetSockUTOpenRetry(s, "localhost", v6only.port));
             r = _SSFNetSockUTPollOpen(s, SSF_NETSOCK_UT_WAIT_TICKS);
@@ -344,7 +366,11 @@ void SSFNetSockUnitTest(void)
             SSF_ASSERT(s->state == SSF_NETSOCK_STATE_CLOSED);
             (void)SSF_NETSOCK_UT_CLOSE(v6only.v6);
         }
-        else { (void)SSF_NETSOCK_UT_CLOSE(v6only.v4); }
+        else
+        {
+            /* No, nothing to test */
+            (void)SSF_NETSOCK_UT_CLOSE(v6only.v4);
+        }
     }
 
     /* Refused connect to a port nobody listens on */
@@ -355,8 +381,10 @@ void SSFNetSockUnitTest(void)
         deadPort = dead.port;
         _SSFNetSockUTUnlisten(&dead);
     }
+    /* Refusal not already detected by open()? */
     if (t->open(t, "127.0.0.1", sizeof("127.0.0.1"), deadPort))
     {
+        /* Yes, pollOpen() reports it */
         SSFNetIOResult_t r = _SSFNetSockUTPollOpen(s, SSF_NETSOCK_UT_WAIT_TICKS);
         SSF_ASSERT((r == SSF_NET_IO_ERROR) || (r == SSF_NET_IO_CLOSED));
     }
@@ -383,8 +411,7 @@ void SSFNetSockUnitTest(void)
     SSF_ASSERT(_SSFNetSockUTPollOpen(s, SSF_NETSOCK_UT_WAIT_TICKS) == SSF_NET_IO_SUCCESS);
     _SSFNetSockUTEcho(s, &l);
 
-    /* Lookups the OS cannot cancel are abandoned by close() and DeInit(), then reaped once     */
-    /* they finish, so open() succeeds again                                                    */
+    /* Uncancelable lookups abandoned by close() and DeInit() are reaped, so open() works again */
     _ssfNetSockUTNoCancel = true;
     for (i = 0; i < (SSF_NETSOCK_CONFIG_MAX_LOOKUPS * 4u); i++)
     {
@@ -403,8 +430,10 @@ void SSFNetSockUnitTest(void)
     /* Lookup slots are shared: one more lookup than slots is refused until one is released */
     for (i = 1; i < SSF_NETSOCK_UT_INSTANCES; i++) SSFNetSockInit(&_utSocks[i]);
     for (i = 0; i < SSF_NETSOCK_CONFIG_MAX_LOOKUPS; i++)
-    { SSF_ASSERT(_SSFNetSockUTOpenRetry(&_utSocks[i], "localhost", l.port)); }
-    i = SSF_NETSOCK_UT_INSTANCES - 1u;
+    {
+        SSF_ASSERT(_SSFNetSockUTOpenRetry(&_utSocks[i], "localhost", l.port));
+    }
+    i = (SSF_NETSOCK_UT_INSTANCES - 1u);
     SSF_ASSERT(_utSocks[i].transport.open(&_utSocks[i].transport, "localhost",
                                           sizeof("localhost"), l.port) == false);
     SSF_ASSERT(_utSocks[i].state == SSF_NETSOCK_STATE_CLOSED);

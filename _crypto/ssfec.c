@@ -171,7 +171,7 @@ static void _SSFECPointDouble(SSFECPoint_t *r, const SSFECPoint_t *p, const SSFE
     SSF_REQUIRE(r->y.cap >= c->limbs);
     SSF_REQUIRE(r->z.cap >= c->limbs);
 
-    /* No identity early-exit: formulas produce Z3 = 0 when Z1 = 0, preserving the identity. */
+    /* Formulas produce Z3 = 0 when Z1 = 0, preserving the identity. */
 
     /* delta = Z1^2 */
     SSFBNModMulNISTPrime(&delta, &p->z, &p->z, &c->p);
@@ -704,14 +704,16 @@ bool SSFECPointOnCurve(const SSFECPoint_t *pt, SSFECCurve_t curve)
 
     if (SSFBNIsZero(&pt->z)) return false;
 
-    /* Get affine coordinates */
+    /* Is the point already affine (Z = 1)? */
     if (SSFBNIsOne(&pt->z))
     {
+        /* Yes, use the coordinates directly. */
         SSFBNCopy(&ax, &pt->x);
         SSFBNCopy(&ay, &pt->y);
     }
     else
     {
+        /* No, convert to affine coordinates. */
         if (!SSFECPointToAffine(&ax, &ay, pt, curve)) return false;
     }
 
@@ -746,14 +748,16 @@ bool SSFECPointValidate(const SSFECPoint_t *pt, SSFECCurve_t curve)
     /* Must not be identity */
     if (SSFBNIsZero(&pt->z)) return false;
 
-    /* Get affine coordinates */
+    /* Is the point already affine (Z = 1)? */
     if (SSFBNIsOne(&pt->z))
     {
+        /* Yes, use the coordinates directly. */
         SSFBNCopy(&ax, &pt->x);
         SSFBNCopy(&ay, &pt->y);
     }
     else
     {
+        /* No, convert to affine coordinates. */
         if (!SSFECPointToAffine(&ax, &ay, pt, curve)) return false;
     }
 
@@ -1079,9 +1083,10 @@ void SSFECScalarMulDual(SSFECPoint_t *r, const SSFBN_t *u1, const SSFECPoint_t *
         /* R = 2 * R */
         _SSFECPointDouble(r, r, c);
 
-        /* R = R + table[idx] (skip if identity) */
+        /* Does this bit pair select a non-identity table entry? */
         if (idx != 0u)
         {
+            /* Yes, R = R + table[idx]. */
             _SSFECPointAddFull(r, r, table[idx], c);
         }
     }
@@ -1257,6 +1262,7 @@ void SSFECScalarMulBaseP256(SSFECPoint_t *r, const SSFBN_t *k)
     SSF_REQUIRE(r->x.cap >= 8u);
     SSF_REQUIRE(r->y.cap >= 8u);
     SSF_REQUIRE(r->z.cap >= 8u);
+
     _SSFECScalarMulComb(r, k, SSFECGetCurveParams(SSF_EC_CURVE_P256),
                         _ssfECP256CombTable, _SSF_EC_P256_COMB_D);
 }
@@ -1297,6 +1303,7 @@ void SSFECScalarMulBaseP384(SSFECPoint_t *r, const SSFBN_t *k)
     SSF_REQUIRE(r->x.cap >= 12u);
     SSF_REQUIRE(r->y.cap >= 12u);
     SSF_REQUIRE(r->z.cap >= 12u);
+
     _SSFECScalarMulComb(r, k, SSFECGetCurveParams(SSF_EC_CURVE_P384),
                         _ssfECP384CombTable, _SSF_EC_P384_COMB_D);
 }
@@ -1305,13 +1312,13 @@ void SSFECScalarMulBaseP384(SSFECPoint_t *r, const SSFBN_t *k)
 
 #if (SSF_EC_CONFIG_FIXED_BASE_P256 == 1) || (SSF_EC_CONFIG_FIXED_BASE_P384 == 1)
 
-/* --------------------------------------------------------------------------------------------- */
-/* Internal: variable-time scalar mul via 5-bit signed-digit wNAF (PUBLIC-INPUT ONLY).           */
-/* --------------------------------------------------------------------------------------------- */
 #define _SSF_EC_VTWNAF_W            (5u)
 #define _SSF_EC_VTWNAF_TABLE_SIZE   (1u << (_SSF_EC_VTWNAF_W - 2u)) /* 8 odd multiples */
 #define _SSF_EC_VTWNAF_MAX_DIGITS   ((SSF_EC_MAX_COORD_BYTES * 8u) + 1u)
 
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: variable-time scalar mul via 5-bit signed-digit wNAF (PUBLIC-INPUT ONLY).           */
+/* --------------------------------------------------------------------------------------------- */
 static void _SSFECScalarMulVTwNAF(SSFECPoint_t *r, const SSFBN_t *k, const SSFECPoint_t *p,
                                   const SSFECCurveParams_t *c)
 {
@@ -1361,15 +1368,19 @@ static void _SSFECScalarMulVTwNAF(SSFECPoint_t *r, const SSFBN_t *k, const SSFEC
     SSFBNCopy(&table[0].z, &p->z);
     inputAffine = (table[0].z.len >= 1u) && SSFBNIsOne(&table[0].z);
     _SSFECPointDouble(&twoP, p, c);
-    /* First add: table[1] = table[0] + twoP. */
+
+    /* Is P affine (Z = 1) for the first add table[1] = table[0] + twoP? */
     if (inputAffine)
     {
+        /* Yes, use the mixed-coordinate add. */
         _SSFECPointAddMixed(&table[1], &twoP, &table[0], c);
     }
     else
     {
+        /* No, use the full Jacobian add. */
         _SSFECPointAddFull(&table[1], &table[0], &twoP, c);
     }
+
     /* Subsequent table[i] for i >= 2: both operands are Jacobian (twoP and table[i-1]). */
     for (i = 2; i < _SSF_EC_VTWNAF_TABLE_SIZE; i++)
     {
@@ -1408,8 +1419,11 @@ static void _SSFECScalarMulVTwNAF(SSFECPoint_t *r, const SSFBN_t *k, const SSFEC
             /* No, emit a zero digit. */
             d = 0;
         }
+
+        /* Is there room for another digit? */
         if (nDigits < _SSF_EC_VTWNAF_MAX_DIGITS)
         {
+            /* Yes, store it. */
             digits[nDigits++] = d;
         }
         SSFBNShiftRight1(&kCopy);
@@ -1421,13 +1435,17 @@ static void _SSFECScalarMulVTwNAF(SSFECPoint_t *r, const SSFBN_t *k, const SSFEC
     SSFBNSetZero(&r->z, c->limbs);
 
     /* Process digits MSB-first; mixed-add against table[0] when P was affine (Z=1). */
-    for (i = nDigits; i-- > 0; )
+    for (i = nDigits; (i--) > 0u; )
     {
         int8_t d = digits[i];
+
         _SSFECPointDouble(r, r, c);
+
+        /* Is the digit positive? */
         if (d > 0)
         {
-            int32_t idx = (d - 1) / 2;
+            /* Yes, add table[(d - 1) / 2]. */
+            int32_t idx = ((d - 1) / 2);
 
             /* Is this the affine table[0] entry? */
             if ((idx == 0) && inputAffine)
@@ -1441,9 +1459,11 @@ static void _SSFECScalarMulVTwNAF(SSFECPoint_t *r, const SSFBN_t *k, const SSFEC
                 _SSFECPointAddFull(r, r, &table[idx], c);
             }
         }
+        /* Is the digit negative? */
         else if (d < 0)
         {
-            int32_t idx = ((-d) - 1) / 2;
+            /* Yes, add the negation of table[(-d - 1) / 2]. */
+            int32_t idx = (((-d) - 1) / 2);
 
             /* neg = -table[idx] = (X, p - Y, Z) */
             SSFBNCopy(&neg.x, &table[idx].x);
@@ -1511,34 +1531,41 @@ void SSFECScalarMulDualBase(SSFECPoint_t *r, const SSFBN_t *u1, const SSFBN_t *u
     SSF_REQUIRE(u2->len <= c->limbs);
 
 #if SSF_EC_CONFIG_FIXED_BASE_P256 == 1
+    /* Is the curve P-256? */
     if (curve == SSF_EC_CURVE_P256)
     {
+        /* Yes, use the P-256 fixed-base comb. */
         SSFECScalarMulBaseP256(&R1, u1);
         didFixedBase = true;
     }
 #endif
 #if SSF_EC_CONFIG_FIXED_BASE_P384 == 1
+    /* Is the curve P-384? */
     if (curve == SSF_EC_CURVE_P384)
     {
+        /* Yes, use the P-384 fixed-base comb. */
         SSFECScalarMulBaseP384(&R1, u1);
         didFixedBase = true;
     }
 #endif
 
+    /* Was a fixed-base comb unavailable for this curve? */
     if (!didFixedBase)
     {
+        /* Yes, use the generic constant-time scalar mul on G. */
         SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
+
         SSFECPointFromAffine(&G, &c->gx, &c->gy, curve);
         SSFECScalarMul(&R1, u1, &G, curve);
     }
 
-    /* [u2] q via the variable-time wNAF (faster than the CT path; safe because u2 is public). */
+    /* [u2] q via the variable-time wNAF; u2 is public. */
     _SSFECScalarMulVTwNAF(&R2, u2, q, c);
 
     /* r = R1 + R2 */
     SSFECPointAdd(r, &R1, &R2, curve);
 
-    /* Zeroize scratch for consistency with the rest of the module. */
+    /* Zeroize scratch. */
     SSFBNZeroize(&R1.x); SSFBNZeroize(&R1.y); SSFBNZeroize(&R1.z);
     SSFBNZeroize(&R2.x); SSFBNZeroize(&R2.y); SSFBNZeroize(&R2.z);
 }

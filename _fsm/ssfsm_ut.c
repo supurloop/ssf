@@ -119,13 +119,11 @@ void UT1TestHandler1(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
         SSFSMPutEvent(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UTX_1);
         SSFSMPutEvent(SSF_SM_UNIT_TEST_2, SSF_SM_EVENT_UT1_1);
         SSFSMPutEvent(SSF_SM_UNIT_TEST_2, SSF_SM_EVENT_UT1_2);
-        /* (Hardening) InitHandler/DeInitHandler must not be called from within a state handler;    */
-        /* the reentrancy guard traps it (matching SSFSMTask). UT_2 is initialized here, so the     */
-        /* guard -- not the "already de-initialized" precondition -- is what fires, and it aborts    */
-        /* before touching UT_2, leaving the rest of the test undisturbed. */
+        /* DeInitHandler from within a state handler must trip the reentrancy guard */
         SSF_ASSERT_TEST(SSFSMDeInitHandler(SSF_SM_UNIT_TEST_2));
         break;
     case SSF_SM_EVENT_UTX_1:
+        /* Is single-byte event data present? */
         if ((data != NULL) && (dataLen == 1))
         {
             char ed;
@@ -140,6 +138,7 @@ void UT1TestHandler1(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
         }
         break;
     case SSF_SM_EVENT_UTX_2:
+        /* Is single-byte event data present? */
         if ((data != NULL) && (dataLen == 1))
         {
             char ed;
@@ -178,6 +177,7 @@ void UT1TestHandler2(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
         break;
     case SSF_SM_EVENT_UTX_2:
         SSF_ASSERT_TEST(SSFSMTran(UT1TestHandler2));
+        /* Is 10-byte event data present? */
         if ((data != NULL) && (dataLen == 10))
         {
             char ed[10];
@@ -209,6 +209,7 @@ void UT2TestHandler1(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
     case SSF_SM_EVENT_EXIT:
         break;
     case SSF_SM_EVENT_UT2_1:
+        /* Is single-byte event data present? */
         if ((data != NULL) && (dataLen == 1))
         {
             char ed;
@@ -229,6 +230,7 @@ void UT2TestHandler1(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
         SSFSMStopTimer(SSF_SM_EVENT_UT1_1);
         break;
     case SSF_SM_EVENT_UTX_2:
+        /* Is single-byte event data present? */
         if ((data != NULL) && (dataLen == 1))
         {
             char ed;
@@ -277,6 +279,7 @@ void UT2TestHandler2(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
     case SSF_SM_EVENT_UT2_1:
         break;
     case SSF_SM_EVENT_UT2_2:
+        /* Is 20-byte event data present? */
         if ((data != NULL) && (dataLen == 20))
         {
             char ed[20];
@@ -609,7 +612,7 @@ static void UT1CapacityHandler(SSFSMEventId_t eid, const SSFSMData_t *data,
 #endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT == 0 */
 
 /* --------------------------------------------------------------------------------------------- */
-/* Performs unit test on ssfll's external interface.                                             */
+/* Performs unit test on ssfsm's external interface.                                             */
 /* --------------------------------------------------------------------------------------------- */
 void SSFSMUnitTest(void)
 {
@@ -630,13 +633,7 @@ void SSFSMUnitTest(void)
     SSFSMInit(SSFSM_UT_MAX_EVENTS, SSFSM_UT_MAX_TIMERS);
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
-    /* KNOWN FLAKY UNDER LOAD -- already investigated, do not re-investigate. This asserts a 1 s */
-    /* timed wait returns within +/-10%. When the full suite runs tests in parallel (one process */
-    /* per core, e.g. 24) the OS can deschedule this thread past 1.1 s and the assert at the     */
-    /* line below fires; it was seen in 3 of 4 full runs on a loaded Linux host (2026-11-23).   */
-    /* Run alone, the test passed 5/5. The wait itself is not faulty. If this fails in a full    */
-    /* run, re-run ssfsm on its own before suspecting a regression. Fix options when wanted:     */
-    /* widen the upper bound, or skip this timing check when tests run in parallel.              */
+    /* Known flaky under parallel load (OS descheduling); re-run ssfsm alone before suspecting it */
     start = SSFPortGetTick64();
     SSF_SM_THREAD_WAKE_WAIT(SSF_TICKS_PER_SEC);
     delta = SSFPortGetTick64() - start;
@@ -921,11 +918,7 @@ void SSFSMUnitTest(void)
     /* Verify that super cannot have a super */
     SSF_ASSERT_TEST(SSFSMInitHandler(SSF_SM_UNIT_TEST_3, UT3TestHandler2));
 
-    /* The negative test above asserts partway through SSFSMInitHandler (after it has set the       */
-    /* active SM); the SSF_ASSERT_TEST longjmp skips the function's cleanup, leaving the framework  */
-    /* mid-init. In production the assert halts, so this never persists -- but the harness keeps    */
-    /* running, so reset the framework before the positive tests below (the new reentrancy guard    */
-    /* would otherwise trip on the stale active SM). */
+    /* Reset the framework left mid-init by the asserting SSFSMInitHandler call above */
     SSFSMDeInit();
     SSFSMInit(SSFSM_UT_MAX_EVENTS, SSFSM_UT_MAX_TIMERS);
 
@@ -954,13 +947,9 @@ void SSFSMUnitTest(void)
     SSF_ASSERT(_utTrace[0] == 2);
     SSF_ASSERT(_utTrace[1] == 1);
 
-    /* Drive runtime transitions to exercise super exit/entry across hierarchy boundaries. */
-    /* The existing init/deinit tests cover super entry/exit at framework boundaries; this  */
-    /* adds the inter-state transition path (ssfsm.c lines 199-216 -- currentSuper !=        */
-    /* nextSuper, with each side independently NULL or non-NULL).                            */
-    /* From the previous block, UT3 is currently initialized to Handler1 (has super).        */
+    /* Verify super exit/entry on runtime transitions between states with and without a super */
     {
-        /* Tran Handler1 (super = Handler1Super) -> Handler3 (no super). */
+        /* Tran Handler1 (super = Handler1Super) -> Handler3 (no super) */
         _utTraceIndex = 0;
         memset(_utTrace, 0, sizeof(_utTrace));
         SSFSMPutEvent(SSF_SM_UNIT_TEST_3, SSF_SM_EVENT_UNIT_TEST_1);
@@ -969,7 +958,7 @@ void SSFSMUnitTest(void)
         SSF_ASSERT(_utTrace[1] == 4);   /* Handler1Super EXIT */
         SSF_ASSERT(_utTrace[2] == 5);   /* Handler3 ENTRY */
 
-        /* Tran Handler3 (no super) -> Handler1 (super). */
+        /* Tran Handler3 (no super) -> Handler1 (super) */
         _utTraceIndex = 0;
         memset(_utTrace, 0, sizeof(_utTrace));
         SSFSMPutEvent(SSF_SM_UNIT_TEST_3, SSF_SM_EVENT_UNIT_TEST_1);
@@ -979,14 +968,9 @@ void SSFSMUnitTest(void)
         SSF_ASSERT(_utTrace[2] == 1);   /* Handler1 ENTRY */
     }
 
-    /* Timer ownership. A timer started by super-state code reached through child delegation     */
-    /* belongs to the super and survives a transition between two of its children; a timer       */
-    /* started by the child is cancelled by that transition. Re-arming the super's timer from     */
-    /* another delegated event replaces it rather than duplicating it. The super's timer is       */
-    /* cancelled when the super itself is exited.                                                 */
+    /* Verify super-owned timers survive sibling transitions and child-owned timers do not */
     {
-        /* In Handler1 (super Handler1Super). Arm super timer twice (second replaces first) and  */
-        /* a child timer, then move to sibling Handler4.                                          */
+        /* Arm the super timer twice and a child timer, then move to sibling Handler4 */
         _utTraceIndex = 0;
         memset(_utTrace, 0, sizeof(_utTrace));
         SSFSMPutEvent(SSF_SM_UNIT_TEST_3, SSF_SM_EVENT_UTX_1);
@@ -1006,7 +990,7 @@ void SSFSMUnitTest(void)
         SSF_ASSERT(_utTraceIndex == 3);
         SSF_ASSERT(_utTrace[2] == 7);   /* Super timer fired exactly once; child timer did not */
 
-        /* Re-arm the super timer from Handler4, then leave the super: timer must be cancelled. */
+        /* Re-arm the super timer from Handler4, then leave the super: timer must be cancelled */
         _utTraceIndex = 0;
         memset(_utTrace, 0, sizeof(_utTrace));
         SSFSMPutEvent(SSF_SM_UNIT_TEST_3, SSF_SM_EVENT_UTX_1);
@@ -1038,16 +1022,14 @@ void SSFSMUnitTest(void)
     SSF_ASSERT(SSFSMTask(&nextTimeout) == false);
     SSF_ASSERT(nextTimeout == SSF_SM_MAX_TIMEOUT);
 
-    /* (Hardening) The event pool is sized maxEvents + maxTimers, so pending timers cannot starve    */
-    /* queued events. Queue maxEvents + maxTimers events to exercise the full event-pool capacity;   */
-    /* with the old size-maxEvents pool this would exhaust and assert. DeInit drains them unprocessed. */
+    /* Verify the event pool holds maxEvents + maxTimers entries */
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
     {
         uint32_t ei;
         SSFSMInitHandler(SSF_SM_UNIT_TEST_1, UT1TestHandler1);
         SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 0, SSF_SM_EVENT_ENTRY);
         SSF_ASSERT(_SSFSMFlagsAreCleared());
-        for (ei = 0; ei < SSFSM_UT_MAX_EVENTS + SSFSM_UT_MAX_TIMERS; ei++)
+        for (ei = 0; ei < (SSFSM_UT_MAX_EVENTS + SSFSM_UT_MAX_TIMERS); ei++)
         { SSFSMPutEvent(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UT1_1); }
     }
 #else

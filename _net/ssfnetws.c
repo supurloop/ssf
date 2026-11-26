@@ -54,7 +54,7 @@
 #define SSF_NETWS_FIELD_PREFIX       "sec-websocket-"
 #define SSF_NETWS_CLOSE_NORMAL       (1000u)
 #define SSF_NETWS_CLOSE_PROTOCOL     (1002u)
-#define SSF_NETWS_RECV_MAX_READS     (8u)   /* Inner reads per recv() that yield no payload    */
+#define SSF_NETWS_RECV_MAX_READS     (8u)   /* Inner reads per recv() that yield no payload */
 
 /* Frame header (RFC 6455 5.2) */
 #define SSF_NETWS_FIN                (0x80u)
@@ -72,17 +72,17 @@
 #define SSF_NETWS_OP_PONG            (0xAu)
 #define SSF_NETWS_OP_IS_CONTROL(op)  (((op) & 0x8u) != 0)
 
-/* --------------------------------------------------------------------------------------------- */
-/* Returns the session that owns transport t. t is the session's first member, so it converts    */
-/* back to the session (via void *, which -Wcast-align accepts).                                 */
-/* --------------------------------------------------------------------------------------------- */
+/* Compile time check that transport is the session's first member */
 typedef char _SSFNetWSTransportFirst_t[(offsetof(SSFNetWSSession_t, transport) == 0u) ? 1 : -1];
 
+/* --------------------------------------------------------------------------------------------- */
+/* Returns the session that owns transport t.                                                    */
+/* --------------------------------------------------------------------------------------------- */
 static SSFNetWSSession_t *_SSFNetWSSelf(SSFNetTransport_t *t)
 {
     SSFNetWSSession_t *ws = (SSFNetWSSession_t *)(void *)t;
 
-    SSF_REQUIRE(ws != NULL);
+    SSF_REQUIRE(t != NULL);
     SSF_REQUIRE(ws->magic == SSF_NETWS_MAGIC);
     return ws;
 }
@@ -90,54 +90,64 @@ static SSFNetWSSession_t *_SSFNetWSSelf(SSFNetTransport_t *t)
 /* --------------------------------------------------------------------------------------------- */
 /* Writes base64(SHA-1(key || GUID)) to accept (RFC 6455 4.2.2).                                 */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFNetWSAccept(SSFCStrIn_t key, char accept[SSF_NETWS_ACCEPT_SIZE])
+static void _SSFNetWSAccept(SSFCStrIn_t keyStr, char accept[SSF_NETWS_ACCEPT_SIZE])
 {
     SSFSHA1Context_t ctx;
     uint8_t hash[SSF_SHA1_HASH_SIZE];
     size_t keyLen;
 
-    SSF_REQUIRE(SSFStrLen(key, SSF_NETWS_KEY_SIZE, &keyLen));
+    SSF_REQUIRE(keyStr != NULL);
+    SSF_REQUIRE(accept != NULL);
+    SSF_REQUIRE(SSFStrLen(keyStr, SSF_NETWS_KEY_SIZE, &keyLen));
     SSFSHA1Begin(&ctx);
-    SSFSHA1Update(&ctx, (const uint8_t *)key, (uint32_t)keyLen);
+    SSFSHA1Update(&ctx, (const uint8_t *)keyStr, (uint32_t)keyLen);
     SSFSHA1Update(&ctx, (const uint8_t *)SSF_NETWS_GUID, (uint32_t)(sizeof(SSF_NETWS_GUID) - 1u));
     SSFSHA1End(&ctx, hash);
     SSF_ASSERT(SSFBase64Encode(hash, sizeof(hash), accept, SSF_NETWS_ACCEPT_SIZE, NULL));
 }
 
 #if SSF_CONFIG_NETWS_UNIT_TEST == 1
-void _SSFNetWSAcceptForTest(SSFCStrIn_t key, char accept[SSF_NETWS_ACCEPT_SIZE])
+/* --------------------------------------------------------------------------------------------- */
+/* Exposes _SSFNetWSAccept() to the unit test.                                                   */
+/* --------------------------------------------------------------------------------------------- */
+void _SSFNetWSAcceptForTest(SSFCStrIn_t keyStr, char accept[SSF_NETWS_ACCEPT_SIZE])
 {
-    _SSFNetWSAccept(key, accept);
+    SSF_REQUIRE(keyStr != NULL);
+    SSF_REQUIRE(accept != NULL);
+
+    _SSFNetWSAccept(keyStr, accept);
 }
 #endif /* SSF_CONFIG_NETWS_UNIT_TEST */
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if name is one the handshake writes itself, so an app field may not use it.      */
+/* Returns true if nameStr is one the handshake writes itself, so an app field may not use it.   */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFNetWSIsReservedField(SSFCStrIn_t name)
+static bool _SSFNetWSIsReservedField(SSFCStrIn_t nameStr)
 {
     static const char *const reserved[] = { "host", "upgrade", "connection", "content-length",
                                             "transfer-encoding" };
     size_t i;
     size_t j;
 
+    SSF_REQUIRE(nameStr != NULL);
+
     for (i = 0; i < (sizeof(reserved) / sizeof(reserved[0])); i++)
     {
-        for (j = 0; (reserved[i][j] != 0) && (name[j] != 0); j++)
+        for (j = 0; (reserved[i][j] != 0) && (nameStr[j] != 0); j++)
         {
-            char c = name[j];
+            char c = nameStr[j];
 
             if ((c >= 'A') && (c <= 'Z')) c = (char)(c + ('a' - 'A'));
             if (c != reserved[i][j]) break;
         }
-        if ((reserved[i][j] == 0) && (name[j] == 0)) return true;
+        if ((reserved[i][j] == 0) && (nameStr[j] == 0)) return true;
     }
     for (j = 0; SSF_NETWS_FIELD_PREFIX[j] != 0; j++)
     {
-        char c = name[j];
+        char c = nameStr[j];
 
         if ((c >= 'A') && (c <= 'Z')) c = (char)(c + ('a' - 'A'));
-        if (c != SSF_NETWS_FIELD_PREFIX[j]) return false;   /* Also stops at name's NUL */
+        if (c != SSF_NETWS_FIELD_PREFIX[j]) return false;   /* Also stops at nameStr's NUL */
     }
     return true;
 }
@@ -147,12 +157,19 @@ static bool _SSFNetWSIsReservedField(SSFCStrIn_t name)
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFNetWSReset(SSFNetWSSession_t *ws)
 {
-    SSFNetTransport_t transport = ws->transport;
-    SSFNetTransport_t *inner = ws->inner;
-    SSFCStrIn_t path = ws->path;
-    const SSFHTTPHdrField_t *fieldsOpt = ws->fieldsOpt;
-    uint32_t fieldCount = ws->fieldCount;
+    SSFNetTransport_t transport;
+    SSFNetTransport_t *inner;
+    SSFCStrIn_t path;
+    const SSFHTTPHdrField_t *fieldsOpt;
+    uint32_t fieldCount;
 
+    SSF_REQUIRE(ws != NULL);
+
+    transport = ws->transport;
+    inner = ws->inner;
+    path = ws->path;
+    fieldsOpt = ws->fieldsOpt;
+    fieldCount = ws->fieldCount;
     SSFCryptSecureZero(ws, sizeof(*ws));
     ws->transport = transport;
     ws->inner = inner;
@@ -168,6 +185,8 @@ static void _SSFNetWSReset(SSFNetWSSession_t *ws)
 /* --------------------------------------------------------------------------------------------- */
 static SSFNetIOResult_t _SSFNetWSFail(SSFNetWSSession_t *ws, SSFNetIOResult_t r)
 {
+    SSF_REQUIRE(ws != NULL);
+
     ws->state = SSF_NETWS_STATE_FAILED;
     return (r == SSF_NET_IO_CLOSED) ? SSF_NET_IO_CLOSED : SSF_NET_IO_ERROR;
 }
@@ -175,18 +194,24 @@ static SSFNetIOResult_t _SSFNetWSFail(SSFNetWSSession_t *ws, SSFNetIOResult_t r)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true with the Upgrade request in hsBuf, else false if it is invalid or too large.     */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFNetWSBuildRequest(SSFNetWSSession_t *ws, SSFCStrIn_t key)
+static bool _SSFNetWSBuildRequest(SSFNetWSSession_t *ws, SSFCStrIn_t keyStr)
 {
     size_t len;
     uint32_t i;
-    uint16_t hostPort = ((ws->port == 80u) || (ws->port == 443u)) ? 0 : ws->port;
+    uint16_t hostPort;
     bool ok;
 
+    SSF_REQUIRE(ws != NULL);
+    SSF_REQUIRE(keyStr != NULL);
+    SSF_REQUIRE((ws->fieldsOpt != NULL) || (ws->fieldCount == 0));
+
+    hostPort = ((ws->port == 80u) || (ws->port == 443u)) ? 0 : ws->port;
     ok = SSFHTTPHdrReqBegin(ws->hsBuf, sizeof(ws->hsBuf), &len, "GET", ws->path, ws->host,
                             hostPort);
     ok = ok && SSFHTTPHdrReqAddField(ws->hsBuf, sizeof(ws->hsBuf), &len, "Upgrade", "websocket");
     ok = ok && SSFHTTPHdrReqAddField(ws->hsBuf, sizeof(ws->hsBuf), &len, "Connection", "Upgrade");
-    ok = ok && SSFHTTPHdrReqAddField(ws->hsBuf, sizeof(ws->hsBuf), &len, "Sec-WebSocket-Key", key);
+    ok = ok && SSFHTTPHdrReqAddField(ws->hsBuf, sizeof(ws->hsBuf), &len, "Sec-WebSocket-Key",
+                                     keyStr);
     ok = ok && SSFHTTPHdrReqAddField(ws->hsBuf, sizeof(ws->hsBuf), &len, "Sec-WebSocket-Version",
                                      "13");
     ok = ok && SSFHTTPHdrReqAddField(ws->hsBuf, sizeof(ws->hsBuf), &len, "Sec-WebSocket-Protocol",
@@ -195,9 +220,10 @@ static bool _SSFNetWSBuildRequest(SSFNetWSSession_t *ws, SSFCStrIn_t key)
     {
         const SSFHTTPHdrField_t *f = &ws->fieldsOpt[i];
 
-        SSF_REQUIRE((f->name != NULL) && (f->value != NULL));
-        ok = (_SSFNetWSIsReservedField(f->name) == false) &&
-             SSFHTTPHdrReqAddField(ws->hsBuf, sizeof(ws->hsBuf), &len, f->name, f->value);
+        SSF_REQUIRE(f->name != NULL);
+        SSF_REQUIRE(f->value != NULL);
+        ok = ((_SSFNetWSIsReservedField(f->name) == false) &&
+              (SSFHTTPHdrReqAddField(ws->hsBuf, sizeof(ws->hsBuf), &len, f->name, f->value)));
     }
     ok = ok && SSFHTTPHdrReqEnd(ws->hsBuf, sizeof(ws->hsBuf), &len);
     if (ok == false) return false;
@@ -211,8 +237,12 @@ static bool _SSFNetWSBuildRequest(SSFNetWSSession_t *ws, SSFCStrIn_t key)
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFNetWSCheckResponse(const SSFNetWSSession_t *ws, const SSFHTTPHdrResponse_t *resp)
 {
-    const uint8_t *b = ws->hsBuf;
+    const uint8_t *b;
 
+    SSF_REQUIRE(ws != NULL);
+    SSF_REQUIRE(resp != NULL);
+
+    b = ws->hsBuf;
     if ((resp->status != 101u) || (resp->versionMajor != 1u) || (resp->versionMinor != 1u))
     { return false; }
     if (SSFHTTPHdrFieldIsOnly(b, resp, "Upgrade", "websocket", true) == false) return false;
@@ -229,10 +259,12 @@ static bool _SSFNetWSCheckResponse(const SSFNetWSSession_t *ws, const SSFHTTPHdr
 
 /* --------------------------------------------------------------------------------------------- */
 /* Handshake step 1 of 2: writes the request in hsBuf, then wipes it (it may carry credentials). */
-/* Together with _SSFNetWSUpgradeRecv() this is the seam a future HTTP client would replace.     */
 /* --------------------------------------------------------------------------------------------- */
 static SSFNetIOResult_t _SSFNetWSUpgradeSend(SSFNetWSSession_t *ws)
 {
+    SSF_REQUIRE(ws != NULL);
+    SSF_REQUIRE(ws->hsPos <= ws->hsLen);
+
     while (ws->hsPos < ws->hsLen)
     {
         size_t n = 0;
@@ -251,12 +283,13 @@ static SSFNetIOResult_t _SSFNetWSUpgradeSend(SSFNetWSSession_t *ws)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Handshake step 2 of 2: reads and checks the response head. On SUCCESS any bytes after the     */
-/* head stay in hsBuf as the first frame bytes.                                                  */
+/* Handshake step 2 of 2: reads and checks the response head; any bytes after it stay in hsBuf.  */
 /* --------------------------------------------------------------------------------------------- */
 static SSFNetIOResult_t _SSFNetWSUpgradeRecv(SSFNetWSSession_t *ws)
 {
     SSFHTTPHdrResponse_t resp;
+
+    SSF_REQUIRE(ws != NULL);
 
     for (;;)
     {
@@ -273,8 +306,10 @@ static SSFNetIOResult_t _SSFNetWSUpgradeRecv(SSFNetWSSession_t *ws)
 
         p = SSFHTTPHdrParseResponse(ws->hsBuf, ws->hsLen, &resp);
         if (p == SSF_HTTP_HDR_MALFORMED) return _SSFNetWSFail(ws, SSF_NET_IO_ERROR);
+        /* Is the response head complete? */
         if (p == SSF_HTTP_HDR_COMPLETE)
         {
+            /* Yes, check it and keep any frame bytes that followed it */
             if (_SSFNetWSCheckResponse(ws, &resp) == false)
             { return _SSFNetWSFail(ws, SSF_NET_IO_ERROR); }
             /* Keep what followed the head; it is frame data */
@@ -288,42 +323,49 @@ static SSFNetIOResult_t _SSFNetWSUpgradeRecv(SSFNetWSSession_t *ws)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Builds one masked frame of payload[0..len) in the empty frame buffer.                         */
+/* Builds one masked frame of payload[0..payloadLen) in the empty frame buffer.                  */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFNetWSBuildFrame(SSFNetWSSession_t *ws, uint8_t opcode, const uint8_t *payload,
-                                size_t len)
+                                size_t payloadLen)
 {
-    uint8_t *f = ws->txBuf;
+    uint8_t *f;
     uint8_t mask[4];
     size_t n = 0;
     size_t i;
 
+    SSF_REQUIRE(ws != NULL);
     SSF_REQUIRE(ws->txLen == 0);
-    SSF_REQUIRE(len <= SSF_NETWS_TX_PAYLOAD_MAX);
-    SSF_REQUIRE((payload != NULL) || (len == 0));
+    SSF_REQUIRE((opcode & SSF_NETWS_OPCODE_MASK) == opcode);
+    SSF_REQUIRE(payloadLen <= SSF_NETWS_TX_PAYLOAD_MAX);
+    SSF_REQUIRE((payload != NULL) || (payloadLen == 0));
 
+    f = ws->txBuf;
     f[n++] = (uint8_t)(SSF_NETWS_FIN | opcode);
-    if (len < SSF_NETWS_LEN_16) { f[n++] = (uint8_t)(SSF_NETWS_MASK_BIT | len); }
+    /* Does the length fit in the 7-bit field? */
+    if (payloadLen < SSF_NETWS_LEN_16) { f[n++] = (uint8_t)(SSF_NETWS_MASK_BIT | payloadLen); }
     else
     {
+        /* No, use the 16-bit extended length */
         f[n++] = (uint8_t)(SSF_NETWS_MASK_BIT | SSF_NETWS_LEN_16);
-        f[n++] = (uint8_t)(len >> 8);
-        f[n++] = (uint8_t)len;
+        f[n++] = (uint8_t)(payloadLen >> 8);
+        f[n++] = (uint8_t)payloadLen;
     }
     SSFPRNGGetRandom(&ws->prng, mask, sizeof(mask));           /* RFC 6455 5.3: fresh per frame */
     memcpy(&f[n], mask, sizeof(mask));
     n += sizeof(mask);
-    for (i = 0; i < len; i++) f[n + i] = (uint8_t)(payload[i] ^ mask[i & 3u]);
-    ws->txLen = n + len;
+    for (i = 0; i < payloadLen; i++) f[n + i] = (uint8_t)(payload[i] ^ mask[(i & 3u)]);
+    ws->txLen = n + payloadLen;
     ws->txPos = 0;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Writes the frame buffer out as far as the inner allows. SUCCESS when empty, WANT_WRITE while  */
-/* bytes remain, else the inner's failure.                                                       */
+/* Writes the frame buffer out as far as the inner allows; SUCCESS once empty.                   */
 /* --------------------------------------------------------------------------------------------- */
 static SSFNetIOResult_t _SSFNetWSFlush(SSFNetWSSession_t *ws)
 {
+    SSF_REQUIRE(ws != NULL);
+    SSF_REQUIRE(ws->txPos <= ws->txLen);
+
     while (ws->txPos < ws->txLen)
     {
         size_t n = 0;
@@ -342,25 +384,31 @@ static SSFNetIOResult_t _SSFNetWSFlush(SSFNetWSSession_t *ws)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Flushes the frame buffer, then queues and flushes any owed Close (first) or Pong. Nothing     */
-/* follows a Close. SUCCESS when all is written, WANT_WRITE while bytes remain, else failure.    */
+/* Flushes the frame buffer, then any owed Close (first) or Pong; nothing follows a Close.       */
 /* --------------------------------------------------------------------------------------------- */
 static SSFNetIOResult_t _SSFNetWSFlushControl(SSFNetWSSession_t *ws)
 {
-    SSFNetIOResult_t r = _SSFNetWSFlush(ws);
+    SSFNetIOResult_t r;
 
+    SSF_REQUIRE(ws != NULL);
+
+    r = _SSFNetWSFlush(ws);
     if (r != SSF_NET_IO_SUCCESS) return r;
     if (ws->isCloseSent) return SSF_NET_IO_SUCCESS;
+    /* Is a Close owed? */
     if (ws->isCloseOwed)
     {
+        /* Yes, send it; it supersedes any owed Pong */
         _SSFNetWSBuildFrame(ws, SSF_NETWS_OP_CLOSE, ws->close, ws->closeLen);
         ws->isCloseOwed = false;
         ws->isCloseSent = true;
         ws->isPongOwed = false;
         return _SSFNetWSFlush(ws);
     }
+    /* Is a Pong owed? */
     if (ws->isPongOwed)
     {
+        /* Yes, send it */
         _SSFNetWSBuildFrame(ws, SSF_NETWS_OP_PONG, ws->pong, ws->pongLen);
         ws->isPongOwed = false;
         return _SSFNetWSFlush(ws);
@@ -373,11 +421,15 @@ static SSFNetIOResult_t _SSFNetWSFlushControl(SSFNetWSSession_t *ws)
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFNetWSOweClose(SSFNetWSSession_t *ws, const uint8_t *codeOpt)
 {
-    if (ws->isCloseSent || ws->isCloseOwed) return;
+    SSF_REQUIRE(ws != NULL);
+
+    if ((ws->isCloseSent) || (ws->isCloseOwed)) return;
     ws->isCloseOwed = true;
     ws->closeLen = 0;
+    /* Was a status code given? */
     if (codeOpt != NULL)
     {
+        /* Yes, carry it in the Close body */
         ws->close[0] = codeOpt[0];
         ws->close[1] = codeOpt[1];
         ws->closeLen = 2u;
@@ -385,8 +437,7 @@ static void _SSFNetWSOweClose(SSFNetWSSession_t *ws, const uint8_t *codeOpt)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Takes one header byte. Returns false on a protocol violation, else true with *isDoneOut set   */
-/* once the header is complete (rxRemain, rxOpcode and rxIsFin then valid).                      */
+/* Takes one header byte; returns false on a protocol violation, else true, *isDoneOut if done.  */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFNetWSRxHeaderByte(SSFNetWSSession_t *ws, uint8_t b, bool *isDoneOut)
 {
@@ -394,24 +445,32 @@ static bool _SSFNetWSRxHeaderByte(SSFNetWSSession_t *ws, uint8_t b, bool *isDone
     uint8_t need;
     uint8_t i;
 
+    SSF_REQUIRE(ws != NULL);
+    SSF_REQUIRE(ws->rxHdrLen < sizeof(ws->rxHdr));
+    SSF_REQUIRE(isDoneOut != NULL);
+
     *isDoneOut = false;
     ws->rxHdr[ws->rxHdrLen++] = b;
+    /* Is this the first header byte? */
     if (ws->rxHdrLen == 1u)
     {
+        /* Yes, check the flags and opcode */
         uint8_t op = (uint8_t)(b & SSF_NETWS_OPCODE_MASK);
 
         if ((b & SSF_NETWS_RSV_MASK) != 0) return false;        /* No extension negotiated */
         if ((op != SSF_NETWS_OP_CONT) && (op != SSF_NETWS_OP_BIN) && (op != SSF_NETWS_OP_CLOSE) &&
             (op != SSF_NETWS_OP_PING) && (op != SSF_NETWS_OP_PONG))
         { return false; }                                       /* Text (MQTT 6.0) or reserved */
-        if (SSF_NETWS_OP_IS_CONTROL(op) && ((b & SSF_NETWS_FIN) == 0)) return false;
+        if ((SSF_NETWS_OP_IS_CONTROL(op)) && ((b & SSF_NETWS_FIN) == 0)) return false;
         return true;
     }
+    /* Is this the second header byte? */
     if (ws->rxHdrLen == 2u)
     {
+        /* Yes, check the mask bit and control frame length */
         if ((b & SSF_NETWS_MASK_BIT) != 0) return false;        /* Server frames are unmasked */
         len7 = (uint8_t)(b & SSF_NETWS_LEN_MASK);
-        if (SSF_NETWS_OP_IS_CONTROL(ws->rxHdr[0] & SSF_NETWS_OPCODE_MASK) &&
+        if ((SSF_NETWS_OP_IS_CONTROL(ws->rxHdr[0] & SSF_NETWS_OPCODE_MASK)) &&
             (len7 > SSF_NETWS_CTL_MAX))
         { return false; }
     }
@@ -421,11 +480,13 @@ static bool _SSFNetWSRxHeaderByte(SSFNetWSSession_t *ws, uint8_t b, bool *isDone
     if (ws->rxHdrLen < need) return true;
 
     /* Header complete */
+    /* Is the length in the 7-bit field? */
     if (len7 < SSF_NETWS_LEN_16) ws->rxRemain = len7;
     else
     {
+        /* No, it is in the extended length bytes */
         ws->rxRemain = 0;
-        for (i = 2; i < need; i++) ws->rxRemain = (ws->rxRemain << 8) | ws->rxHdr[i];
+        for (i = 2; i < need; i++) ws->rxRemain = ((ws->rxRemain << 8) | ws->rxHdr[i]);
     }
     ws->rxOpcode = (uint8_t)(ws->rxHdr[0] & SSF_NETWS_OPCODE_MASK);
     ws->rxIsFin = ((ws->rxHdr[0] & SSF_NETWS_FIN) != 0);
@@ -433,13 +494,16 @@ static bool _SSFNetWSRxHeaderByte(SSFNetWSSession_t *ws, uint8_t b, bool *isDone
     ws->rxCtlLen = 0;
 
     /* Fragmentation (RFC 6455 5.4): a message starts with BIN and goes on with CONT */
+    /* Does this frame start a message? */
     if (ws->rxOpcode == SSF_NETWS_OP_BIN)
     {
+        /* Yes, one must not already be in progress */
         if (ws->isInMessage) return false;
         ws->isInMessage = (ws->rxIsFin == false);
     }
     else if (ws->rxOpcode == SSF_NETWS_OP_CONT)
     {
+        /* No, it continues one that must be in progress */
         if (ws->isInMessage == false) return false;
         if (ws->rxIsFin) ws->isInMessage = false;
     }
@@ -452,18 +516,25 @@ static bool _SSFNetWSRxHeaderByte(SSFNetWSSession_t *ws, uint8_t b, bool *isDone
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFNetWSRxControlDone(SSFNetWSSession_t *ws)
 {
+    SSF_REQUIRE(ws != NULL);
+    SSF_REQUIRE(ws->rxCtlLen <= SSF_NETWS_CTL_MAX);
+
+    /* Is it a Ping? */
     if (ws->rxOpcode == SSF_NETWS_OP_PING)
     {
+        /* Yes, owe a Pong with the same payload */
         memcpy(ws->pong, ws->rxCtl, ws->rxCtlLen);              /* Latest Ping wins (5.5.3) */
         ws->pongLen = ws->rxCtlLen;
         ws->isPongOwed = true;
     }
     else if (ws->rxOpcode == SSF_NETWS_OP_CLOSE)
     {
+        /* No, it is a Close; owe a Close echoing a valid status code */
         if (ws->rxCtlLen == 1u) return false;                   /* A code is 2 bytes (5.5.1) */
+        /* Does the Close carry a status code? */
         if (ws->rxCtlLen >= 2u)
         {
-            /* Only codes an endpoint may send (7.4.1, 7.4.2); 1005, 1006, 1015 never are */
+            /* Yes, only codes an endpoint may send (7.4.1, 7.4.2); 1005, 1006, 1015 never are */
             uint16_t code = (uint16_t)(((uint16_t)ws->rxCtl[0] << 8) | ws->rxCtl[1]);
 
             if (!(((code >= 1000u) && (code <= 1003u)) || ((code >= 1007u) && (code <= 1014u)) ||
@@ -482,19 +553,24 @@ static bool _SSFNetWSRxControlDone(SSFNetWSSession_t *ws)
 static SSFNetIOResult_t _SSFNetWSRxFail(SSFNetWSSession_t *ws, SSFNetIOResult_t r, size_t got,
                                         size_t *gotOut)
 {
+    SSF_REQUIRE(ws != NULL);
+    SSF_REQUIRE(gotOut != NULL);
+
     (void)_SSFNetWSFail(ws, r);
     if (got > 0) { *gotOut = got; return SSF_NET_IO_SUCCESS; }
     return (r == SSF_NET_IO_CLOSED) ? SSF_NET_IO_CLOSED : SSF_NET_IO_ERROR;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Fails the connection from recv() on a protocol violation by the server: one best-effort Close */
-/* 1002 (RFC 6455 7.1.7), then as _SSFNetWSRxFail().                                             */
+/* Fails recv() on a server protocol violation with a best-effort Close 1002 (RFC 6455 7.1.7).   */
 /* --------------------------------------------------------------------------------------------- */
 static SSFNetIOResult_t _SSFNetWSRxProtocolFail(SSFNetWSSession_t *ws, size_t got, size_t *gotOut)
 {
     static const uint8_t protocolError[2] = { (uint8_t)(SSF_NETWS_CLOSE_PROTOCOL >> 8),
                                               (uint8_t)(SSF_NETWS_CLOSE_PROTOCOL & 0xFFu) };
+
+    SSF_REQUIRE(ws != NULL);
+    SSF_REQUIRE(gotOut != NULL);
 
     ws->isCloseOwed = false;                    /* A Close echo not yet built gives way to 1002 */
     _SSFNetWSOweClose(ws, protocolError);
@@ -503,9 +579,10 @@ static SSFNetIOResult_t _SSFNetWSRxProtocolFail(SSFNetWSSession_t *ws, size_t go
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Starts connecting to host:port: validates, builds the request, opens the inner.               */
+/* Starts connecting to hostStr:port: validates, builds the request, opens the inner.            */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFNetWSOpen(SSFNetTransport_t *t, SSFCStrIn_t host, size_t hostSize, uint16_t port)
+static bool _SSFNetWSOpen(SSFNetTransport_t *t, SSFCStrIn_t hostStr, size_t hostSize,
+                          uint16_t port)
 {
     SSFNetWSSession_t *ws;
     size_t hostLen;
@@ -514,18 +591,18 @@ static bool _SSFNetWSOpen(SSFNetTransport_t *t, SSFCStrIn_t host, size_t hostSiz
     char key[SSF_NETWS_KEY_SIZE];
     bool ok;
 
-    SSF_REQUIRE(host != NULL);
+    SSF_REQUIRE(hostStr != NULL);
     SSF_REQUIRE(hostSize > 0);
     ws = _SSFNetWSSelf(t);
     SSF_REQUIRE(ws->state == SSF_NETWS_STATE_CLOSED);
 
-    if ((SSFStrLen(host, hostSize, &hostLen) == false) || (hostLen == 0)) return false;
+    if ((SSFStrLen(hostStr, hostSize, &hostLen) == false) || (hostLen == 0)) return false;
     if (hostLen >= sizeof(ws->host)) return false;
     if (port == 0) return false;
-    if (memchr(host, ':', hostLen) != NULL) return false;       /* IPv4 only (ssfnet.h) */
+    if (memchr(hostStr, ':', hostLen) != NULL) return false;       /* IPv4 only (ssfnet.h) */
 
     _SSFNetWSReset(ws);
-    memcpy(ws->host, host, hostLen + 1u);                       /* Caller's copy may go */
+    memcpy(ws->host, hostStr, hostLen + 1u);                       /* Caller's copy may go */
     ws->port = port;
 
     /* A fresh key, and a mask generator seeded for this connection */
@@ -552,21 +629,27 @@ static SSFNetIOResult_t _SSFNetWSPollOpen(SSFNetTransport_t *t)
     SSFNetWSSession_t *ws = _SSFNetWSSelf(t);
     SSFNetIOResult_t r;
 
+    /* Is the inner transport still opening? */
     if (ws->state == SSF_NETWS_STATE_OPENING)
     {
+        /* Yes, advance it */
         r = ws->inner->pollOpen(ws->inner);
         if ((r == SSF_NET_IO_WANT_READ) || (r == SSF_NET_IO_WANT_WRITE)) return r;
         if (r != SSF_NET_IO_SUCCESS) return _SSFNetWSFail(ws, r);
         ws->state = SSF_NETWS_STATE_HS_SEND;
     }
+    /* Is the Upgrade request being sent? */
     if (ws->state == SSF_NETWS_STATE_HS_SEND)
     {
+        /* Yes, send more of it */
         r = _SSFNetWSUpgradeSend(ws);
         if (r != SSF_NET_IO_SUCCESS) return r;
         ws->state = SSF_NETWS_STATE_HS_RECV;
     }
+    /* Is the Upgrade response being received? */
     if (ws->state == SSF_NETWS_STATE_HS_RECV)
     {
+        /* Yes, receive and check it */
         r = _SSFNetWSUpgradeRecv(ws);
         if (r != SSF_NET_IO_SUCCESS) return r;
         SSFCryptSecureZero(ws->accept, sizeof(ws->accept));
@@ -578,7 +661,7 @@ static SSFNetIOResult_t _SSFNetWSPollOpen(SSFNetTransport_t *t)
 /* --------------------------------------------------------------------------------------------- */
 /* Frames up to SSF_NETWS_CONFIG_TX_FRAME_SIZE bytes of buf as one binary frame.                 */
 /* --------------------------------------------------------------------------------------------- */
-static SSFNetIOResult_t _SSFNetWSSend(SSFNetTransport_t *t, const uint8_t *buf, size_t len,
+static SSFNetIOResult_t _SSFNetWSSend(SSFNetTransport_t *t, const uint8_t *buf, size_t bufLen,
                                       size_t *sentOut)
 {
     SSFNetWSSession_t *ws;
@@ -586,20 +669,20 @@ static SSFNetIOResult_t _SSFNetWSSend(SSFNetTransport_t *t, const uint8_t *buf, 
     size_t chunk;
 
     SSF_REQUIRE(buf != NULL);
-    SSF_REQUIRE(len > 0);
+    SSF_REQUIRE(bufLen > 0);
     SSF_REQUIRE(sentOut != NULL);
     ws = _SSFNetWSSelf(t);
 
     *sentOut = 0;
     if (ws->state != SSF_NETWS_STATE_OPEN) return SSF_NET_IO_ERROR;
     if (ws->isPeerClosed) return SSF_NET_IO_CLOSED;
-    if (ws->isCloseSent || ws->isCloseOwed) return SSF_NET_IO_ERROR;   /* After shutdown() */
+    if ((ws->isCloseSent) || (ws->isCloseOwed)) return SSF_NET_IO_ERROR;   /* After shutdown() */
 
     r = _SSFNetWSFlushControl(ws);
     if (r == SSF_NET_IO_WANT_WRITE) return r;
     if (r != SSF_NET_IO_SUCCESS) return _SSFNetWSFail(ws, r);
 
-    chunk = (len > SSF_NETWS_CONFIG_TX_FRAME_SIZE) ? SSF_NETWS_CONFIG_TX_FRAME_SIZE : len;
+    chunk = (bufLen > SSF_NETWS_CONFIG_TX_FRAME_SIZE) ? SSF_NETWS_CONFIG_TX_FRAME_SIZE : bufLen;
     _SSFNetWSBuildFrame(ws, SSF_NETWS_OP_BIN, buf, chunk);
     r = _SSFNetWSFlush(ws);
     if ((r != SSF_NET_IO_SUCCESS) && (r != SSF_NET_IO_WANT_WRITE)) return _SSFNetWSFail(ws, r);
@@ -610,7 +693,7 @@ static SSFNetIOResult_t _SSFNetWSSend(SSFNetTransport_t *t, const uint8_t *buf, 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns payload bytes from binary and continuation frames, handling control frames.           */
 /* --------------------------------------------------------------------------------------------- */
-static SSFNetIOResult_t _SSFNetWSRecv(SSFNetTransport_t *t, uint8_t *buf, size_t size,
+static SSFNetIOResult_t _SSFNetWSRecv(SSFNetTransport_t *t, uint8_t *buf, size_t bufSize,
                                       size_t *gotOut)
 {
     SSFNetWSSession_t *ws;
@@ -619,7 +702,7 @@ static SSFNetIOResult_t _SSFNetWSRecv(SSFNetTransport_t *t, uint8_t *buf, size_t
     uint32_t reads = 0;
 
     SSF_REQUIRE(buf != NULL);
-    SSF_REQUIRE(size > 0);
+    SSF_REQUIRE(bufSize > 0);
     SSF_REQUIRE(gotOut != NULL);
     ws = _SSFNetWSSelf(t);
 
@@ -631,14 +714,15 @@ static SSFNetIOResult_t _SSFNetWSRecv(SSFNetTransport_t *t, uint8_t *buf, size_t
     r = _SSFNetWSFlushControl(ws);
     if ((r != SSF_NET_IO_SUCCESS) && (r != SSF_NET_IO_WANT_WRITE)) return _SSFNetWSFail(ws, r);
 
-    while (got < size)
+    while (got < bufSize)
     {
         size_t avail;
         size_t n;
 
+        /* Is the staging buffer empty? */
         if (ws->hsPos >= ws->hsLen)
         {
-            /* Staging empty: return what we have, or read more */
+            /* Yes, return what we have, or read more */
             if ((got > 0) || (reads >= SSF_NETWS_RECV_MAX_READS)) break;
             reads++;
             ws->hsPos = 0;
@@ -651,8 +735,10 @@ static SSFNetIOResult_t _SSFNetWSRecv(SSFNetTransport_t *t, uint8_t *buf, size_t
             ws->hsLen = n;
         }
 
+        /* Is a frame header still being read? */
         if (ws->rxIsPayload == false)
         {
+            /* Yes, take one more header byte */
             bool isDone;
 
             if (_SSFNetWSRxHeaderByte(ws, ws->hsBuf[ws->hsPos++], &isDone) == false)
@@ -663,14 +749,17 @@ static SSFNetIOResult_t _SSFNetWSRecv(SSFNetTransport_t *t, uint8_t *buf, size_t
 
         avail = ws->hsLen - ws->hsPos;
         n = (ws->rxRemain < (uint64_t)avail) ? (size_t)ws->rxRemain : avail;
+        /* Is this a control frame? */
         if (SSF_NETWS_OP_IS_CONTROL(ws->rxOpcode))
         {
+            /* Yes, collect its payload */
             memcpy(&ws->rxCtl[ws->rxCtlLen], &ws->hsBuf[ws->hsPos], n);   /* rxRemain <= 125 */
             ws->rxCtlLen = (uint8_t)(ws->rxCtlLen + n);
         }
         else
         {
-            if (n > (size - got)) n = size - got;
+            /* No, copy its payload to the caller */
+            if (n > (bufSize - got)) n = bufSize - got;
             memcpy(&buf[got], &ws->hsBuf[ws->hsPos], n);
             got += n;
         }
@@ -680,8 +769,10 @@ static SSFNetIOResult_t _SSFNetWSRecv(SSFNetTransport_t *t, uint8_t *buf, size_t
 
         /* Frame done */
         ws->rxIsPayload = false;
+        /* Was it a control frame? */
         if (SSF_NETWS_OP_IS_CONTROL(ws->rxOpcode))
         {
+            /* Yes, act on it */
             if (_SSFNetWSRxControlDone(ws) == false)
             { return _SSFNetWSRxProtocolFail(ws, got, gotOut); }
             if (ws->isPeerClosed) break;
@@ -719,8 +810,7 @@ static SSFNetIOResult_t _SSFNetWSShutdown(SSFNetTransport_t *t)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Ends the connection: one best-effort attempt at a Close if open, then closes the inner and    */
-/* wipes the buffers. Never waits.                                                               */
+/* Ends the connection with a best-effort Close if open, closes the inner, wipes the buffers.    */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFNetWSClose(SSFNetTransport_t *t)
 {
@@ -728,8 +818,10 @@ static void _SSFNetWSClose(SSFNetTransport_t *t)
                                        (uint8_t)(SSF_NETWS_CLOSE_NORMAL & 0xFFu) };
     SSFNetWSSession_t *ws = _SSFNetWSSelf(t);
 
+    /* Is the connection open? */
     if (ws->state == SSF_NETWS_STATE_OPEN)
     {
+        /* Yes, try once to send a Close */
         _SSFNetWSOweClose(ws, normal);
         (void)_SSFNetWSFlushControl(ws);
     }
@@ -740,8 +832,8 @@ static void _SSFNetWSClose(SSFNetTransport_t *t)
 /* --------------------------------------------------------------------------------------------- */
 /* Initializes a WebSocket session over inner.                                                   */
 /* --------------------------------------------------------------------------------------------- */
-void SSFNetWSInit(SSFNetWSSession_t *ws, SSFNetTransport_t *inner, SSFCStrIn_t path,
-                  const SSFHTTPHdrField_t *fieldsOpt, uint32_t fieldCount)
+void SSFNetWSInit(SSFNetWSSession_t *ws, SSFNetTransport_t *inner, SSFCStrIn_t pathStr,
+                  const SSFHTTPHdrField_t *fieldsOpt, uint32_t fieldsOptLen)
 {
     SSF_REQUIRE(ws != NULL);
     SSF_REQUIRE(ws->magic != SSF_NETWS_MAGIC);
@@ -752,8 +844,8 @@ void SSFNetWSInit(SSFNetWSSession_t *ws, SSFNetTransport_t *inner, SSFCStrIn_t p
     SSF_REQUIRE(inner->recv != NULL);
     SSF_REQUIRE(inner->shutdown != NULL);
     SSF_REQUIRE(inner->close != NULL);
-    SSF_REQUIRE(path != NULL);
-    SSF_REQUIRE((fieldsOpt != NULL) || (fieldCount == 0));
+    SSF_REQUIRE(pathStr != NULL);
+    SSF_REQUIRE((fieldsOpt != NULL) || (fieldsOptLen == 0));
 
     memset(ws, 0, sizeof(*ws));
     ws->transport.open = _SSFNetWSOpen;
@@ -763,9 +855,9 @@ void SSFNetWSInit(SSFNetWSSession_t *ws, SSFNetTransport_t *inner, SSFCStrIn_t p
     ws->transport.shutdown = _SSFNetWSShutdown;
     ws->transport.close = _SSFNetWSClose;
     ws->inner = inner;
-    ws->path = path;
+    ws->path = pathStr;
     ws->fieldsOpt = fieldsOpt;
-    ws->fieldCount = fieldCount;
+    ws->fieldCount = fieldsOptLen;
     ws->state = SSF_NETWS_STATE_CLOSED;
     ws->magic = SSF_NETWS_MAGIC;
 }

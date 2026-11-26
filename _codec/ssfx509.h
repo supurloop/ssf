@@ -41,16 +41,6 @@ extern "C" {
 #include "ssfport.h"
 
 /* --------------------------------------------------------------------------------------------- */
-/* Limitations                                                                                   */
-/* --------------------------------------------------------------------------------------------- */
-/* Maximum certificate DER size is SSF_X509_CONFIG_MAX_CERT_SIZE bytes.                          */
-/* Maximum parsed extensions is SSF_X509_CONFIG_MAX_EXTENSIONS.                                  */
-/* Maximum SAN entries is SSF_X509_CONFIG_MAX_SAN_ENTRIES.                                       */
-/* All pointer fields in SSFX509Cert_t point into the original DER buffer (zero-copy).           */
-/* The DER buffer must remain valid for the lifetime of the parsed structure.                    */
-/* --------------------------------------------------------------------------------------------- */
-
-/* --------------------------------------------------------------------------------------------- */
 /* Defines and typedefs                                                                          */
 /* --------------------------------------------------------------------------------------------- */
 
@@ -198,21 +188,19 @@ bool SSFX509Parse(const uint8_t *der, uint32_t derLen, SSFX509Cert_t *cert);
 /* Validity check: returns true if notBefore <= nowUnixSec <= notAfter (RFC 5280, inclusive). */
 bool SSFX509IsValid(const SSFX509Cert_t *cert, uint64_t nowUnixSec);
 
-/* OID comparison helpers. IsKey* test the subject public key (what the certificate certifies);  */
-/* IsSig* test the algorithm its issuer signed it with. They differ whenever a CA of one key type */
-/* issues a certificate for another (an Ed25519 server key under an ECDSA CA).                   */
-bool SSFX509IsKeyRSA(const SSFX509Cert_t *cert);       /* Public key algorithm rsaEncryption     */
-bool SSFX509IsKeyP256(const SSFX509Cert_t *cert);      /* EC public key on secp256r1             */
-bool SSFX509IsKeyP384(const SSFX509Cert_t *cert);      /* EC public key on secp384r1             */
-bool SSFX509IsKeyEd25519(const SSFX509Cert_t *cert);   /* Public key algorithm id-Ed25519        */
-bool SSFX509IsSigECDSASHA256(const SSFX509Cert_t *cert);    /* ecdsa-with-SHA256             */
-bool SSFX509IsSigECDSASHA384(const SSFX509Cert_t *cert);    /* ecdsa-with-SHA384             */
-bool SSFX509IsSigRSAPSSSHA256(const SSFX509Cert_t *cert);   /* RSASSA-PSS, params SHA-256    */
-bool SSFX509IsSigRSAPSSSHA384(const SSFX509Cert_t *cert);   /* RSASSA-PSS, params SHA-384    */
-bool SSFX509IsSigRSAPKCS1SHA256(const SSFX509Cert_t *cert); /* sha256WithRSAEncryption       */
-bool SSFX509IsSigRSAPKCS1SHA384(const SSFX509Cert_t *cert); /* sha384WithRSAEncryption       */
-bool SSFX509IsSigRSAPKCS1SHA512(const SSFX509Cert_t *cert); /* sha512WithRSAEncryption       */
-bool SSFX509IsSigEd25519(const SSFX509Cert_t *cert);        /* id-Ed25519                    */
+/* OID comparison helpers: IsKey* test the subject public key, IsSig* the issuer's signature alg */
+bool SSFX509IsKeyRSA(const SSFX509Cert_t *cert);       /* Public key algorithm rsaEncryption */
+bool SSFX509IsKeyP256(const SSFX509Cert_t *cert);      /* EC public key on secp256r1 */
+bool SSFX509IsKeyP384(const SSFX509Cert_t *cert);      /* EC public key on secp384r1 */
+bool SSFX509IsKeyEd25519(const SSFX509Cert_t *cert);   /* Public key algorithm id-Ed25519 */
+bool SSFX509IsSigECDSASHA256(const SSFX509Cert_t *cert);    /* ecdsa-with-SHA256 */
+bool SSFX509IsSigECDSASHA384(const SSFX509Cert_t *cert);    /* ecdsa-with-SHA384 */
+bool SSFX509IsSigRSAPSSSHA256(const SSFX509Cert_t *cert);   /* RSASSA-PSS, params SHA-256 */
+bool SSFX509IsSigRSAPSSSHA384(const SSFX509Cert_t *cert);   /* RSASSA-PSS, params SHA-384 */
+bool SSFX509IsSigRSAPKCS1SHA256(const SSFX509Cert_t *cert); /* sha256WithRSAEncryption */
+bool SSFX509IsSigRSAPKCS1SHA384(const SSFX509Cert_t *cert); /* sha384WithRSAEncryption */
+bool SSFX509IsSigRSAPKCS1SHA512(const SSFX509Cert_t *cert); /* sha512WithRSAEncryption */
+bool SSFX509IsSigEd25519(const SSFX509Cert_t *cert);        /* id-Ed25519 */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Certificate generation                                                                        */
@@ -302,28 +290,27 @@ typedef enum SSFX509Purpose
 typedef enum SSFX509VerifyCode
 {
     SSF_X509_VERIFY_MIN = -1,
-    SSF_X509_VERIFY_OK,                     /* The chain verified                              */
-    SSF_X509_VERIFY_ERR_PARSE,              /* certIdx does not parse                          */
-    SSF_X509_VERIFY_ERR_VERSION,            /* certIdx is not v3                               */
+    SSF_X509_VERIFY_OK,                     /* The chain verified */
+    SSF_X509_VERIFY_ERR_PARSE,              /* certIdx does not parse */
+    SSF_X509_VERIFY_ERR_VERSION,            /* certIdx is not v3 */
     SSF_X509_VERIFY_ERR_SIG_ALG_MISMATCH,   /* certIdx TBS and outer signature algorithm differ */
-    SSF_X509_VERIFY_ERR_NOT_YET_VALID,      /* certIdx notBefore is after nowUnixSec           */
-    SSF_X509_VERIFY_ERR_EXPIRED,            /* certIdx notAfter is before nowUnixSec           */
-    SSF_X509_VERIFY_ERR_SIGNATURE,          /* certIdx's named issuers' keys do not verify it  */
+    SSF_X509_VERIFY_ERR_NOT_YET_VALID,      /* certIdx notBefore is after nowUnixSec */
+    SSF_X509_VERIFY_ERR_EXPIRED,            /* certIdx notAfter is before nowUnixSec */
+    SSF_X509_VERIFY_ERR_SIGNATURE,          /* certIdx's named issuers' keys do not verify it */
     SSF_X509_VERIFY_ERR_KEY_ID_MISMATCH,    /* certIdx's named issuers' SKIDs differ from AKID */
-    SSF_X509_VERIFY_ERR_UNKNOWN_CA,         /* No anchor or certificate sent issued certIdx    */
-    SSF_X509_VERIFY_ERR_NOT_CA,             /* Intermediate certIdx lacks basicConstraints cA  */
+    SSF_X509_VERIFY_ERR_UNKNOWN_CA,         /* No anchor or certificate sent issued certIdx */
+    SSF_X509_VERIFY_ERR_NOT_CA,             /* Intermediate certIdx lacks basicConstraints cA */
     SSF_X509_VERIFY_ERR_CA_KEY_USAGE,       /* Intermediate certIdx Key Usage lacks keyCertSign */
     SSF_X509_VERIFY_ERR_PATH_LEN,           /* pathLenConstraint of certIdx (chainLen: anchor) */
-    SSF_X509_VERIFY_ERR_NAME_CONSTRAINTS,   /* certIdx SAN violates a CA's Name Constraints    */
-    SSF_X509_VERIFY_ERR_EKU,                /* Leaf Extended Key Usage lacks the purpose       */
-    SSF_X509_VERIFY_ERR_LEAF_KEY_USAGE,     /* Code signing leaf Key Usage cannot sign         */
-    SSF_X509_VERIFY_ERR_CRITICAL_EXT,       /* certIdx has an unrecognized critical extension  */
-    SSF_X509_VERIFY_ERR_HOSTNAME,           /* The leaf's SANs do not name the hostname        */
+    SSF_X509_VERIFY_ERR_NAME_CONSTRAINTS,   /* certIdx SAN violates a CA's Name Constraints */
+    SSF_X509_VERIFY_ERR_EKU,                /* Leaf Extended Key Usage lacks the purpose */
+    SSF_X509_VERIFY_ERR_LEAF_KEY_USAGE,     /* Code signing leaf Key Usage cannot sign */
+    SSF_X509_VERIFY_ERR_CRITICAL_EXT,       /* certIdx has an unrecognized critical extension */
+    SSF_X509_VERIFY_ERR_HOSTNAME,           /* The leaf's SANs do not name the hostname */
     SSF_X509_VERIFY_MAX
 } SSFX509VerifyCode_t;
 
-/* Chain verification result detail: code, and the chainDer index of the certificate rejected  */
-/* (0 = leaf; chainLen = the trust anchor itself; 0 when code is SSF_X509_VERIFY_OK).          */
+/* Chain verification result detail: code and the chainDer index of the rejected certificate */
 typedef struct SSFX509VerifyErr
 {
     SSFX509VerifyCode_t code;
@@ -340,8 +327,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
 /* Verify cert's signature with issuer's public key; ECDSA, RSA PKCS#1 v1.5, RSA-PSS, Ed25519. */
 bool SSFX509VerifyCertSignature(const SSFX509Cert_t *cert, const SSFX509Cert_t *issuer);
 
-/* Verify chainDer[0] (leaf) up to a trust anchor and match its SAN against hostnameStr; *errOut */
-/* says why on false (SSF_X509_VERIFY_OK on true).                                              */
+/* Verify chainDer[0] (leaf) up to a trust anchor and match its SAN against hostnameStr */
 bool SSFX509VerifyChain(const uint8_t **chainDer, const uint32_t *chainDerLen,
                         uint8_t chainLen,
                         const uint8_t **trustDer, const uint32_t *trustDerLen,
@@ -349,8 +335,7 @@ bool SSFX509VerifyChain(const uint8_t **chainDer, const uint32_t *chainDerLen,
                         const char *hostnameStr, uint64_t nowUnixSec,
                         SSFX509VerifyErr_t *errOut);
 
-/* Verify chainDer[0] to a trust anchor for purpose; hostnameStrOpt is for SERVER_AUTH only;    */
-/* *errOut says why on false (SSF_X509_VERIFY_OK on true).                                      */
+/* Verify chainDer[0] (leaf) up to a trust anchor for purpose; hostnameStrOpt is SERVER_AUTH only */
 bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDerLen,
                                uint8_t chainLen,
                                const uint8_t **trustDer, const uint32_t *trustDerLen,
@@ -373,8 +358,7 @@ void SSFX509SetTraceCtx(void (*fnOpt)(int, int, const char *, void *), void *use
 bool SSFX509MatchIPAddress(const char *hostnameStr, const uint8_t *sanIP, uint32_t sanIPLen);
 
 /* Returns true if cert's AKID and issuer's SKID match or either is absent, else false. */
-bool SSFX509CheckSKIDAKID
-(const SSFX509Cert_t *cert, const SSFX509Cert_t *issuer);
+bool SSFX509CheckSKIDAKID(const SSFX509Cert_t *cert, const SSFX509Cert_t *issuer);
 
 #if SSF_CONFIG_X509_UNIT_TEST == 1
 void SSFX509UnitTest(void);

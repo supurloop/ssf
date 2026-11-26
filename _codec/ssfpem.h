@@ -44,34 +44,28 @@ extern "C" {
 /* Defines                                                                                       */
 /* --------------------------------------------------------------------------------------------- */
 
-/* Longest label accepted between "-----BEGIN " and "-----" (e.g. "ENCRYPTED PRIVATE KEY").      */
+/* Longest label accepted between "-----BEGIN " and "-----" (e.g. "ENCRYPTED PRIVATE KEY"). */
 #define SSF_PEM_MAX_LABEL_LEN (40u)
 
 typedef enum
 {
-    SSF_PEM_BLOCK,     /* A block was decoded; *pos is past its END line                        */
-    SSF_PEM_END,       /* No further BEGIN line in the input                                     */
-    SSF_PEM_ERR,       /* Malformed block: bad BEGIN/END line, label mismatch, bad Base64       */
-    SSF_PEM_ERR_SIZE,  /* The decoded block does not fit in derSize bytes                        */
+    SSF_PEM_BLOCK,    /* A block was decoded; *pos is past its END line */
+    SSF_PEM_END,      /* No further BEGIN line in the input */
+    SSF_PEM_ERR,      /* Malformed block: bad BEGIN/END line, label mismatch, bad Base64 */
+    SSF_PEM_ERR_SIZE, /* The decoded block does not fit in derSize bytes */
 } SSFPEMResult_t;
 
 /* --------------------------------------------------------------------------------------------- */
 /* External Interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
 
-/* Decodes the next PEM block (RFC 7468) at or after offset *pos of pem[0..pemLen).              */
-/* The BEGIN and END lines must start a line; other text is ignored. Whitespace (space, tab, CR, */
-/* LF) inside the Base64 is skipped. derOpt must not overlap pem.                               */
-/* On SSF_PEM_BLOCK: *labelOut / *labelLenOut point at the label inside pem, the decoded bytes   */
-/* are in der[0..*derLenOut) and *pos is advanced past the END line. derOpt may be NULL to only  */
-/* check and measure a block (*derLenOut is still set). On SSF_PEM_ERR / SSF_PEM_ERR_SIZE all   */
-/* derSize bytes of derOpt are zeroed (a block may hold a private key) and *pos is unchanged.    */
+/* Decodes the next PEM block (RFC 7468) at or after offset *pos of pem[0..pemLen). */
 SSFPEMResult_t SSFPEMDecodeNext(const char *pem, size_t pemLen, size_t *pos,
                                 const char **labelOut, size_t *labelLenOut,
                                 uint8_t *derOpt, size_t derSize, size_t *derLenOut);
 
-/* True if label[0..labelLen) equals the C string str. */
-bool SSFPEMLabelIs(const char *label, size_t labelLen, const char *str);
+/* Returns true if label[0..labelLen) equals the C string cmpStr. */
+bool SSFPEMLabelIs(const char *label, size_t labelLen, const char *cmpStr);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */

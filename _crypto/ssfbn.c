@@ -44,11 +44,11 @@
 /* SSF_BN_KARATSUBA_THRESHOLD and SSF_BN_MODEXP_WIN_K come from ssfbn_opt.h or ssfcrypt_opt.h */
 
 /* Karatsuba step 7 stays inside the 2n-limb result only for n >= 4 */
-#if SSF_BN_KARATSUBA_THRESHOLD < 4
+#if (SSF_BN_KARATSUBA_THRESHOLD < 4)
 #error "SSF_BN_KARATSUBA_THRESHOLD must be >= 4 (Karatsuba step 7 overruns r for n < 4)"
 #endif
 #define SSF_BN_MODEXP_TBL_N        ((uint32_t)1u << SSF_BN_MODEXP_WIN_K)
-#if (SSF_BN_MODEXP_WIN_K < 1u) || (SSF_BN_MODEXP_WIN_K > 8u)
+#if ((SSF_BN_MODEXP_WIN_K < 1u) || (SSF_BN_MODEXP_WIN_K > 8u))
 #error SSF_BN_MODEXP_WIN_K must be 1 to 8 (a 2^k-entry table on the stack)
 #endif
 #define SSF_BN_NUM_SMALL_PRIMES \
@@ -62,7 +62,7 @@ uint32_t _SSFBNModCallCount = 0u;
 uint32_t _SSFBNTrialDivRejects = 0u;
 
 /* Test-only hook fired after each secret local is wiped; NULL in production. */
-void (*_SSFBNScrubTestHook)(const void *buf, size_t len) = NULL;
+void (*_SSFBNScrubTestHook)(const void *buf, size_t bufSize) = NULL;
 #define _SSF_BN_SCRUB_HOOK(p, n) \
     do { if (_SSFBNScrubTestHook != NULL) { _SSFBNScrubTestHook((p), (n)); } } while (0)
 
@@ -125,9 +125,7 @@ const SSFBNLimb_t SSF_BN_NIST_P384_LIMBS[12] =
 const SSFBN_t SSF_BN_NIST_P384 = { (SSFBNLimb_t *)SSF_BN_NIST_P384_LIMBS, 12, 12 };
 #endif /* SSF_BN_CONFIG_MAX_BITS >= 768 */
 
-/* The 254 odd primes 3 to 1613 for trial division during prime-candidate screening, each    */
-/* stored as half its gap from the previous one (from 1): the largest gap below 1613 is 34,  */
-/* so every entry fits a byte, half the size of a uint16_t table (OPTIMIZE BN-16).           */
+/* The 254 odd primes 3 to 1613 for trial division, each as half its gap from the prior (from 1) */
 static const uint8_t _ssfBNSmallPrimeHalfGaps[] = {
      1,  1,  1,  2,  1,  2,  1,  2,  3,  1,  3,  2,  1,  2,  3,  3,  1,  3,  2,  1,  3,  2,  3,  4,
      2,  1,  2,  1,  2,  7,  2,  3,  1,  5,  1,  3,  3,  2,  3,  3,  1,  5,  1,  2,  1,  6,  6,  2,
@@ -1318,9 +1316,11 @@ static void _SSFBNModShift(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
     while (shift >= 0)
     {
         SSFBNLimb_t borrow = _SSFBNRawSub(rem.limbs, rem.limbs, shifted.limbs, rem.len);
+
+        /* Did the subtraction borrow? */
         if (borrow != 0u)
         {
-            /* Undo: add shifted back */
+            /* Yes, undo it by adding shifted back */
             _SSFBNRawAdd(rem.limbs, rem.limbs, shifted.limbs, rem.len);
         }
         SSFBNShiftRight1(&shifted);
@@ -1573,8 +1573,7 @@ void SSFBNModMulCT(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* r = (a * b) mod m for odd m, constant-time: SSFBNModMulCT without its even-modulus path, so    */
-/* callers whose moduli are always odd do not link the shift-and-subtract (OPTIMIZE BN-15).      */
+/* r = (a * b) mod m for odd m, constant-time; SSFBNModMulCT without its even-modulus path.      */
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNModMulCTOdd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m)
 {
@@ -1672,9 +1671,10 @@ void SSFBNGcd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b)
         /* Reduce v to its odd part in one shot. */
         SSFBNShiftRight(v, SSFBNTrailingZeros(v));
 
+        /* Is u greater than v? */
         if (SSFBNCmp(u, v) > 0)
         {
-            /* Swap the roles, not the limbs */
+            /* Yes, swap the roles, not the limbs */
             SSFBN_t *t = u;
             u = v;
             v = t;
@@ -1756,8 +1756,7 @@ void SSFBNDivMod(SSFBN_t *q, SSFBN_t *rem, const SSFBN_t *a, const SSFBN_t *b)
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFBNModInvExtEuclid(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
 {
-    /* Track only s (m's coefficient is implicit); signs tracked separately (SSFBN_t unsigned). */
-    /* Every value is reduced below m, so only the product needs 2N limbs (BN-05). */
+    /* Track only s, with its sign apart; values stay below m, so only prod needs 2N limbs */
     SSFBN_DEFINE(old_r, SSF_BN_MAX_MOD_LIMBS);
     SSFBN_DEFINE(cur_r, SSF_BN_MAX_MOD_LIMBS);
     SSFBN_DEFINE(old_s, SSF_BN_MAX_MOD_LIMBS);
@@ -1784,8 +1783,11 @@ static bool _SSFBNModInvExtEuclid(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m
     /* old_r = m, cur_r = a (reduced mod m if needed) */
     SSFBNCopy(&old_r, m);
     SSFBNCopy(&cur_r, a);
+
+    /* Is a at least m? */
     if (SSFBNCmp(&cur_r, m) >= 0)
     {
+        /* Yes, reduce it */
         SSFBNMod(&cur_r, &cur_r, m);
     }
     if (SSFBNIsZero(&cur_r)) return false;
@@ -1810,14 +1812,16 @@ static bool _SSFBNModInvExtEuclid(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m
             /* Do old_s and qxs share the same sign? */
             if (old_s_neg == cur_s_neg)
             {
-                /* Yes, subtract magnitudes. */
+                /* Yes, subtract magnitudes; is old_s at least qxs? */
                 if (SSFBNCmp(&old_s, &qxs) >= 0)
                 {
+                    /* Yes, the difference keeps old_s's sign */
                     SSFBNSub(&tmp_s, &old_s, &qxs);
                     tmp_neg = old_s_neg;
                 }
                 else
                 {
+                    /* No, the difference takes the opposite sign */
                     SSFBNSub(&tmp_s, &qxs, &old_s);
                     tmp_neg = (old_s_neg == false);
                 }
@@ -1993,9 +1997,7 @@ bool SSFBNModInvExt(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* If gcd(a, m) == 1 writes r = a^(-1) mod m and returns true, else false. Odd m, a < m only:    */
-/* the binary path of SSFBNModInvExt without its Euclid fallback, so callers that never need an  */
-/* even modulus do not link it (OPTIMIZE BN-07). Variable-time (see ssfbn.md).                   */
+/* If gcd(a, m) == 1 writes r = a^(-1) mod m (odd m, a < m), returns true, else false.           */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFBNModInvOdd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
 {
@@ -2041,7 +2043,7 @@ static int32_t _SSFBNNistFold(SSFBNLimb_t *r, const int8_t *coef, uint16_t n, in
         w = (uint64_t)r[i] + (uint64_t)(uint32_t)((((int32_t)coef[i] * c) + carry) + 64);
         r[i] = (SSFBNLimb_t)(w - 64u);
         /* floor(v / 2^32) is -1, 0 or 1: no division and no shift of a negative value */
-        carry = (int32_t)((w + 0xFFFFFFC0u) >> 32) - 1;
+        carry = ((int32_t)((w + 0xFFFFFFC0u) >> 32)) - 1;
     }
     return carry;
 }
@@ -2318,6 +2320,8 @@ static bool _SSFBNIsNistPrime(const SSFBN_t *m, const SSFBN_t *p)
 /* --------------------------------------------------------------------------------------------- */
 static const SSFBN_t *_SSFBNNistPrimeOf(const SSFBN_t *m)
 {
+    SSF_REQUIRE(m != NULL);
+
 #if SSF_BN_CONFIG_MAX_BITS >= 512
     if (_SSFBNIsNistPrime(m, &SSF_BN_NIST_P256)) return &SSF_BN_NIST_P256;
 #endif /* SSF_BN_CONFIG_MAX_BITS >= 512 */
@@ -2329,12 +2333,16 @@ static const SSFBN_t *_SSFBNNistPrimeOf(const SSFBN_t *m)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* r = (a * b) mod p for p, the NIST prime m equals (from _SSFBNNistPrimeOf), by fast reduction; */
-/* the caller has checked the operands against m.                                                */
+/* r = (a * b) mod p by fast reduction, for p the NIST prime returned by _SSFBNNistPrimeOf.      */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFBNModMulNISTFast(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b,
                                  const SSFBN_t *p)
 {
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(b != NULL);
+    SSF_REQUIRE(p != NULL);
+
 #if SSF_BN_CONFIG_MAX_BITS >= 512
     /* Product of two curve-width operands: 2 x 12 limbs for P-384, 2 x 8 for P-256 */
 #if SSF_BN_CONFIG_MAX_BITS >= 768
@@ -2343,11 +2351,12 @@ static void _SSFBNModMulNISTFast(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b,
     SSFBN_DEFINE(prod, 16u);
 #endif
 
-    /* The public callers checked r, a, b and m; p has m's length */
     SSFBNMul(&prod, a, b);
 #if SSF_BN_CONFIG_MAX_BITS >= 768
+    /* Is p the P-384 prime? */
     if (p == &SSF_BN_NIST_P384)
     {
+        /* Yes */
         _SSFBNReduceP384(r, &prod);
         return;
     }
@@ -2398,8 +2407,7 @@ void SSFBNModMulNIST(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* r = (a * b) mod m for m the P-256 or P-384 prime only (SSF_REQUIRE): SSFBNModMulNIST without  */
-/* its generic fallback, so ssfec does not link SSFBNModMul (OPTIMIZE BN-08).                    */
+/* r = (a * b) mod m for m the P-256 or P-384 prime only; SSFBNModMulNIST without its fallback.  */
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNModMulNISTPrime(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m)
 {
@@ -2656,10 +2664,10 @@ void SSFBNMontInit(SSFBNMont_t *ctx, const SSFBN_t *m)
     /* From here only ctx->mod is read, so m may alias ctx->rr */
     SSFBNSetZero(r2, ctx->len);
 
-    /* Is m == 1, where R^2 mod m is 0? */
+    /* Is m greater than 1, so R^2 mod m is nonzero? */
     if (bitLen > 1u)
     {
-        /* No, start at 2^(bitLen - 1), the largest power of two below m */
+        /* Yes, start at 2^(bitLen - 1), the largest power of two below m */
         r2->limbs[(bitLen - 1u) / SSF_BN_LIMB_BITS] =
             (SSFBNLimb_t)((SSFBNLimb_t)1u << ((bitLen - 1u) % SSF_BN_LIMB_BITS));
 
@@ -2685,7 +2693,7 @@ void SSFBNMontInit(SSFBNMont_t *ctx, const SSFBN_t *m)
             SSFBNMontSquare(r2, r2, ctx);
         }
     }
-    /* Yes, r2 stays 0 */
+    /* No, r2 stays 0 */
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -2985,8 +2993,7 @@ void SSFBNMontConvertOut(SSFBN_t *a, const SSFBN_t *aR, const SSFBNMont_t *ctx)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: r = a^e mod ctx->mod; constant-time fixed-window (k=4) over caller storage of       */
-/* (SSF_BN_MODEXP_TBL_N + 2) zeroed residues of cap limbs each, all wiped before return.         */
+/* r = a^e mod ctx->mod, constant-time fixed-window over caller storage that is wiped after.     */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFBNModExpMontCore(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e,
                                  const SSFBNMont_t *ctx, SSFBNLimb_t *store, uint16_t cap)
@@ -3031,8 +3038,7 @@ static void _SSFBNModExpMontCore(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e,
     picked.len = 0u;
     picked.cap = cap;
 
-    /* table[1] = Mont(a); table[0] = Mont(1) for zero-windows, converted in place */
-    /* (ConvertIn allows aR == a); table[i] = Mont(a)^i for i = 2..15.            */
+    /* table[1] = Mont(a), table[0] = Mont(1) converted in place, table[i] = Mont(a)^i */
     SSFBNMontConvertIn(&table[1], a, ctx);
     SSFBNSetOne(&table[0], ctx->len);
     SSFBNMontConvertIn(&table[0], &table[0], ctx);
@@ -3045,9 +3051,7 @@ static void _SSFBNModExpMontCore(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e,
     SSFBNCopy(&result, &table[0]);
     SSFBNCopy(&picked, &table[0]);
 
-    /* nWindows = ceil(max(e->len, ctx->len) * 32 / k): fixed by public lengths, so the loop */
-    /* count is e-independent; for k not dividing 32 the top window reads bits past e->len,  */
-    /* which SSFBNGetBit returns as 0 (SAFE-03).                                              */
+    /* nWindows = ceil(max(e->len, ctx->len) * 32 / k); bits past e->len read as 0 */
     {
         uint16_t expLen = (e->len > ctx->len) ? e->len : ctx->len;
         nWindows = (((uint32_t)expLen * SSF_BN_LIMB_BITS) + (SSF_BN_MODEXP_WIN_K - 1u)) /
@@ -3116,13 +3120,16 @@ void SSFBNModExp(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN_t *
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* r = a^e mod m using precomputed Montgomery context; constant-time fixed-window (k=4).         */
+/* r = a^e mod m using precomputed Montgomery context; constant-time fixed-window.               */
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNModExpMont(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBNMont_t *ctx)
 {
     /* Residues only -- never the 2N raw-mul intermediate. See ssfbn.md "MAX_MOD_LIMBS". */
     SSFBNLimb_t store[(SSF_BN_MODEXP_TBL_N + 2u) * SSF_BN_MAX_MOD_LIMBS] = {0u};
 
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(e != NULL);
     SSF_REQUIRE(ctx != NULL);
     SSF_REQUIRE(ctx->len <= SSF_BN_MAX_MOD_LIMBS);
 
@@ -3130,8 +3137,7 @@ void SSFBNModExpMont(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* r = a^e mod m for m of at most SSF_BN_HALF_MOD_LIMBS limbs (an RSA CRT prime); constant-time  */
-/* fixed-window (k=4), the same algorithm as SSFBNModExp on half-width storage.                  */
+/* r = a^e mod m for m of at most SSF_BN_HALF_MOD_LIMBS limbs; constant-time fixed-window.       */
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNModExpHalf(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN_t *m)
 {
@@ -3140,6 +3146,10 @@ void SSFBNModExpHalf(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN
 
     SSF_REQUIRE(r != NULL);
     SSF_REQUIRE(r->limbs != NULL);
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(a->limbs != NULL);
+    SSF_REQUIRE(e != NULL);
+    SSF_REQUIRE(e->limbs != NULL);
     SSF_REQUIRE(m != NULL);
     SSF_REQUIRE(m->limbs != NULL);
     SSF_REQUIRE(m->len >= 1u);
@@ -3224,12 +3234,10 @@ void SSFBNModExpMontPub(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SS
     /* Convert a to Montgomery form once; every subsequent MontMul keeps result in Mont form. */
     SSFBNMontConvertIn(&aM, a, ctx);
 
-    /* The top bit of e is set: starting from Mont(1) would square it and multiply by aM, */
-    /* giving aM, so start there and process the remaining bits. */
+    /* The top bit of e is set, so start from aM and process the remaining bits */
     SSFBNCopy(&result, &aM);
 
-    /* Left-to-right binary square-and-multiply; leaks Hamming weight of e (public-only). */
-    /* Bits eBits - 2 down to 0; an unsigned count-down avoids -Wstrict-overflow on eBits - 2. */
+    /* Left-to-right square-and-multiply over bits eBits - 2 down to 0; leaks e's weight */
     for (i = eBits - 1u; i-- > 0u;)
     {
         SSFBNMontSquare(&result, &result, ctx);
@@ -3330,15 +3338,15 @@ uint32_t SSFBNModUint32(const SSFBN_t *a, uint32_t d)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns a mod d for d < 2^16 with 32-bit remainders only: two 16-bit steps per limb, so the   */
-/* running value stays below 2^32. SSFBNGenPrime's trial division uses it on 32-bit targets,     */
-/* where the 64-bit remainder of SSFBNModUint32 is a libgcc routine (OPTIMIZE BN-13).            */
+/* Returns a mod d for d < 2^16 using only 32-bit remainders, two 16-bit steps per limb.         */
 /* --------------------------------------------------------------------------------------------- */
 static uint32_t _SSFBNModUint16(const SSFBN_t *a, uint32_t d)
 {
     uint32_t r = 0u;
     uint16_t i;
 
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(a->limbs != NULL);
     SSF_REQUIRE((d != 0u) && (d <= 0xFFFFu));
 
     for (i = a->len; i > 0u; i--)
@@ -3362,18 +3370,22 @@ static uint32_t _SSFBNModUint16(const SSFBN_t *a, uint32_t d)
 /* --------------------------------------------------------------------------------------------- */
 uint32_t _SSFBNModUint16Test(const SSFBN_t *a, uint32_t d)
 {
+    SSF_REQUIRE(a != NULL);
+
     return _SSFBNModUint16(a, d);
 }
 #endif /* SSF_CONFIG_BN_UNIT_TEST */
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if no odd prime 3..1613 divides p, else false (SSFBNGenPrime's trial division).  */
-/* Variable time: stops at the first divisor found.                                              */
+/* Returns true if no odd prime 3..1613 divides p, else false; variable-time.                    */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFBNTrialDivPass(const SSFBN_t *p)
 {
     uint32_t d = 1u;
     uint16_t i;
+
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(p->limbs != NULL);
 
     for (i = 0; i < SSF_BN_NUM_SMALL_PRIMES; i++)
     {
@@ -3394,6 +3406,8 @@ static bool _SSFBNTrialDivPass(const SSFBN_t *p)
 /* --------------------------------------------------------------------------------------------- */
 bool _SSFBNTrialDivPassTest(const SSFBN_t *p)
 {
+    SSF_REQUIRE(p != NULL);
+
     return _SSFBNTrialDivPass(p);
 }
 #endif /* SSF_CONFIG_BN_UNIT_TEST */
@@ -3457,13 +3471,15 @@ bool SSFBNRandomBelow(SSFBN_t *a, const SSFBN_t *bound, SSFPRNGContext_t *prng)
     topLimb = (uint16_t)((bitLen - 1u) / SSF_BN_LIMB_BITS);
     topBit = (uint16_t)((bitLen - 1u) % SSF_BN_LIMB_BITS);
 
-    /* Mask keeps bits [0, topBit] in top limb; guards `1u << 32` UB at limb-aligned bitLen. */
+    /* Is topBit the limb's highest bit, where 1u << (topBit + 1u) would be UB? */
     if (topBit == (SSF_BN_LIMB_BITS - 1u))
     {
+        /* Yes, keep the whole top limb */
         topMask = (SSFBNLimb_t)(~(SSFBNLimb_t)0u);
     }
     else
     {
+        /* No, keep bits [0, topBit] of the top limb */
         topMask = (SSFBNLimb_t)(((SSFBNLimb_t)1u << (topBit + 1u)) - 1u);
     }
 
@@ -3580,9 +3596,7 @@ bool SSFBNIsProbablePrime(const SSFBN_t *n, uint16_t rounds, SSFPRNGContext_t *p
             continue;
         }
 
-        /* Inner loop: square x up to s-1 times, looking for x == n-1. x is squared in Montgomery */
-        /* form with the context already built for n, and each result converted out into a (the */
-        /* witness, no longer needed this round) for the comparisons (OPTIMIZE BN-14).          */
+        /* Square x in Montgomery form up to s-1 times, comparing each, converted out into a */
         cont = false;
         SSFBNMontConvertIn(&x, &x, &mont);
         for (r = 1; r < s; r++)
@@ -3660,19 +3674,22 @@ bool SSFBNGenPrime(SSFBN_t *p, uint16_t bitLen, uint16_t rounds, SSFPRNGContext_
     {
         /* Draw the candidate straight into p, keep bitLen bits, force the top two and the low */
         SSFBNRandom(p, limbs, prng);
+
+        /* Does bitLen end inside the top limb? */
         if ((bitLen % SSF_BN_LIMB_BITS) != 0u)
         {
+            /* Yes, clear the bits above bitLen */
             p->limbs[limbs - 1u] &=
                 (SSFBNLimb_t)(((SSFBNLimb_t)1u << (bitLen % SSF_BN_LIMB_BITS)) - 1u);
         }
-        p->limbs[topBit / SSF_BN_LIMB_BITS] |= (SSFBNLimb_t)1u << (topBit % SSF_BN_LIMB_BITS);
-        p->limbs[nextBit / SSF_BN_LIMB_BITS] |= (SSFBNLimb_t)1u << (nextBit % SSF_BN_LIMB_BITS);
+        p->limbs[topBit / SSF_BN_LIMB_BITS] |= ((SSFBNLimb_t)1u << (topBit % SSF_BN_LIMB_BITS));
+        p->limbs[nextBit / SSF_BN_LIMB_BITS] |= ((SSFBNLimb_t)1u << (nextBit % SSF_BN_LIMB_BITS));
         p->limbs[0] |= 1u;
 
-        /* Trial-divide by the odd primes up to 1613 (p is far larger than any of them) */
+        /* Does an odd prime up to 1613 divide p (p is far larger than any of them)? */
         if (!_SSFBNTrialDivPass(p))
         {
-            /* A small prime divides p, next candidate */
+            /* Yes, try the next candidate */
 #if SSF_CONFIG_BN_UNIT_TEST == 1
             _SSFBNTrialDivRejects++;
 #endif

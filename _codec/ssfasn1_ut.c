@@ -127,12 +127,20 @@ void SSFASN1UnitTest(void)
         static const uint8_t utf8Ok[] = { 0x0Cu, 0x02u, 'a', 'b' };
         static const uint8_t bmpOk[] = { 0x1Eu, 0x02u, 0x00u, 'A' };
         static const uint8_t univOk[] = { 0x1Cu, 0x04u, 0x00u, 0x00u, 0x00u, 'A' };
-        static const struct { const uint8_t *der; uint32_t len; } bad[] = {
+        static const struct
+        {
+            const uint8_t *der;
+            uint32_t len;
+        } bad[] = {
             { utf8Nul, sizeof(utf8Nul) }, { printNul, sizeof(printNul) },
             { ia5Nul, sizeof(ia5Nul) }, { t61Nul, sizeof(t61Nul) },
             { bmpOdd, sizeof(bmpOdd) }, { univBad, sizeof(univBad) }
         };
-        static const struct { const uint8_t *der; uint32_t len; } good[] = {
+        static const struct
+        {
+            const uint8_t *der;
+            uint32_t len;
+        } good[] = {
             { utf8Ok, sizeof(utf8Ok) }, { bmpOk, sizeof(bmpOk) }, { univOk, sizeof(univOk) }
         };
         const uint8_t *str;
@@ -197,8 +205,13 @@ void SSFASN1UnitTest(void)
         static const uint8_t m0080[] = { 0x00u, 0x80u };
         static const uint8_t mPad007F[] = { 0x00u, 0x7Fu };
         static const uint8_t mPadFF80[] = { 0xFFu, 0x80u };
-        static const struct { const uint8_t *in; uint32_t inLen; uint8_t outLen;
-                              uint8_t out[4]; } vec[] = {
+        static const struct
+        {
+            const uint8_t *in;
+            uint32_t inLen;
+            uint8_t outLen;
+            uint8_t out[4];
+        } vec[] = {
             { m80, sizeof(m80), 4u, { 0x02u, 0x02u, 0x00u, 0x80u } },
             { m0001, sizeof(m0001), 3u, { 0x02u, 0x01u, 0x01u, 0x00u } },
             { m00, sizeof(m00), 3u, { 0x02u, 0x01u, 0x00u, 0x00u } },
@@ -241,11 +254,20 @@ void SSFASN1UnitTest(void)
         static const uint8_t bs780[] = { 0x03u, 0x02u, 0x07u, 0x80u };
         static const uint8_t bs0FF[] = { 0x03u, 0x02u, 0x00u, 0xFFu };
         static const uint8_t bs1FFFE[] = { 0x03u, 0x03u, 0x01u, 0xFFu, 0xFEu };
-        static const struct { const uint8_t *der; uint32_t len; } bad[] = {
+        static const struct
+        {
+            const uint8_t *der;
+            uint32_t len;
+        } bad[] = {
             { bsUnused8, sizeof(bsUnused8) }, { bsEmpty5, sizeof(bsEmpty5) },
             { bsPad7, sizeof(bsPad7) }, { bsPad1, sizeof(bsPad1) }
         };
-        static const struct { const uint8_t *der; uint32_t len; uint8_t unused; } good[] = {
+        static const struct
+        {
+            const uint8_t *der;
+            uint32_t len;
+            uint8_t unused;
+        } good[] = {
             { bsEmpty, sizeof(bsEmpty), 0u }, { bs780, sizeof(bs780), 7u },
             { bs0FF, sizeof(bs0FF), 0u }, { bs1FFFE, sizeof(bs1FFFE), 1u }
         };
@@ -308,10 +330,18 @@ void SSFASN1UnitTest(void)
         static const uint8_t iNeg128[] = { 0x02u, 0x01u, 0x80u };
         static const uint8_t iNeg1[] = { 0x02u, 0x01u, 0xFFu };
         static const uint8_t iNeg129[] = { 0x02u, 0x02u, 0xFFu, 0x7Fu };
-        static const struct { const uint8_t *der; uint32_t len; } bad[] = {
+        static const struct
+        {
+            const uint8_t *der;
+            uint32_t len;
+        } bad[] = {
             { iEmpty, sizeof(iEmpty) }, { iPad00, sizeof(iPad00) }, { iPadFF, sizeof(iPadFF) }
         };
-        static const struct { const uint8_t *der; uint32_t len; } good[] = {
+        static const struct
+        {
+            const uint8_t *der;
+            uint32_t len;
+        } good[] = {
             { iZero, sizeof(iZero) }, { i7F, sizeof(i7F) }, { i128, sizeof(i128) },
             { iNeg128, sizeof(iNeg128) }, { iNeg1, sizeof(iNeg1) }, { iNeg129, sizeof(iNeg129) }
         };
@@ -353,11 +383,14 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(SSFASN1DecGetUInt(&cursor, &iBuf, &iLen, &next) == true);
         SSF_ASSERT((iLen == 1u) && (iBuf == &i128[3]) && (iBuf[0] == 0x80u));
 
-        /* GetUInt contract callers rely on (ssfx509 RSA key policy): a returned magnitude has */
-        /* no leading 0x00 unless the value is zero, which comes back as the single byte 0x00. */
+        /* GetUInt magnitude has no leading 0x00 unless the value is zero (single byte 0x00) */
         {
             static const uint8_t iMulti[] = { 0x02u, 0x03u, 0x00u, 0x80u, 0x01u };
-            static const struct { const uint8_t *der; uint32_t len; } uints[] = {
+            static const struct
+            {
+                const uint8_t *der;
+                uint32_t len;
+            } uints[] = {
                 { iZero, sizeof(iZero) }, { i7F, sizeof(i7F) }, { i128, sizeof(i128) },
                 { iMulti, sizeof(iMulti) }
             };
@@ -385,7 +418,11 @@ void SSFASN1UnitTest(void)
         static uint8_t len82For128[4u + 128u];
         static uint8_t len81For128[3u + 128u];
         static uint8_t len82For256[4u + 256u];
-        static const struct { const uint8_t *der; uint32_t len; } bad[] = {
+        static const struct
+        {
+            const uint8_t *der;
+            uint32_t len;
+        } bad[] = {
             { len81For3, sizeof(len81For3) }, { len82For3, sizeof(len82For3) },
             { len84For3, sizeof(len84For3) }, { len82For128, sizeof(len82For128) }
         };
@@ -427,7 +464,12 @@ void SSFASN1UnitTest(void)
 
     /* ---- COV-6b: EncTagLen writes the minimal 0x83 and 0x84 long forms ---- */
     {
-        static const struct { uint32_t len; uint8_t hdr[6]; uint32_t hdrLen; } vec[] = {
+        static const struct
+        {
+            uint32_t len;
+            uint8_t hdr[6];
+            uint32_t hdrLen;
+        } vec[] = {
             { 0x10000u, { 0x30u, 0x83u, 0x01u, 0x00u, 0x00u, 0x00u }, 5u },
             { 0xFFFFFFu, { 0x30u, 0x83u, 0xFFu, 0xFFu, 0xFFu, 0x00u }, 5u },
             { 0x1000000u, { 0x30u, 0x84u, 0x01u, 0x00u, 0x00u, 0x00u }, 6u },
@@ -561,7 +603,11 @@ void SSFASN1UnitTest(void)
         static const uint8_t vMax[] = {
             0x02u, 0x09u, 0x00u, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu
         };
-        static const struct { const uint8_t *der; uint32_t len; } bad[] = {
+        static const struct
+        {
+            const uint8_t *der;
+            uint32_t len;
+        } bad[] = {
             { negOne, sizeof(negOne) }, { neg128, sizeof(neg128) }, { empty, sizeof(empty) },
             { padded7F, sizeof(padded7F) }, { padded1, sizeof(padded1) }
         };
@@ -1917,7 +1963,8 @@ void SSFASN1UnitTest(void)
                 "2024-06-15T12:00:X0"    /* second non-digit (line 620) */
             };
             size_t i;
-            for (i = 0; i < sizeof(bad_payloads) / sizeof(bad_payloads[0]); i++) {
+            for (i = 0; i < (sizeof(bad_payloads) / sizeof(bad_payloads[0])); i++)
+            {
                 memcpy(payload, bad_payloads[i], 19);
                 SSF_ASSERT(SSFASN1EncTagLen(der, sizeof(der), SSF_ASN1_TAG_DATE_TIME, 19u, &hdrLen)
                            == true);

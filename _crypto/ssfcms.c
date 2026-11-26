@@ -386,10 +386,11 @@ static bool _SSFCMSParseSignerInfo(SSFASN1Cursor_t *pos, SSFCMSSignerInfo_t *si)
     }
     si->version = (uint8_t)version;
 
-    /* SignerIdentifier CHOICE: SEQUENCE for issuerAndSerialNumber, [0] for the key identifier */
+    /* Is the SignerIdentifier CHOICE an issuerAndSerialNumber SEQUENCE? */
     if (!SSFASN1DecPeekTag(&inner, &tag)) return false;
     if (tag == SSF_ASN1_TAG_SEQUENCE)
     {
+        /* Yes, only valid with version 1 */
         if (version != 1u) return false;
         if (!SSFASN1DecOpenConstructed(&inner, SSF_ASN1_TAG_SEQUENCE, &ias, &inner)) return false;
         start = ias.buf;
@@ -402,8 +403,10 @@ static bool _SSFCMSParseSignerInfo(SSFASN1Cursor_t *pos, SSFCMSSignerInfo_t *si)
         if (!SSFASN1DecGetInt(&ias, &si->sidSerial, &si->sidSerialLen, &ias)) return false;
         if (!SSFASN1DecIsEmpty(&ias)) return false;
     }
+    /* No, is it a [0] subjectKeyIdentifier? */
     else if (tag == _TAG_CTX0_PRIMITIVE)
     {
+        /* Yes, only valid with version 3 */
         if (version != 3u) return false;
         if (!SSFASN1DecGetTLV(&inner, &tag, &si->sidSkid, &si->sidSkidLen, &inner)) return false;
         if (si->sidSkidLen == 0u) return false;
@@ -460,9 +463,10 @@ static bool _SSFCMSParseCertificates(const SSFASN1Cursor_t *certs, SSFCMSSignedD
     {
         if (!SSFASN1DecPeekTag(&pos, &tag)) return false;
 
-        /* CertificateChoices: a SEQUENCE is an X.509 certificate, anything tagged is skipped */
+        /* Is this CertificateChoices entry other than an X.509 certificate SEQUENCE? */
         if (tag != SSF_ASN1_TAG_SEQUENCE)
         {
+            /* Yes, skip it */
             if (!SSFASN1DecSkip(&pos, &pos)) return false;
             continue;
         }
@@ -551,8 +555,11 @@ bool SSFCMSParse(const uint8_t *der, uint32_t derLen, SSFCMSSignedData_t *sdOut)
     if (!SSFASN1DecOpenConstructed(&sd, SSF_ASN1_TAG_SEQUENCE, &eci, &sd)) return false;
     if (!SSFASN1DecGetOIDRaw(&eci, &sdOut->eContentTypeOidRaw, &sdOut->eContentTypeOidRawLen,
                              &eci)) return false;
+
+    /* Is eContent present? */
     if (!SSFASN1DecIsEmpty(&eci))
     {
+        /* Yes, attached content */
         if (!SSFASN1DecOpenConstructed(&eci, _TAG_CTX0_CONSTRUCTED, &econt, &eci)) return false;
         if (!SSFASN1DecGetOctetString(&econt, &sdOut->eContent, &sdOut->eContentLen, &econt))
         {
@@ -645,8 +652,11 @@ static bool _SSFCMSFindSignerCert(const SSFCMSSignedData_t *sd, const SSFCMSSign
     for (i = 0; i < sd->certsLen; i++)
     {
         if (!SSFX509Parse(sd->certs[i].der, sd->certs[i].derLen, certOut)) continue;
+
+        /* Is this embedded certificate the signer's? */
         if (_SSFCMSCertMatchesSigner(certOut, si))
         {
+            /* Yes */
             *derOut = sd->certs[i].der;
             *derLenOut = sd->certs[i].derLen;
             return true;
@@ -656,8 +666,11 @@ static bool _SSFCMSFindSignerCert(const SSFCMSSignedData_t *sd, const SSFCMSSign
     {
         SSF_REQUIRE(trustDer[i] != NULL);
         if (!SSFX509Parse(trustDer[i], trustDerLen[i], certOut)) continue;
+
+        /* Is this trust anchor the signer's certificate? */
         if (_SSFCMSCertMatchesSigner(certOut, si))
         {
+            /* Yes */
             *derOut = trustDer[i];
             *derLenOut = trustDerLen[i];
             return true;
@@ -667,8 +680,7 @@ static bool _SSFCMSFindSignerCert(const SSFCMSSignedData_t *sd, const SSFCMSSign
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if the signer certificate is found, with its DER in derOut / derLenOut. The      */
-/* parsed certificate lives only in this frame, not across chain verification (OPTIMIZE CMS-01). */
+/* Returns true if the signer certificate is found, with its DER in derOut / derLenOut.          */
 /* --------------------------------------------------------------------------------------------- */
 SSF_NOINLINE
 static bool _SSFCMSFindSignerDer(const SSFCMSSignedData_t *sd, const SSFCMSSignerInfo_t *si,
@@ -677,25 +689,38 @@ static bool _SSFCMSFindSignerDer(const SSFCMSSignedData_t *sd, const SSFCMSSigne
 {
     SSFX509Cert_t cert;
 
+    SSF_REQUIRE(sd != NULL);
+    SSF_REQUIRE(si != NULL);
+    SSF_REQUIRE(trustDer != NULL);
+    SSF_REQUIRE(trustDerLen != NULL);
+    SSF_REQUIRE(derOut != NULL);
+    SSF_REQUIRE(derLenOut != NULL);
+
+    /* Parsed certificate lives only in this frame, not across chain verification */
     return _SSFCMSFindSignerCert(sd, si, trustDer, trustDerLen, trustCount, &cert, derOut,
                                  derLenOut);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if signer idx's signature verifies with the key of the chain-verified signer     */
-/* certificate signerDer, filling resultOut, else false. Parses signerDer again (fails closed)   */
-/* and re-tags the signed attributes; both live only in this frame (OPTIMIZE CMS-01).            */
+/* Returns true if signer idx's signature verifies with the key of signerDer, else false.        */
 /* --------------------------------------------------------------------------------------------- */
 SSF_NOINLINE
 static bool _SSFCMSVerifySignerSig(const SSFCMSSignedData_t *sd, uint8_t idx,
                                    const uint8_t *signerDer, uint32_t signerDerLen,
                                    SSFCMSVerifyResult_t *resultOut)
 {
-    const SSFCMSSignerInfo_t *si = &sd->signers[idx];
+    const SSFCMSSignerInfo_t *si;
     SSFX509Cert_t signerCert;
     uint8_t attrs[SSF_CMS_CONFIG_MAX_SIGNED_ATTRS_LEN];
     const uint8_t *covered;
     uint32_t coveredLen;
+
+    SSF_REQUIRE(sd != NULL);
+    SSF_REQUIRE(idx < sd->signersLen);
+    SSF_REQUIRE(signerDer != NULL);
+    SSF_REQUIRE(resultOut != NULL);
+
+    si = &sd->signers[idx];
 
     /* Does the chain-verified signer certificate fail to parse again? */
     if (!SSFX509Parse(signerDer, signerDerLen, &signerCert))
@@ -787,6 +812,7 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
         if (_SSFCMSSpanEquals(sd->digestAlgOidRaw[i], sd->digestAlgOidRawLen[i],
                               si->digestAlgOidRaw, si->digestAlgOidRawLen)) listed = true;
     }
+
     /* Is it missing from SignedData.digestAlgorithms? */
     if (!listed)
     {
@@ -843,10 +869,11 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
     /* Are signed attributes present? */
     if (si->signedAttrs != NULL)
     {
-        /* Yes, they bind the content type and digest, and the signature covers them as a SET */
+        /* Yes, does the content-type attribute differ from eContentType? */
         if (!_SSFCMSSpanEquals(si->contentTypeOidRaw, si->contentTypeOidRawLen,
                                sd->eContentTypeOidRaw, sd->eContentTypeOidRawLen))
         {
+            /* Yes */
             SSF_TLS_TRACE_CERT_ERROR(_SSF_CMS_TRACE_CTX,
                                      "CMS: signer[%u] content-type attribute != eContentType", idx);
             return false;
@@ -886,13 +913,16 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
             return false;
         }
 
-        /* Was a digest supplied as well? It must match the attached content, never be ignored */
+        /* Was a digest supplied as well? */
         if (digestOpt != NULL)
         {
-            /* Yes */
+            /* Yes, it must match the attached content */
             _SSFCMSDigest(alg, sd->eContent, sd->eContentLen, computed, sizeof(computed));
+
+            /* Does the supplied digest differ from the attached content's (constant time)? */
             if (!SSFCryptCTMemEq(digestOpt, computed, hashLen))
             {
+                /* Yes */
                 SSF_TLS_TRACE_CERT_ERROR(_SSF_CMS_TRACE_CTX,
                     "CMS: signer[%u] supplied digest does not match the attached content", idx);
                 return false;
@@ -909,9 +939,7 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
         return false;
     }
 
-    /* The signer first, then every other embedded certificate in any order: the verifier builds */
-    /* the path (ssfx509), choosing each issuer by name, key identifier and signature. At most   */
-    /* SSF_CMS_CONFIG_MAX_CERTS + 1 entries, which the chain depth #error above guarantees fit.  */
+    /* Signer first, then every other embedded certificate in any order for path building */
     chain[0] = signerDer;
     chainLen[0] = signerDerLen;
     chainN = 1u;

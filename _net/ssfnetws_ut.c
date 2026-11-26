@@ -73,18 +73,18 @@ typedef struct
     uint32_t shutdownCount;
     char host[SSF_NETWS_CONFIG_MAX_HOST_SIZE + 8u];
     uint16_t port;
-    uint32_t pollWant;               /* WANT_WRITE results pollOpen() returns first             */
+    uint32_t pollWant;               /* WANT_WRITE results pollOpen() returns first */
     SSFNetIOResult_t pollResult;
     uint8_t tx[SSF_NETWS_UT_TX_CAP];
     size_t txLen;
-    size_t txChunk;                  /* Most bytes send() takes per call; 0 = all               */
-    bool isTxBlocked;                /* send() returns WANT_WRITE                               */
-    SSFNetIOResult_t txFail;         /* Not SUCCESS: send() returns it                          */
+    size_t txChunk;                  /* Most bytes send() takes per call; 0 = all */
+    bool isTxBlocked;                /* send() returns WANT_WRITE */
+    SSFNetIOResult_t txFail;         /* Not SUCCESS: send() returns it */
     uint8_t rx[SSF_NETWS_UT_RX_CAP];
     size_t rxLen;
     size_t rxPos;
-    size_t rxChunk;                  /* Most bytes recv() returns per call; 0 = all             */
-    bool isRxEof;                    /* recv() returns CLOSED once rx is drained                */
+    size_t rxChunk;                  /* Most bytes recv() returns per call; 0 = all */
+    bool isRxEof;                    /* recv() returns CLOSED once rx is drained */
     SSFNetIOResult_t rxFail;
     SSFNetIOResult_t shutdownResult;
 } SSFNetWSUTMock_t;
@@ -96,40 +96,53 @@ static uint8_t _utPayload[SSF_NETWS_UT_RX_CAP];
 static char _utKey[32];
 
 /* --------------------------------------------------------------------------------------------- */
-/* Mock transport operations.                                                                    */
+/* Mock inner open(): records the host and port and returns the scripted result.                 */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFNetWSUTOpen(SSFNetTransport_t *t, SSFCStrIn_t host, size_t hostSize,
+static bool _SSFNetWSUTOpen(SSFNetTransport_t *t, SSFCStrIn_t hostStr, size_t hostStrSize,
                             uint16_t port)
 {
     size_t len;
 
-    SSF_ASSERT(t == &_utMock.transport);
-    SSF_ASSERT(_utMock.isOpen == false);
-    SSF_ASSERT(SSFStrLen(host, hostSize, &len));
+    SSF_REQUIRE(t == &_utMock.transport);
+    SSF_REQUIRE(hostStr != NULL);
+    SSF_REQUIRE(_utMock.isOpen == false);
+
+    SSF_ASSERT(SSFStrLen(hostStr, hostStrSize, &len));
     SSF_ASSERT(len < sizeof(_utMock.host));
-    memcpy(_utMock.host, host, len + 1u);
+    memcpy(_utMock.host, hostStr, (len + 1u));
     _utMock.port = port;
     _utMock.openCount++;
     _utMock.isOpen = _utMock.openResult;
     return _utMock.openResult;
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Mock inner pollOpen(): returns WANT_WRITE pollWant times, then the scripted result.           */
+/* --------------------------------------------------------------------------------------------- */
 static SSFNetIOResult_t _SSFNetWSUTPollOpenFn(SSFNetTransport_t *t)
 {
-    SSF_ASSERT(t == &_utMock.transport);
-    SSF_ASSERT(_utMock.isOpen);
+    SSF_REQUIRE(t == &_utMock.transport);
+    SSF_REQUIRE(_utMock.isOpen);
+
+    /* Still scripted to be in progress? */
     if (_utMock.pollWant > 0) { _utMock.pollWant--; return SSF_NET_IO_WANT_WRITE; }
     return _utMock.pollResult;
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Mock inner send(): appends up to txChunk bytes to tx unless scripted to block or fail.        */
+/* --------------------------------------------------------------------------------------------- */
 static SSFNetIOResult_t _SSFNetWSUTSend(SSFNetTransport_t *t, const uint8_t *buf, size_t len,
                                         size_t *sentOut)
 {
     size_t n = len;
 
-    SSF_ASSERT(t == &_utMock.transport);
-    SSF_ASSERT(_utMock.isOpen);
-    SSF_ASSERT((buf != NULL) && (len > 0) && (sentOut != NULL));
+    SSF_REQUIRE(t == &_utMock.transport);
+    SSF_REQUIRE(buf != NULL);
+    SSF_REQUIRE(len > 0);
+    SSF_REQUIRE(sentOut != NULL);
+    SSF_REQUIRE(_utMock.isOpen);
+
     *sentOut = 0;
     if (_utMock.txFail != SSF_NET_IO_SUCCESS) return _utMock.txFail;
     if (_utMock.isTxBlocked) return SSF_NET_IO_WANT_WRITE;
@@ -141,20 +154,30 @@ static SSFNetIOResult_t _SSFNetWSUTSend(SSFNetTransport_t *t, const uint8_t *buf
     return SSF_NET_IO_SUCCESS;
 }
 
-static SSFNetIOResult_t _SSFNetWSUTRecv(SSFNetTransport_t *t, uint8_t *buf, size_t size,
+/* --------------------------------------------------------------------------------------------- */
+/* Mock inner recv(): returns up to rxChunk scripted rx bytes, then CLOSED or WANT_READ.         */
+/* --------------------------------------------------------------------------------------------- */
+static SSFNetIOResult_t _SSFNetWSUTRecv(SSFNetTransport_t *t, uint8_t *buf, size_t bufSize,
                                         size_t *gotOut)
 {
     size_t n;
 
-    SSF_ASSERT(t == &_utMock.transport);
-    SSF_ASSERT(_utMock.isOpen);
-    SSF_ASSERT((buf != NULL) && (size > 0) && (gotOut != NULL));
+    SSF_REQUIRE(t == &_utMock.transport);
+    SSF_REQUIRE(buf != NULL);
+    SSF_REQUIRE(bufSize > 0);
+    SSF_REQUIRE(gotOut != NULL);
+    SSF_REQUIRE(_utMock.isOpen);
+
     *gotOut = 0;
     if (_utMock.rxFail != SSF_NET_IO_SUCCESS) return _utMock.rxFail;
+    /* Script drained? */
     if (_utMock.rxPos >= _utMock.rxLen)
-    { return _utMock.isRxEof ? SSF_NET_IO_CLOSED : SSF_NET_IO_WANT_READ; }
-    n = _utMock.rxLen - _utMock.rxPos;
-    if (n > size) n = size;
+    {
+        /* Yes, end of stream or nothing yet */
+        return ((_utMock.isRxEof) ? SSF_NET_IO_CLOSED : SSF_NET_IO_WANT_READ);
+    }
+    n = (_utMock.rxLen - _utMock.rxPos);
+    if (n > bufSize) n = bufSize;
     if ((_utMock.rxChunk != 0) && (n > _utMock.rxChunk)) n = _utMock.rxChunk;
     memcpy(buf, &_utMock.rx[_utMock.rxPos], n);
     _utMock.rxPos += n;
@@ -162,17 +185,25 @@ static SSFNetIOResult_t _SSFNetWSUTRecv(SSFNetTransport_t *t, uint8_t *buf, size
     return SSF_NET_IO_SUCCESS;
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Mock inner shutdown(): counts the call and returns the scripted result.                       */
+/* --------------------------------------------------------------------------------------------- */
 static SSFNetIOResult_t _SSFNetWSUTShutdown(SSFNetTransport_t *t)
 {
-    SSF_ASSERT(t == &_utMock.transport);
-    SSF_ASSERT(_utMock.isOpen);
+    SSF_REQUIRE(t == &_utMock.transport);
+    SSF_REQUIRE(_utMock.isOpen);
+
     _utMock.shutdownCount++;
     return _utMock.shutdownResult;
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Mock inner close(): counts the call and marks the mock closed.                                */
+/* --------------------------------------------------------------------------------------------- */
 static void _SSFNetWSUTClose(SSFNetTransport_t *t)
 {
-    SSF_ASSERT(t == &_utMock.transport);
+    SSF_REQUIRE(t == &_utMock.transport);
+
     _utMock.closeCount++;
     _utMock.isOpen = false;
 }
@@ -201,30 +232,39 @@ static void _SSFNetWSUTMockReset(void)
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFNetWSUTInject(const void *bytes, size_t len)
 {
-    SSF_ASSERT((_utMock.rxLen + len) <= sizeof(_utMock.rx));
+    SSF_REQUIRE(bytes != NULL);
+    SSF_REQUIRE((_utMock.rxLen + len) <= sizeof(_utMock.rx));
+
     memcpy(&_utMock.rx[_utMock.rxLen], bytes, len);
     _utMock.rxLen += len;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Appends a server frame. lenWidth 0 picks the minimal length encoding, else 1, 2 or 8 bytes.   */
-/* masked sets the MASK bit with key 0 (the payload is unchanged); rsv is ORed into byte 0.      */
+/* Appends a server frame; lenWidth 0 is minimal, masked uses key 0, rsv is ORed in.             */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFNetWSUTFrameEx(bool fin, uint8_t rsv, uint8_t opcode, bool masked,
                                uint8_t lenWidth, const uint8_t *payload, uint64_t len)
 {
     uint8_t hdr[14];
     size_t n = 0;
-    uint8_t m = masked ? 0x80u : 0;
+    uint8_t m;
 
-    hdr[n++] = (uint8_t)((fin ? 0x80u : 0) | rsv | opcode);
-    if (lenWidth == 0) lenWidth = (len < 126u) ? 1u : ((len <= 0xFFFFu) ? 2u : 8u);
+    SSF_REQUIRE((lenWidth == 0) || (lenWidth == 1u) || (lenWidth == 2u) || (lenWidth == 8u));
+    SSF_REQUIRE((payload != NULL) || (len == 0));
+
+    m = ((masked) ? 0x80u : 0);
+    hdr[n++] = (uint8_t)(((fin) ? 0x80u : 0) | rsv | opcode);
+    if (lenWidth == 0) lenWidth = ((len < 126u) ? 1u : ((len <= 0xFFFFu) ? 2u : 8u));
+    /* Length in the second byte? */
     if (lenWidth == 1u) { hdr[n++] = (uint8_t)(m | (uint8_t)len); }
+    /* 16-bit extended length? */
     else if (lenWidth == 2u)
     { hdr[n++] = (uint8_t)(m | 126u); hdr[n++] = (uint8_t)(len >> 8); hdr[n++] = (uint8_t)len; }
     else
     {
         int i;
+
+        /* No, 64-bit extended length */
 
         hdr[n++] = (uint8_t)(m | 127u);
         for (i = 7; i >= 0; i--) hdr[n++] = (uint8_t)(len >> (8 * i));
@@ -234,40 +274,54 @@ static void _SSFNetWSUTFrameEx(bool fin, uint8_t rsv, uint8_t opcode, bool maske
     if ((payload != NULL) && (len > 0)) _SSFNetWSUTInject(payload, (size_t)len);
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Appends an unmasked server frame with the minimal length encoding.                            */
+/* --------------------------------------------------------------------------------------------- */
 static void _SSFNetWSUTFrame(bool fin, uint8_t opcode, const void *payload, size_t len)
 {
     _SSFNetWSUTFrameEx(fin, 0, opcode, false, 0, (const uint8_t *)payload, len);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Decodes the client frame at _utMock.tx[*posInOut]: checks FIN, RSV 0, the MASK bit and the    */
-/* minimal length encoding, unmasks the payload into out and returns its opcode.                 */
+/* Checks and unmasks the client frame at _utMock.tx[*posInOut]; returns its opcode.             */
 /* --------------------------------------------------------------------------------------------- */
 static uint8_t _SSFNetWSUTClientFrame(size_t *posInOut, uint8_t *out, size_t outSize,
                                       size_t *lenOut, uint8_t maskOut[4])
 {
-    const uint8_t *p = &_utMock.tx[*posInOut];
-    size_t avail = _utMock.txLen - *posInOut;
+    const uint8_t *p;
+    size_t avail;
     size_t n = 2;
     uint64_t len;
     size_t i;
 
+    SSF_REQUIRE(posInOut != NULL);
+    SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE(lenOut != NULL);
+    SSF_REQUIRE(maskOut != NULL);
+    SSF_REQUIRE((*posInOut) <= _utMock.txLen);
+
+    p = &_utMock.tx[*posInOut];
+    avail = (_utMock.txLen - (*posInOut));
     SSF_ASSERT(avail >= 2u);
     SSF_ASSERT((p[0] & 0xF0u) == 0x80u);                 /* FIN, no RSV */
     SSF_ASSERT((p[1] & 0x80u) == 0x80u);                 /* Masked */
-    len = p[1] & 0x7Fu;
+    len = (p[1] & 0x7Fu);
+    /* 16-bit extended length? */
     if (len == 126u)
     {
+        /* Yes, take it from the next 2 bytes */
         SSF_ASSERT(avail >= 4u);
         len = ((uint64_t)p[2] << 8) | p[3];
         SSF_ASSERT(len >= 126u);
         n = 4;
     }
+    /* 64-bit extended length? */
     else if (len == 127u)
     {
+        /* Yes, take it from the next 8 bytes */
         SSF_ASSERT(avail >= 10u);
         len = 0;
-        for (i = 0; i < 8u; i++) len = (len << 8) | p[2 + i];
+        for (i = 0; i < 8u; i++) len = ((len << 8) | p[2 + i]);
         SSF_ASSERT(len > 0xFFFFu);
         n = 10;
     }
@@ -276,38 +330,46 @@ static uint8_t _SSFNetWSUTClientFrame(size_t *posInOut, uint8_t *out, size_t out
     memcpy(maskOut, &p[n], 4);
     for (i = 0; i < (size_t)len; i++) out[i] = (uint8_t)(p[n + 4u + i] ^ maskOut[i & 3u]);
     *lenOut = (size_t)len;
-    *posInOut += n + 4u + (size_t)len;
+    *posInOut += (n + 4u + (size_t)len);
     return (uint8_t)(p[0] & 0x0Fu);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Computes Sec-WebSocket-Accept for key independently of the code under test.                   */
+/* Computes Sec-WebSocket-Accept for keyStr independently of the code under test.                */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFNetWSUTAccept(const char *key, char accept[SSF_NETWS_ACCEPT_SIZE])
+static void _SSFNetWSUTAccept(const char *keyStr, char accept[SSF_NETWS_ACCEPT_SIZE])
 {
     SSFSHA1Context_t ctx;
     uint8_t h[SSF_SHA1_HASH_SIZE];
 
+    SSF_REQUIRE(keyStr != NULL);
+    SSF_REQUIRE(accept != NULL);
+
     SSFSHA1Begin(&ctx);
-    SSFSHA1Update(&ctx, (const uint8_t *)key, (uint32_t)strlen(key));
+    SSFSHA1Update(&ctx, (const uint8_t *)keyStr, (uint32_t)strlen(keyStr));
     SSFSHA1Update(&ctx, (const uint8_t *)SSF_NETWS_UT_GUID, (uint32_t)strlen(SSF_NETWS_UT_GUID));
     SSFSHA1End(&ctx, h);
     SSF_ASSERT(SSFBase64Encode(h, sizeof(h), accept, SSF_NETWS_ACCEPT_SIZE, NULL));
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns the value of field name in the NUL terminated request text, else NULL.                */
+/* Returns the value of field nameStr in the request textStr, else NULL.                         */
 /* --------------------------------------------------------------------------------------------- */
-static const char *_SSFNetWSUTReqField(const char *text, const char *name, size_t *valueLenOut)
+static const char *_SSFNetWSUTReqField(const char *textStr, const char *nameStr,
+                                       size_t *valueLenOut)
 {
     char pat[64];
     const char *f;
     const char *e;
 
-    (void)snprintf(pat, sizeof(pat), "\r\n%s: ", name);
-    f = strstr(text, pat);
+    SSF_REQUIRE(textStr != NULL);
+    SSF_REQUIRE(nameStr != NULL);
+    SSF_REQUIRE(valueLenOut != NULL);
+
+    (void)snprintf(pat, sizeof(pat), "\r\n%s: ", nameStr);
+    f = strstr(textStr, pat);
     if (f == NULL) return NULL;
-    SSF_ASSERT(strstr(f + 1, pat) == NULL);                  /* Exactly once */
+    SSF_ASSERT(strstr((f + 1), pat) == NULL);                  /* Exactly once */
     f += strlen(pat);
     e = strstr(f, "\r\n");
     SSF_ASSERT(e != NULL);
@@ -316,11 +378,10 @@ static const char *_SSFNetWSUTReqField(const char *text, const char *name, size_
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Checks the Upgrade request at the start of the mock's tx, removes it, and saves its key in    */
-/* _utKey. extraOpt is a field line expected verbatim, or NULL.                                  */
+/* Checks and removes the Upgrade request in the mock tx, saving its key in _utKey.              */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFNetWSUTCheckRequest(const char *path, const char *expectedHost,
-                                    const char *extraOpt)
+static void _SSFNetWSUTCheckRequest(const char *pathStr, const char *expectedHostStr,
+                                    const char *extraStrOpt)
 {
     static char text[SSF_NETWS_CONFIG_HS_BUF_SIZE + 1u];
     char line[300];
@@ -331,19 +392,22 @@ static void _SSFNetWSUTCheckRequest(const char *path, const char *expectedHost,
     uint8_t keyBytes[32];
     size_t keyBytesLen;
 
+    SSF_REQUIRE(pathStr != NULL);
+    SSF_REQUIRE(expectedHostStr != NULL);
+
     SSF_ASSERT(_utMock.txLen < sizeof(text));
     memcpy(text, _utMock.tx, _utMock.txLen);
     text[_utMock.txLen] = 0;
     end = strstr(text, "\r\n\r\n");
     SSF_ASSERT(end != NULL);
-    reqLen = (size_t)(end - text) + 4u;
+    reqLen = ((size_t)(end - text) + 4u);
     text[reqLen - 2u] = 0;                                  /* Keep the last field's CRLF */
 
-    (void)snprintf(line, sizeof(line), "GET %s HTTP/1.1\r\n", path);
+    (void)snprintf(line, sizeof(line), "GET %s HTTP/1.1\r\n", pathStr);
     SSF_ASSERT(strncmp(text, line, strlen(line)) == 0);
     v = _SSFNetWSUTReqField(text, "Host", &vLen);
-    SSF_ASSERT((v != NULL) && (vLen == strlen(expectedHost)));
-    SSF_ASSERT(memcmp(v, expectedHost, vLen) == 0);
+    SSF_ASSERT((v != NULL) && (vLen == strlen(expectedHostStr)));
+    SSF_ASSERT(memcmp(v, expectedHostStr, vLen) == 0);
     v = _SSFNetWSUTReqField(text, "Upgrade", &vLen);
     SSF_ASSERT((v != NULL) && (vLen == 9u) && (memcmp(v, "websocket", 9) == 0));
     v = _SSFNetWSUTReqField(text, "Connection", &vLen);
@@ -359,31 +423,35 @@ static void _SSFNetWSUTCheckRequest(const char *path, const char *expectedHost,
     SSF_ASSERT(SSFBase64Decode(_utKey, vLen, keyBytes, sizeof(keyBytes), &keyBytesLen));
     SSF_ASSERT(keyBytesLen == 16u);
     SSF_ASSERT(strstr(text, "Sec-WebSocket-Extensions") == NULL);
-    if (extraOpt != NULL)
+    /* Extra field line expected? */
+    if (extraStrOpt != NULL)
     {
-        (void)snprintf(line, sizeof(line), "\r\n%s\r\n", extraOpt);
+        /* Yes, it must appear verbatim */
+        (void)snprintf(line, sizeof(line), "\r\n%s\r\n", extraStrOpt);
         SSF_ASSERT(strstr(text, line) != NULL);
     }
 
     /* Remove the request: what follows in tx is frames */
-    memmove(_utMock.tx, &_utMock.tx[reqLen], _utMock.txLen - reqLen);
+    memmove(_utMock.tx, &_utMock.tx[reqLen], (_utMock.txLen - reqLen));
     _utMock.txLen -= reqLen;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Injects a 101 response carrying the right accept for _utKey plus extraFields (each line       */
-/* ending in CRLF), followed by trailerOpt bytes.                                                */
+/* Injects a 101 response with the accept for _utKey, extraFieldsStr, then trailerOpt.           */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFNetWSUTRespond(const char *extraFields, const uint8_t *trailerOpt,
+static void _SSFNetWSUTRespond(const char *extraFieldsStr, const uint8_t *trailerOpt,
                                size_t trailerLen)
 {
     char accept[SSF_NETWS_ACCEPT_SIZE];
     char resp[900];
     int n;
 
+    SSF_REQUIRE(extraFieldsStr != NULL);
+
     _SSFNetWSUTAccept(_utKey, accept);
     n = snprintf(resp, sizeof(resp), "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
-                 "Connection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n%s\r\n", accept, extraFields);
+                 "Connection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n%s\r\n", accept,
+                 extraFieldsStr);
     SSF_ASSERT((n > 0) && ((size_t)n < sizeof(resp)));
     _SSFNetWSUTInject(resp, (size_t)n);
     if (trailerOpt != NULL) _SSFNetWSUTInject(trailerOpt, trailerLen);
@@ -406,8 +474,7 @@ static SSFNetIOResult_t _SSFNetWSUTPollOpen(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Fresh mock and session for "/mqtt" on broker.example:8080, taken through the handshake to     */
-/* the point of the response.                                                                    */
+/* Takes a fresh session for "/mqtt" on broker.example:8080 up to the handshake response.        */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFNetWSUTToResponse(void)
 {
@@ -420,7 +487,7 @@ static void _SSFNetWSUTToResponse(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Fresh mock and session taken to OPEN.                                                         */
+/* Takes a fresh mock and session to OPEN.                                                       */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFNetWSUTGoOpen(void)
 {
@@ -443,8 +510,7 @@ static void _SSFNetWSUTEnd(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Reads up to want bytes into _utOut with reads of at most chunk bytes, until want bytes, a     */
-/* run of WANT_READ, or a failure; returns the total and the last result in *rOut.               */
+/* Reads up to want bytes into _utOut in chunk reads; returns the total, last result in *rOut.   */
 /* --------------------------------------------------------------------------------------------- */
 static size_t _SSFNetWSUTRead(size_t want, size_t chunk, SSFNetIOResult_t *rOut)
 {
@@ -452,13 +518,18 @@ static size_t _SSFNetWSUTRead(size_t want, size_t chunk, SSFNetIOResult_t *rOut)
     SSFNetIOResult_t r = SSF_NET_IO_SUCCESS;
     uint32_t idle = 0;
 
+    SSF_REQUIRE(want <= sizeof(_utOut));
+    SSF_REQUIRE(chunk > 0);
+    SSF_REQUIRE(rOut != NULL);
+
     while ((total < want) && (idle < SSF_NETWS_UT_LOOPS))
     {
         size_t got = 99;
-        size_t n = want - total;
+        size_t n = (want - total);
 
         if (n > chunk) n = chunk;
         r = _utWS.transport.recv(&_utWS.transport, &_utOut[total], n, &got);
+        /* Got data, nothing yet, or a failure? */
         if (r == SSF_NET_IO_SUCCESS)
         { SSF_ASSERT((got >= 1u) && (got <= n)); total += got; idle = 0; }
         else if (r == SSF_NET_IO_WANT_READ) { SSF_ASSERT(got == 0); idle++; }
@@ -509,8 +580,7 @@ static void _SSFNetWSUTScenarioBasics(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Tests that open() refuses bad arguments and configuration before touching the inner, and      */
-/* that the other calls fail cleanly when not open.                                              */
+/* Tests that open() refuses bad input before the inner and other calls fail when not open.      */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFNetWSUTScenarioOpenRefused(void)
 {
@@ -625,32 +695,42 @@ static void _SSFNetWSUTScenarioOpenRefused(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if the session struct contains needle anywhere.                                  */
+/* Returns true if the session struct contains needleStr anywhere.                               */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFNetWSUTSessionHas(const char *needle)
+static bool _SSFNetWSUTSessionHas(const char *needleStr)
 {
     const uint8_t *p = (const uint8_t *)&_utWS;
-    size_t n = strlen(needle);
+    size_t n;
     size_t i;
 
-    for (i = 0; (i + n) <= sizeof(_utWS); i++) { if (memcmp(&p[i], needle, n) == 0) return true; }
+    SSF_REQUIRE(needleStr != NULL);
+
+    n = strlen(needleStr);
+    for (i = 0; (i + n) <= sizeof(_utWS); i++)
+    {
+        if (memcmp(&p[i], needleStr, n) == 0) return true;
+    }
     return false;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Injects fmt with its one %s replaced by the right accept for _utKey.                          */
+/* Injects fmtStr with its one %s replaced by the right accept for _utKey.                       */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFNetWSUTRespondRaw(const char *fmt)
+static void _SSFNetWSUTRespondRaw(const char *fmtStr)
 {
     char accept[SSF_NETWS_ACCEPT_SIZE];
-    const char *at = strstr(fmt, "%s");
+    const char *at;
     size_t i;
 
+    SSF_REQUIRE(fmtStr != NULL);
+
+    at = strstr(fmtStr, "%s");
     _SSFNetWSUTAccept(_utKey, accept);
+    /* No %s placeholder? */
     if (at == NULL)
     {
-        /* %S: the accept with the case of every letter swapped */
-        at = strstr(fmt, "%S");
+        /* Yes, %S is the accept with the case of every letter swapped */
+        at = strstr(fmtStr, "%S");
         for (i = 0; accept[i] != 0; i++)
         {
             if ((accept[i] >= 'a') && (accept[i] <= 'z')) accept[i] = (char)(accept[i] - 32);
@@ -658,9 +738,9 @@ static void _SSFNetWSUTRespondRaw(const char *fmt)
         }
     }
     SSF_ASSERT(at != NULL);
-    _SSFNetWSUTInject(fmt, (size_t)(at - fmt));
+    _SSFNetWSUTInject(fmtStr, (size_t)(at - fmtStr));
     _SSFNetWSUTInject(accept, strlen(accept));
-    _SSFNetWSUTInject(at + 2, strlen(at + 2));
+    _SSFNetWSUTInject((at + 2), strlen(at + 2));
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -682,8 +762,7 @@ static void _SSFNetWSUTExpectFailed(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Tests the handshake: request contents, the Host port rule, inner progress, split responses,   */
-/* leftover bytes, secrets wiped, and reopening.                                                 */
+/* Tests the handshake request, Host port rule, split responses, secret wiping and reopen.       */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFNetWSUTScenarioHandshake(void)
 {
@@ -697,8 +776,7 @@ static void _SSFNetWSUTScenarioHandshake(void)
     SSFNetIOResult_t r;
     size_t i;
 
-    /* Extra fields and a query; the inner pollOpen() is driven to completion first; the        */
-    /* request leaves in pieces; the response arrives one byte per read with a frame behind it  */
+    /* Extra fields, a query, a slow inner open, a chunked request, a byte-at-a-time response */
     _SSFNetWSUTMockReset();
     _utMock.pollWant = 3;
     _utMock.txChunk = 7;
@@ -740,7 +818,8 @@ static void _SSFNetWSUTScenarioHandshake(void)
     SSF_ASSERT(SSFNetWSGetState(&_utWS) == SSF_NETWS_STATE_CLOSED);
     SSF_ASSERT(_SSFNetWSUTSessionHas("Switching") == false);
     _utMock.txLen = 0;
-    _utMock.rxLen = _utMock.rxPos = 0;
+    _utMock.rxLen = 0;
+    _utMock.rxPos = 0;
     SSF_ASSERT(_utWS.transport.open(&_utWS.transport, "h.example", 10, 8883));
     SSF_ASSERT_TEST((void)_utWS.transport.open(&_utWS.transport, "h.example", 10, 8883));
     SSF_ASSERT(_SSFNetWSUTPollOpen() == SSF_NET_IO_WANT_READ);
@@ -939,30 +1018,32 @@ static void _SSFNetWSUTScenarioHandshakeRefused(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Sends total bytes, calling send() until all are accepted; returns the number of calls.        */
+/* Sends dataLen bytes, calling send() until all are accepted; returns the number of calls.      */
 /* --------------------------------------------------------------------------------------------- */
-static uint32_t _SSFNetWSUTSendAll(const uint8_t *data, size_t total)
+static uint32_t _SSFNetWSUTSendAll(const uint8_t *data, size_t dataLen)
 {
     size_t done = 0;
     uint32_t calls = 0;
 
-    while (done < total)
+    SSF_REQUIRE(data != NULL);
+
+    while (done < dataLen)
     {
         size_t n = 99;
-        SSFNetIOResult_t r = _utWS.transport.send(&_utWS.transport, &data[done], total - done, &n);
+        SSFNetIOResult_t r;
 
+        r = _utWS.transport.send(&_utWS.transport, &data[done], (dataLen - done), &n);
         SSF_ASSERT(calls++ < 100000u);
         if (r == SSF_NET_IO_WANT_WRITE) { SSF_ASSERT(n == 0); continue; }
         SSF_ASSERT(r == SSF_NET_IO_SUCCESS);
-        SSF_ASSERT((n >= 1u) && (n <= SSF_NETWS_CONFIG_TX_FRAME_SIZE) && (n <= (total - done)));
+        SSF_ASSERT((n >= 1u) && (n <= SSF_NETWS_CONFIG_TX_FRAME_SIZE) && (n <= (dataLen - done)));
         done += n;
     }
     return calls;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Decodes all client frames in the mock's tx into _utOut; asserts each is binary unless it is   */
-/* listed; returns the payload total and the frame count.                                        */
+/* Decodes all binary client frames in the mock tx into _utOut; returns the payload total.       */
 /* --------------------------------------------------------------------------------------------- */
 static size_t _SSFNetWSUTDecodeAll(uint32_t *framesOut, bool *isMaskVariedOut)
 {
@@ -971,16 +1052,20 @@ static size_t _SSFNetWSUTDecodeAll(uint32_t *framesOut, bool *isMaskVariedOut)
     uint8_t first[4] = { 0 };
     uint8_t mask[4];
 
+    SSF_REQUIRE(framesOut != NULL);
+    SSF_REQUIRE(isMaskVariedOut != NULL);
+
     *framesOut = 0;
     *isMaskVariedOut = false;
     while (pos < _utMock.txLen)
     {
         size_t len;
 
-        SSF_ASSERT(_SSFNetWSUTClientFrame(&pos, &_utOut[total], sizeof(_utOut) - total, &len,
+        SSF_ASSERT(_SSFNetWSUTClientFrame(&pos, &_utOut[total], (sizeof(_utOut) - total), &len,
                                           mask) == SSF_NETWS_UT_OP_BIN);
         SSF_ASSERT((len >= 1u) && (len <= SSF_NETWS_CONFIG_TX_FRAME_SIZE));
-        if (*framesOut == 0) memcpy(first, mask, 4);
+        /* First frame? */
+        if ((*framesOut) == 0) memcpy(first, mask, 4);
         else if (memcmp(first, mask, 4) != 0) *isMaskVariedOut = true;
         total += len;
         (*framesOut)++;
@@ -1037,8 +1122,7 @@ static void _SSFNetWSUTScenarioSend(void)
         }
     }
 
-    /* A blocked inner: the first send is accepted into the frame buffer, the next waits; recv() */
-    /* keeps the buffered frame moving                                                           */
+    /* A blocked inner buffers one send, refuses the next, and recv() moves the buffered frame */
     _SSFNetWSUTGoOpen();
     _utMock.isTxBlocked = true;
     n = 99;
@@ -1072,8 +1156,7 @@ static void _SSFNetWSUTScenarioSend(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Tests inbound framing: length boundaries and encodings, streaming large frames, frames split  */
-/* across reads, several frames per read, fragmentation and empty frames.                        */
+/* Tests inbound framing: lengths, encodings, split and merged reads, fragments, empties.        */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFNetWSUTScenarioRecv(void)
 {
@@ -1130,8 +1213,7 @@ static void _SSFNetWSUTScenarioRecv(void)
     SSF_ASSERT((got == 5u) && (memcmp(_utOut, "abcde", 5) == 0));
     _SSFNetWSUTEnd();
 
-    /* Every header form split across reads one byte at a time, and an MQTT packet split across */
-    /* frames                                                                                    */
+    /* Every header form split one byte per read, and an MQTT packet split across frames */
     _SSFNetWSUTGoOpen();
     _utMock.rxChunk = 1;
     _SSFNetWSUTFrame(true, SSF_NETWS_UT_OP_BIN, &mqttConnAck[0], 1);
@@ -1177,14 +1259,17 @@ static void _SSFNetWSUTScenarioRecv(void)
         _utMock.rxLen -= 4u;                                    /* Mid-frame */
         if (i == 0) _utMock.isRxEof = true;
         SSF_ASSERT(_SSFNetWSUTRead(10, 100, &r) == 6u);
+        /* Inner failing rather than ending? */
         if (i == 1)
         {
+            /* Yes, the next read fails the session */
             SSF_ASSERT(r == SSF_NET_IO_WANT_READ);
             _utMock.rxFail = SSF_NET_IO_ERROR;
             SSF_ASSERT(_SSFNetWSUTRead(10, 100, &r) == 0);
             SSF_ASSERT(r == SSF_NET_IO_ERROR);
             _SSFNetWSUTExpectFailed();
         }
+        /* No, the end of stream is reported */
         else { SSF_ASSERT(r == SSF_NET_IO_CLOSED); }
         _utMock.rxFail = SSF_NET_IO_SUCCESS;
         _SSFNetWSUTEnd();
@@ -1192,8 +1277,7 @@ static void _SSFNetWSUTScenarioRecv(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Tests that every protocol violation in a server frame fails the connection, after any data    */
-/* that preceded it in the same read has been returned.                                          */
+/* Tests that every server frame protocol violation fails after earlier data is returned.        */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFNetWSUTScenarioRecvRefused(void)
 {
@@ -1240,27 +1324,31 @@ static void _SSFNetWSUTScenarioRecvRefused(void)
         default:
             /* Reserved opcodes 3..7 and 0xB..0xF, then a few that are fine */
             op = (uint8_t)((v < 21u) ? (v - 13u) : (v - 10u));
+            /* Past the reserved opcodes? */
             if (v >= 26u)
             {
+                /* Yes, frames that are valid */
                 isBad = false;
                 if (v == 26u) _SSFNetWSUTFrame(true, SSF_NETWS_UT_OP_PING, ctl126, 125);
                 else if (v == 27u) _SSFNetWSUTFrame(true, SSF_NETWS_UT_OP_PONG, ctl126, 125);
                 else if (v == 28u) _SSFNetWSUTFrame(true, SSF_NETWS_UT_OP_BIN, ctl126, 126);
                 else _SSFNetWSUTFrame(true, SSF_NETWS_UT_OP_BIN, "", 0);
             }
+            /* No, a reserved opcode */
             else { _SSFNetWSUTFrame(true, op, "o", 1); }
             break;
         }
         got = _SSFNetWSUTRead(1000, 1000, &r);
         SSF_ASSERT(got >= 2u);
         SSF_ASSERT(memcmp(_utOut, "ok", 2) == 0);
+        /* Violation injected? */
         if (isBad)
         {
             size_t pos = 0;
             size_t len;
             uint8_t mask[4];
 
-            /* Only the overlap cases deliver the opening fragment's byte */
+            /* Yes, only the overlap cases deliver the opening fragment's byte */
             SSF_ASSERT(got == (((v == 6u) || (v == 12u)) ? 3u : 2u));
             if (r == SSF_NET_IO_WANT_READ) { (void)_SSFNetWSUTRead(1, 1, &r); }
             SSF_ASSERT(r == SSF_NET_IO_ERROR);
@@ -1273,6 +1361,7 @@ static void _SSFNetWSUTScenarioRecvRefused(void)
         }
         else
         {
+            /* No, the session stays open */
             SSF_ASSERT(r == SSF_NET_IO_WANT_READ);
             SSF_ASSERT(SSFNetWSGetState(&_utWS) == SSF_NETWS_STATE_OPEN);
             _SSFNetWSUTEnd();
@@ -1314,8 +1403,7 @@ static void _SSFNetWSUTScenarioPingPong(void)
     SSF_ASSERT(pos == _utMock.txLen);
     _SSFNetWSUTEnd();
 
-    /* Pings while a data frame waits on a blocked inner: the data goes first, then one Pong    */
-    /* for the latest Ping                                                                       */
+    /* Pings behind data on a blocked inner: the data goes first, then one Pong for the latest */
     _SSFNetWSUTGoOpen();
     _utMock.isTxBlocked = true;
     n = 0;
@@ -1345,8 +1433,10 @@ static void _SSFNetWSUTScenarioPingPong(void)
         _SSFNetWSUTFrame(true, SSF_NETWS_UT_OP_PING, "p", 1);
         n = 99;
         r = _utWS.transport.recv(&_utWS.transport, _utOut, 100, &n);
+        /* Data ahead of the Ping? */
         if (i == 1u)
         {
+            /* Yes, it is returned before the failure */
             SSF_ASSERT((r == SSF_NET_IO_SUCCESS) && (n == 2u));
             r = _utWS.transport.recv(&_utWS.transport, _utOut, 100, &n);
         }
@@ -1426,10 +1516,10 @@ static void _SSFNetWSUTScenarioClose(void)
         static const uint16_t bad[] = { 0, 999, 1004, 1005, 1006, 1015, 1016, 2999, 5000, 65535 };
         uint8_t code[2];
 
-        for (i = 0; i < (sizeof(good) / sizeof(good[0])) + (sizeof(bad) / sizeof(bad[0])); i++)
+        for (i = 0; i < ((sizeof(good) / sizeof(good[0])) + (sizeof(bad) / sizeof(bad[0]))); i++)
         {
             bool isGood = (i < (sizeof(good) / sizeof(good[0])));
-            uint16_t c = isGood ? good[i] : bad[i - (sizeof(good) / sizeof(good[0]))];
+            uint16_t c = ((isGood) ? good[i] : bad[i - (sizeof(good) / sizeof(good[0]))]);
 
             code[0] = (uint8_t)(c >> 8);
             code[1] = (uint8_t)c;
@@ -1442,6 +1532,7 @@ static void _SSFNetWSUTScenarioClose(void)
             SSF_ASSERT(_SSFNetWSUTClientFrame(&pos, _utOut, sizeof(_utOut), &len, mask) ==
                        SSF_NETWS_UT_OP_CLOSE);
             SSF_ASSERT((len == 2u) && (pos == _utMock.txLen));
+            /* Code echoed, or replaced by 1002? */
             if (isGood) { SSF_ASSERT(memcmp(_utOut, code, 2) == 0); }
             else { SSF_ASSERT((_utOut[0] == 0x03u) && (_utOut[1] == 0xEAu)); }
             _SSFNetWSUTEnd();
@@ -1482,8 +1573,7 @@ static void _SSFNetWSUTScenarioClose(void)
     SSF_ASSERT(_utOut[0] == 'd');
     _SSFNetWSUTEnd();
 
-    /* shutdown(): buffered data, then Close 1000, then the inner shutdown; idempotent; send()  */
-    /* refused after it, recv() still works                                                     */
+    /* shutdown() flushes data, sends Close 1000, is idempotent, refuses send(), allows recv() */
     _SSFNetWSUTGoOpen();
     _utMock.txChunk = 1;
     n = 0;
@@ -1513,8 +1603,7 @@ static void _SSFNetWSUTScenarioClose(void)
     SSF_ASSERT(pos == _utMock.txLen);                           /* Close not echoed twice */
     _SSFNetWSUTEnd();
 
-    /* shutdown() on a blocked inner with data buffered: the Close waits behind the data, send() */
-    /* is refused meanwhile, and repeated calls owe only one Close                               */
+    /* shutdown() on a blocked inner queues one Close behind the data and refuses send() */
     _SSFNetWSUTGoOpen();
     _utMock.isTxBlocked = true;
     n = 0;

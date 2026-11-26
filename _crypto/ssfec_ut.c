@@ -68,7 +68,12 @@
 static void _ECToOSSLBN(BIGNUM *dst, const SSFBN_t *src)
 {
     uint8_t buf[SSF_EC_MAX_LIMBS * sizeof(SSFBNLimb_t)];
-    size_t outSize = (size_t)src->len * sizeof(SSFBNLimb_t);
+    size_t outSize;
+
+    SSF_REQUIRE(dst != NULL);
+    SSF_REQUIRE(src != NULL);
+
+    outSize = ((size_t)src->len) * sizeof(SSFBNLimb_t);
     SSF_ASSERT(outSize <= sizeof(buf));
     SSF_ASSERT(SSFBNToBytes(src, buf, outSize) == true);
     SSF_ASSERT(BN_bin2bn(buf, (int)outSize, dst) != NULL);
@@ -78,7 +83,13 @@ static void _ECToOSSLBN(BIGNUM *dst, const SSFBN_t *src)
 static void _ECFromOSSLBN(SSFBN_t *dst, const BIGNUM *src, uint16_t numLimbs)
 {
     uint8_t buf[SSF_EC_MAX_LIMBS * sizeof(SSFBNLimb_t)];
-    size_t outSize = (size_t)numLimbs * sizeof(SSFBNLimb_t);
+    size_t outSize;
+
+    SSF_REQUIRE(dst != NULL);
+    SSF_REQUIRE(src != NULL);
+    SSF_REQUIRE(numLimbs > 0u);
+
+    outSize = ((size_t)numLimbs) * sizeof(SSFBNLimb_t);
     SSF_ASSERT(outSize <= sizeof(buf));
     SSF_ASSERT(BN_num_bytes(src) <= (int)outSize);
     SSF_ASSERT(BN_bn2binpad(src, buf, (int)outSize) == (int)outSize);
@@ -88,8 +99,13 @@ static void _ECFromOSSLBN(SSFBN_t *dst, const BIGNUM *src, uint16_t numLimbs)
 /* Get the OpenSSL EC group for a given curve. */
 static EC_GROUP *_ECGetOSSLGroup(SSFECCurve_t curve)
 {
-    int nid = (curve == SSF_EC_CURVE_P256) ? NID_X9_62_prime256v1 : NID_secp384r1;
-    EC_GROUP *g = EC_GROUP_new_by_curve_name(nid);
+    int nid;
+    EC_GROUP *g;
+
+    SSF_REQUIRE((curve > SSF_EC_CURVE_MIN) && (curve < SSF_EC_CURVE_MAX));
+
+    nid = (curve == SSF_EC_CURVE_P256) ? NID_X9_62_prime256v1 : NID_secp384r1;
+    g = EC_GROUP_new_by_curve_name(nid);
     SSF_ASSERT(g != NULL);
     return g;
 }
@@ -98,12 +114,21 @@ static EC_GROUP *_ECGetOSSLGroup(SSFECCurve_t curve)
 static void _ECPointToOSSL(EC_POINT *dst, const SSFECPoint_t *src,
                            SSFECCurve_t curve, EC_GROUP *group, BN_CTX *ctx)
 {
+    SSF_REQUIRE(dst != NULL);
+    SSF_REQUIRE(src != NULL);
+    SSF_REQUIRE((curve > SSF_EC_CURVE_MIN) && (curve < SSF_EC_CURVE_MAX));
+    SSF_REQUIRE(group != NULL);
+    SSF_REQUIRE(ctx != NULL);
+
+    /* Is the source point the identity? */
     if (SSFECPointIsIdentity(src))
     {
+        /* Yes, map it to OpenSSL infinity */
         SSF_ASSERT(EC_POINT_set_to_infinity(group, dst) == 1);
     }
     else
     {
+        /* No, set its affine coordinates */
         SSFBN_DEFINE(ax, SSF_EC_MAX_LIMBS);
         SSFBN_DEFINE(ay, SSF_EC_MAX_LIMBS);
         BIGNUM *bnX = BN_new();
@@ -120,13 +145,26 @@ static void _ECPointToOSSL(EC_POINT *dst, const SSFECPoint_t *src,
 static void _ECPointFromOSSL(SSFECPoint_t *dst, const EC_POINT *src,
                              SSFECCurve_t curve, EC_GROUP *group, BN_CTX *ctx)
 {
-    const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
+    const SSFECCurveParams_t *c;
+
+    SSF_REQUIRE(dst != NULL);
+    SSF_REQUIRE(src != NULL);
+    SSF_REQUIRE((curve > SSF_EC_CURVE_MIN) && (curve < SSF_EC_CURVE_MAX));
+    SSF_REQUIRE(group != NULL);
+    SSF_REQUIRE(ctx != NULL);
+
+    c = SSFECGetCurveParams(curve);
+    SSF_ASSERT(c != NULL);
+
+    /* Is the OpenSSL point at infinity? */
     if (EC_POINT_is_at_infinity(group, src))
     {
+        /* Yes, map it to the SSF identity */
         SSFECPointSetIdentity(dst, curve);
     }
     else
     {
+        /* No, copy its affine coordinates */
         SSFBN_DEFINE(ax, SSF_EC_MAX_LIMBS);
         SSFBN_DEFINE(ay, SSF_EC_MAX_LIMBS);
         BIGNUM *bnX = BN_new();
@@ -142,6 +180,9 @@ static void _ECPointFromOSSL(SSFECPoint_t *dst, const EC_POINT *src,
 /* Deep-copy an SSFECPoint_t; aliasing tests snapshot and restore P/Q with it. */
 static void _ECPointCopy(SSFECPoint_t *dst, const SSFECPoint_t *src)
 {
+    SSF_REQUIRE(dst != NULL);
+    SSF_REQUIRE(src != NULL);
+
     SSFBNCopy(&dst->x, &src->x);
     SSFBNCopy(&dst->y, &src->y);
     SSFBNCopy(&dst->z, &src->z);
@@ -151,8 +192,17 @@ static void _ECPointCopy(SSFECPoint_t *dst, const SSFECPoint_t *src)
 static bool _ECPointEqOSSL(const SSFECPoint_t *a, const EC_POINT *b,
                            SSFECCurve_t curve, EC_GROUP *group, BN_CTX *ctx)
 {
-    bool aIsId = SSFECPointIsIdentity(a);
-    int  bIsId = EC_POINT_is_at_infinity(group, b);
+    bool aIsId;
+    int  bIsId;
+
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(b != NULL);
+    SSF_REQUIRE((curve > SSF_EC_CURVE_MIN) && (curve < SSF_EC_CURVE_MAX));
+    SSF_REQUIRE(group != NULL);
+    SSF_REQUIRE(ctx != NULL);
+
+    aIsId = SSFECPointIsIdentity(a);
+    bIsId = EC_POINT_is_at_infinity(group, b);
 
     /* Is exactly one of the two points the identity? */
     if (aIsId != (bIsId != 0))
@@ -176,7 +226,7 @@ static bool _ECPointEqOSSL(const SSFECPoint_t *a, const EC_POINT *b,
         SSF_ASSERT(EC_POINT_get_affine_coordinates(group, b, bnBx, bnBy, ctx) == 1);
         _ECFromOSSLBN(&bx, bnBx, c->limbs);
         _ECFromOSSLBN(&by, bnBy, c->limbs);
-        eq = (SSFBNCmp(&ax, &bx) == 0) && (SSFBNCmp(&ay, &by) == 0);
+        eq = ((SSFBNCmp(&ax, &bx) == 0) && (SSFBNCmp(&ay, &by) == 0));
 
         BN_free(bnBx); BN_free(bnBy);
         return eq;
@@ -204,6 +254,9 @@ static void _ECVerifyAtCurve(SSFECCurve_t curve, uint16_t iters)
     SSFBN_DEFINE(k2, SSF_EC_MAX_LIMBS);
     uint16_t i;
 
+    SSF_REQUIRE((curve > SSF_EC_CURVE_MIN) && (curve < SSF_EC_CURVE_MAX));
+    SSF_REQUIRE(iters > 0u);
+    SSF_ASSERT(c != NULL);
     SSF_ASSERT(ctx != NULL);
     SSF_ASSERT((bnK1 != NULL) && (bnK2 != NULL) && (bnOrder != NULL));
     SSF_ASSERT((osslP != NULL) && (osslQ != NULL) && (osslR != NULL) && (osslT != NULL));
@@ -262,9 +315,7 @@ static void _ECVerifyAtCurve(SSFECCurve_t curve, uint16_t iters)
         SSF_ASSERT(EC_POINT_add(group, osslR, osslT, osslR, ctx) == 1);
         SSF_ASSERT(_ECPointEqOSSL(&R, osslR, curve, group, ctx) == true);
 
-        /* === Test 8: ScalarMulDualBase: [k1]G + [k2]Q ====================================== */
-        /* (built only with a fixed-base table; with one table, the other curve takes its   */
-        /* generic G path)                                                                    */
+        /* === Test 8: ScalarMulDualBase: [k1]G + [k2]Q (needs any fixed-base table) ======== */
 #if (SSF_EC_CONFIG_FIXED_BASE_P256 == 1) || (SSF_EC_CONFIG_FIXED_BASE_P384 == 1)
         SSFECScalarMulDualBase(&R, &k1, &k2, &Q, curve);
         SSF_ASSERT(EC_POINT_mul(group, osslR, bnK1, osslQ, bnK2, ctx) == 1);
@@ -625,6 +676,10 @@ static void _ECVerifyAtCurve(SSFECCurve_t curve, uint16_t iters)
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFECUTCombMul(SSFECPoint_t *r, const SSFBN_t *k, SSFECCurve_t curve)
 {
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(k != NULL);
+    SSF_REQUIRE((curve > SSF_EC_CURVE_MIN) && (curve < SSF_EC_CURVE_MAX));
+
 #if SSF_EC_CONFIG_FIXED_BASE_P256 == 1
     if (curve == SSF_EC_CURVE_P256) { SSFECScalarMulBaseP256(r, k); return; }
 #endif
@@ -812,7 +867,7 @@ void SSFECUnitTest(void)
             const uint8_t bad_prefixes[] = { 0x01u, 0x08u, 0xFFu };
             size_t pi;
             memcpy(nonsense, enc, sizeof(nonsense));
-            for (pi = 0; pi < sizeof(bad_prefixes) / sizeof(bad_prefixes[0]); pi++)
+            for (pi = 0; pi < (sizeof(bad_prefixes) / sizeof(bad_prefixes[0])); pi++)
             {
                 nonsense[0] = bad_prefixes[pi];
                 SSF_ASSERT(SSFECPointDecode(&decoded, SSF_EC_CURVE_P256,
@@ -962,7 +1017,7 @@ void SSFECUnitTest(void)
         {
             const uint32_t edges[] = { 2u, 3u, 15u, 16u, 17u, 31u, 32u, 33u };
             size_t ei;
-            for (ei = 0; ei < sizeof(edges) / sizeof(edges[0]); ei++)
+            for (ei = 0; ei < (sizeof(edges) / sizeof(edges[0])); ei++)
             {
                 uint32_t step;
                 small_k = edges[ei];
@@ -1332,13 +1387,15 @@ void SSFECUnitTest(void)
             SSFECPointAdd(&L, &P, &Q, SSF_EC_CURVE_P256);
             SSFECScalarMul(&M, &kSum, &G, SSF_EC_CURVE_P256);
 
-            /* If [k1+k2]G is identity (kSum happened to be 0), so should L. */
+            /* Is [k1+k2]G the identity (kSum happened to be 0)? */
             if (SSFECPointIsIdentity(&M))
             {
+                /* Yes, so must L be */
                 SSF_ASSERT(SSFECPointIsIdentity(&L) == true);
             }
             else
             {
+                /* No, L must equal [k1+k2]G */
                 SSF_ASSERT(SSFECPointToAffine(&lx, &ly, &L, SSF_EC_CURVE_P256) == true);
                 SSF_ASSERT(SSFECPointToAffine(&mx, &my, &M, SSF_EC_CURVE_P256) == true);
                 SSF_ASSERT(SSFBNCmp(&lx, &mx) == 0);
@@ -1368,12 +1425,15 @@ void SSFECUnitTest(void)
             SSFECPointAdd(&Sum, &Pin, &Qin, SSF_EC_CURVE_P256);
             SSFECScalarMul(&M, &kx, &Sum, SSF_EC_CURVE_P256);
 
+            /* Is [k]P + [k]Q the identity? */
             if (SSFECPointIsIdentity(&L))
             {
+                /* Yes, so must [k](P + Q) be */
                 SSF_ASSERT(SSFECPointIsIdentity(&M) == true);
             }
             else
             {
+                /* No, [k](P + Q) must equal [k]P + [k]Q */
                 SSF_ASSERT(SSFECPointToAffine(&lx, &ly, &L, SSF_EC_CURVE_P256) == true);
                 SSF_ASSERT(SSFECPointToAffine(&mx, &my, &M, SSF_EC_CURVE_P256) == true);
                 SSF_ASSERT(SSFBNCmp(&lx, &mx) == 0);
@@ -1436,12 +1496,15 @@ void SSFECUnitTest(void)
             SSFECPointAdd(&L, &P, &Q, SSF_EC_CURVE_P384);
             SSFECScalarMul(&M, &kSum, &G, SSF_EC_CURVE_P384);
 
+            /* Is [k1+k2]G the identity? */
             if (SSFECPointIsIdentity(&M))
             {
+                /* Yes, so must L be */
                 SSF_ASSERT(SSFECPointIsIdentity(&L) == true);
             }
             else
             {
+                /* No, L must equal [k1+k2]G */
                 SSF_ASSERT(SSFECPointToAffine(&lx, &ly, &L, SSF_EC_CURVE_P384) == true);
                 SSF_ASSERT(SSFECPointToAffine(&mx, &my, &M, SSF_EC_CURVE_P384) == true);
                 SSF_ASSERT(SSFBNCmp(&lx, &mx) == 0);
@@ -1801,7 +1864,7 @@ void SSFECUnitTest(void)
         {
             const uint32_t edges[] = { 2u, 3u, 15u, 16u, 17u, 31u, 32u, 33u, 0xDEADBEEFu };
             size_t ei;
-            for (ei = 0; ei < sizeof(edges) / sizeof(edges[0]); ei++)
+            for (ei = 0; ei < (sizeof(edges) / sizeof(edges[0])); ei++)
             {
                 SSFBNSetUint32(&k, edges[ei], c->limbs);
                 _SSFECScalarMulVTwNAFForTest(&viaWNAF, &k, &Q, SSF_EC_CURVE_P256);
@@ -1982,7 +2045,7 @@ void SSFECUnitTest(void)
         SSFBN_DEFINE(cy, SSF_EC_MAX_LIMBS);
         SSFBN_DEFINE(mx, SSF_EC_MAX_LIMBS);
         SSFBN_DEFINE(my, SSF_EC_MAX_LIMBS);
-        uint32_t d_bits = (256u + SSF_EC_FIXED_BASE_COMB_H - 1u) / SSF_EC_FIXED_BASE_COMB_H;
+        uint32_t d_bits = ((256u + SSF_EC_FIXED_BASE_COMB_H) - 1u) / SSF_EC_FIXED_BASE_COMB_H;
         uint32_t i;
 
         SSFECPointFromAffine(&G, &c->gx, &c->gy, SSF_EC_CURVE_P256);
@@ -1990,7 +2053,7 @@ void SSFECUnitTest(void)
         for (i = 0; i < SSF_EC_FIXED_BASE_COMB_H; i++)
         {
             uint32_t bit_pos = i * d_bits;
-            if (bit_pos >= (uint32_t)c->limbs * SSF_BN_LIMB_BITS) break;
+            if (bit_pos >= (((uint32_t)c->limbs) * SSF_BN_LIMB_BITS)) break;
 
             SSFBNSetZero(&k, c->limbs);
             SSFBNSetBit(&k, bit_pos);
@@ -2497,18 +2560,26 @@ void SSFECUnitTest(void)
         };
         size_t si;
 
-        for (si = 0; si < sizeof(specs) / sizeof(specs[0]); si++)
+        for (si = 0; si < (sizeof(specs) / sizeof(specs[0])); si++)
         {
             const SSFECCurveParams_t *c = SSFECGetCurveParams(specs[si].curve);
             SSFECPOINT_DEFINE(G,    SSF_EC_MAX_LIMBS);
-            SSFECPOINT_DEFINE(t1,   SSF_EC_MAX_LIMBS); SSFECPOINT_DEFINE(t2,   SSF_EC_MAX_LIMBS);
-            SSFECPOINT_DEFINE(t3,   SSF_EC_MAX_LIMBS); SSFECPOINT_DEFINE(t4,   SSF_EC_MAX_LIMBS);
-            SSFECPOINT_DEFINE(t5,   SSF_EC_MAX_LIMBS); SSFECPOINT_DEFINE(t6,   SSF_EC_MAX_LIMBS);
-            SSFECPOINT_DEFINE(t7,   SSF_EC_MAX_LIMBS); SSFECPOINT_DEFINE(t8,   SSF_EC_MAX_LIMBS);
-            SSFECPOINT_DEFINE(t9,   SSF_EC_MAX_LIMBS); SSFECPOINT_DEFINE(t10,  SSF_EC_MAX_LIMBS);
-            SSFECPOINT_DEFINE(t11,  SSF_EC_MAX_LIMBS); SSFECPOINT_DEFINE(t12,  SSF_EC_MAX_LIMBS);
-            SSFECPOINT_DEFINE(t13,  SSF_EC_MAX_LIMBS); SSFECPOINT_DEFINE(t14,  SSF_EC_MAX_LIMBS);
-            SSFECPOINT_DEFINE(t15,  SSF_EC_MAX_LIMBS); SSFECPOINT_DEFINE(zero, SSF_EC_MAX_LIMBS);
+            SSFECPOINT_DEFINE(t1,   SSF_EC_MAX_LIMBS);
+            SSFECPOINT_DEFINE(t2,   SSF_EC_MAX_LIMBS);
+            SSFECPOINT_DEFINE(t3,   SSF_EC_MAX_LIMBS);
+            SSFECPOINT_DEFINE(t4,   SSF_EC_MAX_LIMBS);
+            SSFECPOINT_DEFINE(t5,   SSF_EC_MAX_LIMBS);
+            SSFECPOINT_DEFINE(t6,   SSF_EC_MAX_LIMBS);
+            SSFECPOINT_DEFINE(t7,   SSF_EC_MAX_LIMBS);
+            SSFECPOINT_DEFINE(t8,   SSF_EC_MAX_LIMBS);
+            SSFECPOINT_DEFINE(t9,   SSF_EC_MAX_LIMBS);
+            SSFECPOINT_DEFINE(t10,  SSF_EC_MAX_LIMBS);
+            SSFECPOINT_DEFINE(t11,  SSF_EC_MAX_LIMBS);
+            SSFECPOINT_DEFINE(t12,  SSF_EC_MAX_LIMBS);
+            SSFECPOINT_DEFINE(t13,  SSF_EC_MAX_LIMBS);
+            SSFECPOINT_DEFINE(t14,  SSF_EC_MAX_LIMBS);
+            SSFECPOINT_DEFINE(t15,  SSF_EC_MAX_LIMBS);
+            SSFECPOINT_DEFINE(zero, SSF_EC_MAX_LIMBS);
             SSFBN_DEFINE(scalar, SSF_EC_MAX_LIMBS);
             SSFECPoint_t *all[16];
             uint16_t pi;
@@ -2565,7 +2636,7 @@ void SSFECUnitTest(void)
                     {
                         SSFBNLimb_t v = (li < coords[lim]->len) ? coords[lim]->limbs[li] : 0u;
                         SSF_UT_PRINTF("0x%08Xu%s", (unsigned)v,
-                               (li + 1u < specs[si].nLimbs) ? ", " : "");
+                               ((li + 1u) < specs[si].nLimbs) ? ", " : "");
                     }
                     SSF_UT_PRINTF(" },\n");
                 }

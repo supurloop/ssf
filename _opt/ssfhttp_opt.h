@@ -8,8 +8,7 @@
 extern "C" {
 #endif
 
-/* Fields a parsed response head may hold. A head with more is MALFORMED. Each costs 8 bytes in  */
-/* SSFHTTPHdrResponse_t, which callers usually place on the stack. 1..255.                       */
+/* Maximum fields a parsed response head may hold, 1..255 */
 #ifndef SSF_HTTP_CONFIG_MAX_FIELDS
 #define SSF_HTTP_CONFIG_MAX_FIELDS              (24u)
 #endif

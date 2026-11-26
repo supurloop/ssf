@@ -64,9 +64,16 @@
 static EC_KEY *_ECDSAOSSLKeyFromPub(SSFECCurve_t curve,
                                     const uint8_t *pubKey, size_t pubKeyLen)
 {
-    int nid = (curve == SSF_EC_CURVE_P256) ? NID_X9_62_prime256v1 : NID_secp384r1;
-    EC_KEY *eckey = EC_KEY_new_by_curve_name(nid);
+    int nid;
+    EC_KEY *eckey;
     EC_POINT *pt = NULL;
+
+    SSF_REQUIRE((curve > SSF_EC_CURVE_MIN) && (curve < SSF_EC_CURVE_MAX));
+    SSF_REQUIRE(pubKey != NULL);
+    SSF_REQUIRE(pubKeyLen > 0u);
+
+    nid = (curve == SSF_EC_CURVE_P256) ? NID_X9_62_prime256v1 : NID_secp384r1;
+    eckey = EC_KEY_new_by_curve_name(nid);
     SSF_ASSERT(eckey != NULL);
     pt = EC_POINT_new(EC_KEY_get0_group(eckey));
     SSF_ASSERT(pt != NULL);
@@ -79,7 +86,13 @@ static EC_KEY *_ECDSAOSSLKeyFromPub(SSFECCurve_t curve,
 /* Set the private-key BIGNUM on an EC_KEY from SSF privKey bytes. */
 static void _ECDSAOSSLSetPriv(EC_KEY *eckey, const uint8_t *privKey, size_t privKeyLen)
 {
-    BIGNUM *bnD = BN_bin2bn(privKey, (int)privKeyLen, NULL);
+    BIGNUM *bnD;
+
+    SSF_REQUIRE(eckey != NULL);
+    SSF_REQUIRE(privKey != NULL);
+    SSF_REQUIRE(privKeyLen > 0u);
+
+    bnD = BN_bin2bn(privKey, (int)privKeyLen, NULL);
     SSF_ASSERT(bnD != NULL);
     SSF_ASSERT(EC_KEY_set_private_key(eckey, bnD) == 1);
     BN_free(bnD);
@@ -95,20 +108,31 @@ typedef struct
     size_t   secretBytes;/* ECDH shared-secret size (== field size). */
 } _ECDSAOSSLCurveInfo_t;
 
+/* Fill info with the byte sizes and OpenSSL NID of curve. */
 static void _ECDSAOSSLCurveInfo(SSFECCurve_t curve, _ECDSAOSSLCurveInfo_t *info)
 {
+    SSF_REQUIRE((curve > SSF_EC_CURVE_MIN) && (curve < SSF_EC_CURVE_MAX));
+    SSF_REQUIRE(info != NULL);
+
+    /* Is the curve P-256? */
     if (curve == SSF_EC_CURVE_P256)
     {
+        /* Yes, use the 32-byte sizes */
         info->nid = NID_X9_62_prime256v1;
-        info->privBytes = 32u; info->pubBytes = 65u;
-        info->hashBytes = 32u; info->secretBytes = 32u;
+        info->privBytes = 32u;
+        info->pubBytes = 65u;
+        info->hashBytes = 32u;
+        info->secretBytes = 32u;
     }
     else
     {
+        /* No, it must be P-384 with 48-byte sizes */
         SSF_ASSERT(curve == SSF_EC_CURVE_P384);
         info->nid = NID_secp384r1;
-        info->privBytes = 48u; info->pubBytes = 97u;
-        info->hashBytes = 48u; info->secretBytes = 48u;
+        info->privBytes = 48u;
+        info->pubBytes = 97u;
+        info->hashBytes = 48u;
+        info->secretBytes = 48u;
     }
 }
 
@@ -120,6 +144,9 @@ static void _VerifyECDSARandomAgainstOpenSSL(SSFECCurve_t curve, uint16_t iters)
 {
     _ECDSAOSSLCurveInfo_t info;
     uint16_t i;
+
+    SSF_REQUIRE((curve > SSF_EC_CURVE_MIN) && (curve < SSF_EC_CURVE_MAX));
+    SSF_REQUIRE(iters > 0u);
 
     _ECDSAOSSLCurveInfo(curve, &info);
 
@@ -230,6 +257,9 @@ static void _VerifyECDHAgainstOpenSSL(SSFECCurve_t curve, uint16_t iters)
     _ECDSAOSSLCurveInfo_t info;
     uint16_t i;
 
+    SSF_REQUIRE((curve > SSF_EC_CURVE_MIN) && (curve < SSF_EC_CURVE_MAX));
+    SSF_REQUIRE(iters > 0u);
+
     _ECDSAOSSLCurveInfo(curve, &info);
 
     for (i = 0; i < iters; i++)
@@ -244,7 +274,8 @@ static void _VerifyECDHAgainstOpenSSL(SSFECCurve_t curve, uint16_t iters)
         uint8_t ssfSecret [SSF_ECDSA_MAX_PRIV_KEY_SIZE];
         uint8_t osslSecret[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
         size_t  ssfSecretLen = 0u;
-        EC_KEY *keyA, *keyB;
+        EC_KEY *keyA;
+        EC_KEY *keyB;
         const EC_POINT *pubBPoint;
         int      n;
 
@@ -324,6 +355,8 @@ static void _VerifyECDSACornerCasesAgainstOpenSSL(SSFECCurve_t curve)
     static const uint8_t zeroHash[SSF_ECDSA_MAX_PRIV_KEY_SIZE] = {0};
     uint8_t ffHash[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
 
+    SSF_REQUIRE((curve > SSF_EC_CURVE_MIN) && (curve < SSF_EC_CURVE_MAX));
+
     _ECDSAOSSLCurveInfo(curve, &info);
     memset(ffHash, 0xFFu, sizeof(ffHash));
 
@@ -384,7 +417,8 @@ static void _VerifyECDSACornerCasesAgainstOpenSSL(SSFECCurve_t curve)
         uint8_t derivedBytes[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         size_t  derivedLen;
 
-        SSF_ASSERT(osslKey != NULL); SSF_ASSERT(bnD != NULL);
+        SSF_ASSERT(osslKey != NULL);
+        SSF_ASSERT(bnD != NULL);
         SSF_ASSERT(EC_KEY_set_private_key(osslKey, bnD) == 1);
         grp = EC_KEY_get0_group(osslKey);
         derived = EC_POINT_new(grp);
@@ -415,6 +449,7 @@ typedef struct
     const char *firstNonZero;
 } _SSFECDSAZeroAudit_t;
 
+/* Return true if bn is absent or every limb up to its capacity is zero. */
 static bool _ECDSAUTLimbsAllZero(const SSFBN_t *bn)
 {
     uint16_t i;
@@ -432,8 +467,12 @@ static bool _ECDSAUTLimbsAllZero(const SSFBN_t *bn)
     return true;
 }
 
+/* Record name as the first leak if bn is non-zero and no leak was recorded yet. */
 static void _ECDSAUTRecordBN(_SSFECDSAZeroAudit_t *a, const SSFBN_t *bn, const char *name)
 {
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(name != NULL);
+
     if (a->nonZero) return;
     if (!_ECDSAUTLimbsAllZero(bn))
     {
@@ -442,13 +481,18 @@ static void _ECDSAUTRecordBN(_SSFECDSAZeroAudit_t *a, const SSFBN_t *bn, const c
     }
 }
 
+/* Sign exit hook: audit every secret-derived local for residue. */
 static void _ECDSAUTSignHook(void *ctx,
                              const SSFBN_t *d, const SSFBN_t *k, const SSFBN_t *e,
                              const SSFBN_t *kInv, const SSFBN_t *tmp,
                              const SSFECPoint_t *R,
                              const SSFBN_t *Rx, const SSFBN_t *Ry)
 {
-    _SSFECDSAZeroAudit_t *a = (_SSFECDSAZeroAudit_t *)ctx;
+    _SSFECDSAZeroAudit_t *a;
+
+    SSF_REQUIRE(ctx != NULL);
+
+    a = (_SSFECDSAZeroAudit_t *)ctx;
     a->sawHook = true;
     _ECDSAUTRecordBN(a, d,    "d");
     _ECDSAUTRecordBN(a, k,    "k");
@@ -465,12 +509,17 @@ static void _ECDSAUTSignHook(void *ctx,
     _ECDSAUTRecordBN(a, Ry, "Ry");
 }
 
+/* ECDH exit hook: audit d and the shared point for residue. */
 static void _ECDSAUTECDHHook(void *ctx,
                              const SSFBN_t *d,
                              const SSFECPoint_t *S,
                              const SSFBN_t *Sx, const SSFBN_t *Sy)
 {
-    _SSFECDSAZeroAudit_t *a = (_SSFECDSAZeroAudit_t *)ctx;
+    _SSFECDSAZeroAudit_t *a;
+
+    SSF_REQUIRE(ctx != NULL);
+
+    a = (_SSFECDSAZeroAudit_t *)ctx;
     a->sawHook = true;
     _ECDSAUTRecordBN(a, d, "d");
     if (S != NULL)
@@ -483,12 +532,17 @@ static void _ECDSAUTECDHHook(void *ctx,
     _ECDSAUTRecordBN(a, Sy, "Sy");
 }
 
+/* KeyGen exit hook: audit d and the entropy seed buffer for residue. */
 static void _ECDSAUTKeyGenHook(void *ctx,
                                const SSFBN_t *d,
                                const uint8_t *entropy, size_t entropyLen)
 {
-    _SSFECDSAZeroAudit_t *a = (_SSFECDSAZeroAudit_t *)ctx;
+    _SSFECDSAZeroAudit_t *a;
     size_t i;
+
+    SSF_REQUIRE(ctx != NULL);
+
+    a = (_SSFECDSAZeroAudit_t *)ctx;
     a->sawHook = true;
     _ECDSAUTRecordBN(a, d, "d");
 
@@ -535,9 +589,7 @@ void SSFECDSAUnitTest(void)
 
 #if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
 #if SSF_EC_CONFIG_ENABLE_P384 == 1
-    /* ---- COV-8 (P-384): the same fallback on P-384 uses HMAC-SHA-384. h = first 28 bytes   */
-    /* of SHA-384("sample"), RFC 6979 A.2.6 key; r, s computed independently (pure-Python     */
-    /* RFC 6979 + P-384, checked against the A.2.6 SHA-384 vector first).                     */
+    /* ---- COV-8 (P-384): 28-byte digest uses HMAC-SHA-384; A.2.6 key, independent KAT ---- */
     {
         static const uint8_t privKey[] = {
             0x6Bu, 0x9Du, 0x3Du, 0xADu, 0x2Eu, 0x1Bu, 0x8Cu, 0x1Cu,
@@ -579,10 +631,7 @@ void SSFECDSAUnitTest(void)
     }
 #endif /* SSF_EC_CONFIG_ENABLE_P384 */
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
-    /* ---- COV-8: a digest length that is not SHA-1/SHA-2 drives RFC 6979 with the curve's ---- */
-    /* hash (HMAC-SHA-256 on P-256). h = first 28 bytes of SHA-256("sample"), RFC 6979 A.2.5   */
-    /* key; expected r, s computed independently (pure-Python RFC 6979 + P-256, checked       */
-    /* against the A.2.5 SHA-256 vector first).                                               */
+    /* ---- COV-8: 28-byte digest uses the curve hash (HMAC-SHA-256); A.2.5 key, independent KAT */
     {
         static const uint8_t privKey[] = {
             0xC9u, 0xAFu, 0xA9u, 0xD8u, 0x45u, 0xBAu, 0x75u, 0x16u,
@@ -1235,7 +1284,8 @@ void SSFECDSAUnitTest(void)
         SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, zeroPriv, sizeof(zeroPriv),
                                 hash, sizeof(hash), sig, sizeof(sig), &sigLen) == false);
 #else
-        (void)sig; (void)sigLen;
+        (void)sig;
+        (void)sigLen;
 #endif
     }
 
@@ -1745,7 +1795,7 @@ void SSFECDSAUnitTest(void)
                    privKey, sizeof(privKey),
                    pubKey,  sizeof(pubKey), &pubKeyLen) == true);
 
-        for (mi = 0; mi < sizeof(messages) / sizeof(messages[0]); mi++)
+        for (mi = 0; mi < (sizeof(messages) / sizeof(messages[0])); mi++)
         {
             EC_KEY *eckey;
             const uint8_t *p;
@@ -1769,7 +1819,7 @@ void SSFECDSAUnitTest(void)
         }
 
         /* === OpenSSL signs -> SSF verifies (P-256/SHA-256) === */
-        for (mi = 0; mi < sizeof(messages) / sizeof(messages[0]); mi++)
+        for (mi = 0; mi < (sizeof(messages) / sizeof(messages[0])); mi++)
         {
             EC_KEY *eckey;
             ECDSA_SIG *osslSig;
@@ -1816,7 +1866,7 @@ void SSFECDSAUnitTest(void)
                    privKey, sizeof(privKey),
                    pubKey,  sizeof(pubKey), &pubKeyLen) == true);
 
-        for (mi = 0; mi < sizeof(messages) / sizeof(messages[0]); mi++)
+        for (mi = 0; mi < (sizeof(messages) / sizeof(messages[0])); mi++)
         {
             EC_KEY *eckey;
             const uint8_t *p;
@@ -1837,7 +1887,7 @@ void SSFECDSAUnitTest(void)
         }
 
         /* === OpenSSL signs -> SSF verifies (P-384/SHA-384) === */
-        for (mi = 0; mi < sizeof(messages) / sizeof(messages[0]); mi++)
+        for (mi = 0; mi < (sizeof(messages) / sizeof(messages[0])); mi++)
         {
             EC_KEY *eckey;
             ECDSA_SIG *osslSig;
@@ -1913,7 +1963,8 @@ void SSFECDSAUnitTest(void)
         #include "wycheproof_ecdsa_p256.h"
         uint8_t hash[32];
         uint16_t i;
-        uint16_t pass = 0, mismatches = 0;
+        uint16_t pass = 0;
+        uint16_t mismatches = 0;
 
         SSF_UT_PRINTF("--- Wycheproof ECDSA P-256 verify (%u tests) ---\n",
                (unsigned)SSF_WYCHEPROOF_ECDSA_P256_NTESTS);
@@ -1928,12 +1979,15 @@ void SSFECDSAUnitTest(void)
                                  hash, sizeof(hash),
                                  t->sig, t->sigLen);
 
+            /* Did verify match the expected result? */
             if (got == t->expectedValid)
             {
+                /* Yes, count a pass */
                 pass++;
             }
             else
             {
+                /* No, count and report the mismatch */
                 mismatches++;
                 SSF_UT_PRINTF("  tcId %4u: expected %s, got %s (sig %u bytes)\n",
                        (unsigned)t->tcId,
@@ -1955,7 +2009,8 @@ void SSFECDSAUnitTest(void)
         #include "wycheproof_ecdsa_p384.h"
         uint8_t hash[48];
         uint16_t i;
-        uint16_t pass = 0, mismatches = 0;
+        uint16_t pass = 0;
+        uint16_t mismatches = 0;
 
         SSF_UT_PRINTF("--- Wycheproof ECDSA P-384 verify (%u tests) ---\n",
                (unsigned)SSF_WYCHEPROOF_ECDSA_P384_NTESTS);
@@ -1970,12 +2025,15 @@ void SSFECDSAUnitTest(void)
                                  hash, sizeof(hash),
                                  t->sig, t->sigLen);
 
+            /* Did verify match the expected result? */
             if (got == t->expectedValid)
             {
+                /* Yes, count a pass */
                 pass++;
             }
             else
             {
+                /* No, count and report the mismatch */
                 mismatches++;
                 SSF_UT_PRINTF("  tcId %4u: expected %s, got %s (sig %u bytes)\n",
                        (unsigned)t->tcId,
@@ -2002,7 +2060,10 @@ void SSFECDSAUnitTest(void)
         uint8_t shared[SSF_ECDH_MAX_SECRET_SIZE];
         size_t sharedLen;
         uint16_t i;
-        uint16_t pass = 0, mismatches = 0, acceptableSkipped = 0, knownIssue = 0;
+        uint16_t pass = 0;
+        uint16_t mismatches = 0;
+        uint16_t acceptableSkipped = 0;
+        uint16_t knownIssue = 0;
 
         SSF_UT_PRINTF("--- Wycheproof ECDH P-256 (%u tests) ---\n",
                (unsigned)SSF_WYCHEPROOF_ECDH_P256_NTESTS);
@@ -2027,18 +2088,29 @@ void SSFECDSAUnitTest(void)
                                        shared, sizeof(shared), &sharedLen);
             if (got)
             {
-                sharedOk = (sharedLen == t->sharedLen) &&
-                           (memcmp(shared, t->shared, t->sharedLen) == 0);
+                sharedOk = ((sharedLen == t->sharedLen) &&
+                            (memcmp(shared, t->shared, t->sharedLen) == 0));
             }
 
             if (t->acceptable) { acceptableSkipped++; continue; }
 
-            bool expectedOk = t->expectedValid ? (got && sharedOk) : (!got || !sharedOk);
+            bool expectedOk = (t->expectedValid ? (got && sharedOk) : ((!got) || (!sharedOk)));
 
-            if (expectedOk) pass++;
-            else if (isKnown) knownIssue++;
+            /* Did the result match the expectation? */
+            if (expectedOk)
+            {
+                /* Yes, count a pass */
+                pass++;
+            }
+            /* No, is it a known mismatch? */
+            else if (isKnown)
+            {
+                /* Yes, count a known issue */
+                knownIssue++;
+            }
             else
             {
+                /* No, count and report the new mismatch */
                 mismatches++;
                 SSF_UT_PRINTF("  tcId %4u: expected %s, got %s\n",
                        (unsigned)t->tcId,
@@ -2062,7 +2134,10 @@ void SSFECDSAUnitTest(void)
         uint8_t shared[SSF_ECDH_MAX_SECRET_SIZE];
         size_t sharedLen;
         uint16_t i;
-        uint16_t pass = 0, mismatches = 0, acceptableSkipped = 0, knownIssue = 0;
+        uint16_t pass = 0;
+        uint16_t mismatches = 0;
+        uint16_t acceptableSkipped = 0;
+        uint16_t knownIssue = 0;
         uint16_t firstFails[16];
         uint16_t nFirstFails = 0;
 
@@ -2080,17 +2155,23 @@ void SSFECDSAUnitTest(void)
                                        shared, sizeof(shared), &sharedLen);
             if (got)
             {
-                sharedOk = (sharedLen == t->sharedLen) &&
-                           (memcmp(shared, t->shared, t->sharedLen) == 0);
+                sharedOk = ((sharedLen == t->sharedLen) &&
+                            (memcmp(shared, t->shared, t->sharedLen) == 0));
             }
 
             if (t->acceptable) { acceptableSkipped++; continue; }
 
-            bool expectedOk = t->expectedValid ? (got && sharedOk) : (!got || !sharedOk);
+            bool expectedOk = (t->expectedValid ? (got && sharedOk) : ((!got) || (!sharedOk)));
 
-            if (expectedOk) pass++;
+            /* Did the result match the expectation? */
+            if (expectedOk)
+            {
+                /* Yes, count a pass */
+                pass++;
+            }
             else
             {
+                /* No, count the mismatch and remember its tcId */
                 mismatches++;
                 if (nFirstFails < 16u) firstFails[nFirstFails++] = t->tcId;
             }

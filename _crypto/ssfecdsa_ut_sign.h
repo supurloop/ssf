@@ -62,6 +62,14 @@ static bool _SSFECDSAUTSign(SSFECCurve_t curve, const uint8_t *privKey, size_t p
                             const uint8_t *hash, size_t hashLen, uint8_t *sig, size_t sigSize,
                             size_t *sigLen)
 {
+    SSF_REQUIRE((curve > SSF_EC_CURVE_MIN) && (curve < SSF_EC_CURVE_MAX));
+    SSF_REQUIRE(privKey != NULL);
+    SSF_REQUIRE(privKeyLen > 0u);
+    SSF_REQUIRE(hash != NULL);
+    SSF_REQUIRE(hashLen > 0u);
+    SSF_REQUIRE(sig != NULL);
+    SSF_REQUIRE(sigLen != NULL);
+
     int nid = (curve == SSF_EC_CURVE_P256) ? NID_X9_62_prime256v1 : NID_secp384r1;
     EC_KEY *key = EC_KEY_new_by_curve_name(nid);
     BIGNUM *d = BN_bin2bn(privKey, (int)privKeyLen, NULL);
@@ -73,6 +81,7 @@ static bool _SSFECDSAUTSign(SSFECCurve_t curve, const uint8_t *privKey, size_t p
     /* Is the key built and the signature made? */
     if ((key != NULL) && (d != NULL) && (EC_KEY_set_private_key(key, d) == 1))
     {
+        /* Yes, sign the hash */
         s = ECDSA_do_sign(hash, (int)hashLen, key);
     }
     /* Does its DER encoding fit sig? */
@@ -96,6 +105,14 @@ static bool _SSFECDSAUTSign(SSFECCurve_t curve, const uint8_t *privKey, size_t p
                             const uint8_t *hash, size_t hashLen, uint8_t *sig, size_t sigSize,
                             size_t *sigLen)
 {
+    SSF_REQUIRE((curve > SSF_EC_CURVE_MIN) && (curve < SSF_EC_CURVE_MAX));
+    SSF_REQUIRE(privKey != NULL);
+    SSF_REQUIRE(privKeyLen > 0u);
+    SSF_REQUIRE(hash != NULL);
+    SSF_REQUIRE(hashLen > 0u);
+    SSF_REQUIRE(sig != NULL);
+    SSF_REQUIRE(sigLen != NULL);
+
     (void)curve; (void)privKey; (void)privKeyLen; (void)hash; (void)hashLen;
     (void)sig; (void)sigSize; (void)sigLen;
     return false;

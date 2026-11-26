@@ -58,55 +58,112 @@ static const uint8_t _utP256N[32] = {
 };
 
 /* ---- A tiny DER writer for building test inputs ---- */
-typedef struct { uint8_t b[2048]; size_t len; } _UTDer_t;
-
-static void _UTPut(_UTDer_t *d, const uint8_t *p, size_t n)
+typedef struct
 {
-    SSF_ASSERT((d->len + n) <= sizeof(d->b));
-    if (n == 0u) return;                    /* p may be NULL for an empty value */
-    memcpy(&d->b[d->len], p, n);
-    d->len += n;
+    uint8_t b[2048];
+    size_t len;
+} _UTDer_t;
+
+/* Appends pLen raw bytes from p to d. */
+static void _UTPut(_UTDer_t *d, const uint8_t *p, size_t pLen)
+{
+    SSF_REQUIRE(d != NULL);
+    SSF_REQUIRE((p != NULL) || (pLen == 0u));
+    SSF_ASSERT((d->len + pLen) <= sizeof(d->b));
+
+    /* Empty value? */
+    if (pLen == 0u) return;
+    memcpy(&d->b[d->len], p, pLen);
+    d->len += pLen;
 }
 
-static void _UTByte(_UTDer_t *d, uint8_t x) { _UTPut(d, &x, 1u); }
+/* Appends one byte to d. */
+static void _UTByte(_UTDer_t *d, uint8_t x)
+{
+    SSF_REQUIRE(d != NULL);
+
+    _UTPut(d, &x, 1u);
+}
 
 /* Appends tag, length and value. */
-static void _UTTLV(_UTDer_t *d, uint8_t tag, const uint8_t *v, size_t n)
+static void _UTTLV(_UTDer_t *d, uint8_t tag, const uint8_t *v, size_t vLen)
 {
+    SSF_REQUIRE(d != NULL);
+    SSF_REQUIRE((v != NULL) || (vLen == 0u));
+    SSF_REQUIRE(vLen <= 0xFFFFu);
+
     _UTByte(d, tag);
-    if (n < 0x80u) _UTByte(d, (uint8_t)n);
-    else if (n < 0x100u) { _UTByte(d, 0x81u); _UTByte(d, (uint8_t)n); }
-    else { _UTByte(d, 0x82u); _UTByte(d, (uint8_t)(n >> 8)); _UTByte(d, (uint8_t)n); }
-    _UTPut(d, v, n);
+    /* Short form length? */
+    if (vLen < 0x80u)
+    {
+        /* Yes, one length byte */
+        _UTByte(d, (uint8_t)vLen);
+    }
+    /* One byte long form length? */
+    else if (vLen < 0x100u)
+    {
+        /* Yes, 0x81 prefix */
+        _UTByte(d, 0x81u);
+        _UTByte(d, (uint8_t)vLen);
+    }
+    else
+    {
+        /* No, 0x82 prefix with two length bytes */
+        _UTByte(d, 0x82u);
+        _UTByte(d, (uint8_t)(vLen >> 8));
+        _UTByte(d, (uint8_t)vLen);
+    }
+    _UTPut(d, v, vLen);
 }
 
 /* Appends tag + length + the contents of inner. */
 static void _UTWrap(_UTDer_t *d, uint8_t tag, const _UTDer_t *inner)
 {
+    SSF_REQUIRE(d != NULL);
+    SSF_REQUIRE(inner != NULL);
+    SSF_REQUIRE(inner->len <= sizeof(inner->b));
+
     _UTTLV(d, tag, inner->b, inner->len);
 }
 
-static void _UTInt(_UTDer_t *d, uint8_t v) { _UTTLV(d, 0x02u, &v, 1u); }
+/* Appends a one byte INTEGER. */
+static void _UTInt(_UTDer_t *d, uint8_t v)
+{
+    SSF_REQUIRE(d != NULL);
+
+    _UTTLV(d, 0x02u, &v, 1u);
+}
 
 /* SEC 1 ECPrivateKey: version, scalar, optional [0] curve OID, optional [1] public key. */
 static void _UTSEC1(_UTDer_t *out, uint8_t version, const uint8_t *scalar, size_t scalarLen,
-                    const uint8_t *curveOid, size_t curveOidLen, const uint8_t *pub, size_t pubLen)
+                    const uint8_t *curveOidOpt, size_t curveOidLen, const uint8_t *pubOpt,
+                    size_t pubLen)
 {
-    _UTDer_t seq, ctx, bits;
+    _UTDer_t seq;
+    _UTDer_t ctx;
+    _UTDer_t bits;
+
+    SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE(scalar != NULL);
+
     memset(&seq, 0, sizeof(seq));
     _UTInt(&seq, version);
     _UTTLV(&seq, 0x04u, scalar, scalarLen);
-    if (curveOid != NULL)
+    /* Curve OID supplied? */
+    if (curveOidOpt != NULL)
     {
+        /* Yes, add [0] */
         memset(&ctx, 0, sizeof(ctx));
-        _UTTLV(&ctx, 0x06u, curveOid, curveOidLen);
+        _UTTLV(&ctx, 0x06u, curveOidOpt, curveOidLen);
         _UTWrap(&seq, 0xA0u, &ctx);
     }
-    if (pub != NULL)
+    /* Public key supplied? */
+    if (pubOpt != NULL)
     {
+        /* Yes, add [1] BIT STRING */
         memset(&bits, 0, sizeof(bits));
         _UTByte(&bits, 0x00u);
-        _UTPut(&bits, pub, pubLen);
+        _UTPut(&bits, pubOpt, pubLen);
         memset(&ctx, 0, sizeof(ctx));
         _UTWrap(&ctx, 0x03u, &bits);
         _UTWrap(&seq, 0xA1u, &ctx);
@@ -115,67 +172,94 @@ static void _UTSEC1(_UTDer_t *out, uint8_t version, const uint8_t *scalar, size_
     _UTWrap(out, 0x30u, &seq);
 }
 
-/* PKCS#8: version, AlgorithmIdentifier { oid, params }, OCTET STRING inner, then extra bytes  */
-/* (attributes / [1] public key) appended raw. paramsTag 0 means no parameters.               */
+/* PKCS#8: version, AlgorithmIdentifier, OCTET STRING inner, raw extra bytes; paramsTag 0 = none. */
 static void _UTPKCS8(_UTDer_t *out, uint8_t version, const uint8_t *oid, size_t oidLen,
-                     uint8_t paramsTag, const uint8_t *params, size_t paramsLen,
-                     const uint8_t *inner, size_t innerLen, const uint8_t *extra, size_t extraLen)
+                     uint8_t paramsTag, const uint8_t *paramsOpt, size_t paramsLen,
+                     const uint8_t *inner, size_t innerLen, const uint8_t *extraOpt,
+                     size_t extraLen)
 {
-    _UTDer_t seq, alg;
+    _UTDer_t seq;
+    _UTDer_t alg;
+
+    SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE(oid != NULL);
+    SSF_REQUIRE(inner != NULL);
+
     memset(&seq, 0, sizeof(seq));
     memset(&alg, 0, sizeof(alg));
     _UTInt(&seq, version);
     _UTTLV(&alg, 0x06u, oid, oidLen);
-    if (paramsTag != 0u) _UTTLV(&alg, paramsTag, params, paramsLen);
+    /* Parameters wanted? */
+    if (paramsTag != 0u) _UTTLV(&alg, paramsTag, paramsOpt, paramsLen);
     _UTWrap(&seq, 0x30u, &alg);
     _UTTLV(&seq, 0x04u, inner, innerLen);
-    if (extra != NULL) _UTPut(&seq, extra, extraLen);
+    /* Extra trailing fields supplied? */
+    if (extraOpt != NULL) _UTPut(&seq, extraOpt, extraLen);
     memset(out, 0, sizeof(*out));
     _UTWrap(out, 0x30u, &seq);
 }
 
 /* Ed25519 PKCS#8 with the given seed length and optional [1] public key. */
-static void _UTEd25519(_UTDer_t *out, uint8_t version, size_t seedLen, const uint8_t *pub,
+static void _UTEd25519(_UTDer_t *out, uint8_t version, size_t seedLen, const uint8_t *pubOpt,
                        uint8_t paramsTag)
 {
-    _UTDer_t inner, extra, bits;
+    _UTDer_t inner;
+    _UTDer_t extra;
+    _UTDer_t bits;
     uint8_t seed[40];
-    SSF_ASSERT(seedLen <= sizeof(seed));
+
+    SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE(seedLen <= sizeof(seed));
+
     memset(seed, 0x11, sizeof(seed));
     memcpy(seed, _pkEd25519Seed, (seedLen < 32u) ? seedLen : 32u);
     memset(&inner, 0, sizeof(inner));
     _UTTLV(&inner, 0x04u, seed, seedLen);
     memset(&extra, 0, sizeof(extra));
-    if (pub != NULL)
+    /* Public key supplied? */
+    if (pubOpt != NULL)
     {
+        /* Yes, add [1] */
         memset(&bits, 0, sizeof(bits));
         _UTByte(&bits, 0x00u);
-        _UTPut(&bits, pub, 32u);
+        _UTPut(&bits, pubOpt, 32u);
         _UTWrap(&extra, 0x81u, &bits);
     }
     _UTPKCS8(out, version, _utOidEd25519, sizeof(_utOidEd25519), paramsTag, NULL, 0,
-             inner.b, inner.len, (pub != NULL) ? extra.b : NULL, extra.len);
+             inner.b, inner.len, (pubOpt != NULL) ? extra.b : NULL, extra.len);
 }
 
 /* Wraps der as a PEM block with the given label. */
-static size_t _UTPem(char *out, size_t outSize, const char *label, const uint8_t *der,
+static size_t _UTPem(char *out, size_t outSize, const char *labelStr, const uint8_t *der,
                      size_t derLen)
 {
     size_t n;
     size_t b64Len;
-    n = (size_t)snprintf(out, outSize, "-----BEGIN %s-----\n", label);
-    SSF_ASSERT(SSFBase64Encode(der, derLen, &out[n], outSize - n, &b64Len));
+
+    SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE(labelStr != NULL);
+    SSF_REQUIRE(der != NULL);
+
+    n = (size_t)snprintf(out, outSize, "-----BEGIN %s-----\n", labelStr);
+    SSF_ASSERT(SSFBase64Encode(der, derLen, &out[n], (outSize - n), &b64Len));
     n += b64Len;
-    n += (size_t)snprintf(&out[n], outSize - n, "\n-----END %s-----\n", label);
+    n += (size_t)snprintf(&out[n], (outSize - n), "\n-----END %s-----\n", labelStr);
     SSF_ASSERT(n < outSize);
     return n;
 }
 
-static bool _UTAllZero(const void *p, size_t len)
+/* True if every byte of p is zero. */
+static bool _UTAllZero(const void *p, size_t pSize)
 {
     const uint8_t *b = (const uint8_t *)p;
     size_t i;
-    for (i = 0; i < len; i++) { if (b[i] != 0u) return false; }
+
+    SSF_REQUIRE(p != NULL);
+
+    for (i = 0; i < pSize; i++)
+    {
+        if (b[i] != 0u) return false;
+    }
     return true;
 }
 
@@ -183,10 +267,13 @@ static bool _UTAllZero(const void *p, size_t len)
 static void _UTRefuseDER(const uint8_t *der, size_t derLen)
 {
     SSFPKey_t key;
+
+    SSF_REQUIRE(der != NULL);
+
     memset(&key, 0xAA, sizeof(key));
     SSF_ASSERT(SSFPKeyDecodeDER(der, derLen, &key) == false);
     SSF_ASSERT(_UTAllZero(&key, sizeof(key)));
-    SSF_ASSERT(key.type == SSF_PKEY_TYPE_NONE);                 /* a wiped key is no key */
+    SSF_ASSERT(key.type == SSF_PKEY_TYPE_NONE);
 }
 
 /* Expects pem to be refused, with the key and the whole DER buffer wiped. */
@@ -194,10 +281,13 @@ static void _UTRefusePEM(const char *pem, size_t pemLen)
 {
     static uint8_t buf[2048];
     SSFPKey_t key;
+
+    SSF_REQUIRE(pem != NULL);
+
     memset(&key, 0xAA, sizeof(key));
     memset(buf, 0xAA, sizeof(buf));
     SSF_ASSERT(SSFPKeyDecodePEM(pem, pemLen, buf, sizeof(buf), &key) == false);
-    SSF_ASSERT(_UTAllZero(&key, sizeof(key)) && (key.type == SSF_PKEY_TYPE_NONE));
+    SSF_ASSERT((_UTAllZero(&key, sizeof(key))) && (key.type == SSF_PKEY_TYPE_NONE));
     SSF_ASSERT(_UTAllZero(buf, sizeof(buf)));
 }
 
@@ -209,6 +299,11 @@ static void _UTCheckEC(const SSFPKey_t *key, SSFPKeyType_t type, const uint8_t *
     uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
     size_t sigLen;
     SSFECCurve_t curve = (type == SSF_PKEY_TYPE_P256) ? SSF_EC_CURVE_P256 : SSF_EC_CURVE_P384;
+
+    SSF_REQUIRE(key != NULL);
+    SSF_REQUIRE((type == SSF_PKEY_TYPE_P256) || (type == SSF_PKEY_TYPE_P384));
+    SSF_REQUIRE(priv != NULL);
+    SSF_REQUIRE(pub != NULL);
 
     SSF_ASSERT(key->type == type);
     SSF_ASSERT((key->privLen == privLen) && (memcmp(key->priv, priv, privLen) == 0));
@@ -222,9 +317,13 @@ static void _UTCheckEC(const SSFPKey_t *key, SSFPKeyType_t type, const uint8_t *
 #endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN */
 }
 
+/* Checks an Ed25519 key decoded to the fixture and that it signs. */
 static void _UTCheckEd25519(const SSFPKey_t *key)
 {
     uint8_t sig[SSF_ED25519_SIG_SIZE];
+
+    SSF_REQUIRE(key != NULL);
+
     SSF_ASSERT(key->type == SSF_PKEY_TYPE_ED25519);
     SSF_ASSERT((key->privLen == 32u) && (memcmp(key->priv, _pkEd25519Seed, 32u) == 0));
     SSF_ASSERT((key->pubLen == 32u) && (memcmp(key->pub, _pkEd25519Pub, 32u) == 0));
@@ -232,23 +331,29 @@ static void _UTCheckEd25519(const SSFPKey_t *key)
     SSF_ASSERT(SSFEd25519Verify(_pkEd25519Pub, (const uint8_t *)"pkey", 4u, sig));
 }
 
+/* Checks an RSA key decoded to the fixture and that it signs. */
 static void _UTCheckRSA(const SSFPKey_t *key)
 {
+    SSF_REQUIRE(key != NULL);
+
 #if SSF_RSA_CONFIG_ENABLE_2048 == 1                  /* The RSA fixture is an RSA-2048 key */
-    uint8_t hash[SSF_SHA2_256_BYTE_SIZE];
-    static uint8_t sig[SSF_RSA_MAX_SIG_SIZE];
-    size_t sigLen;
-    SSF_ASSERT(key->type == SSF_PKEY_TYPE_RSA);
-    SSF_ASSERT(key->rsaDerLen == sizeof(_pkRSAPKCS1Der));
-    SSF_ASSERT(memcmp(key->rsaDer, _pkRSAPKCS1Der, sizeof(_pkRSAPKCS1Der)) == 0);
-    SSF_ASSERT((key->privLen == 0u) && (key->pubLen == 0u));
+    {
+        uint8_t hash[SSF_SHA2_256_BYTE_SIZE];
+        static uint8_t sig[SSF_RSA_MAX_SIG_SIZE];
+        size_t sigLen;
+
+        SSF_ASSERT(key->type == SSF_PKEY_TYPE_RSA);
+        SSF_ASSERT(key->rsaDerLen == sizeof(_pkRSAPKCS1Der));
+        SSF_ASSERT(memcmp(key->rsaDer, _pkRSAPKCS1Der, sizeof(_pkRSAPKCS1Der)) == 0);
+        SSF_ASSERT((key->privLen == 0u) && (key->pubLen == 0u));
 #if SSF_RSA_CONFIG_ENABLE_PSS == 1
-    SSFSHA256((const uint8_t *)"pkey", 4u, hash, sizeof(hash));
-    SSF_ASSERT(SSFRSASignPSS(key->rsaDer, key->rsaDerLen, SSF_RSA_HASH_SHA256, hash, sizeof(hash),
-                             sig, sizeof(sig), &sigLen));
-    SSF_ASSERT(SSFRSAVerifyPSS(_pkRSAPubDer, sizeof(_pkRSAPubDer), SSF_RSA_HASH_SHA256, hash,
-                               sizeof(hash), sizeof(hash), sig, sigLen));
+        SSFSHA256((const uint8_t *)"pkey", 4u, hash, sizeof(hash));
+        SSF_ASSERT(SSFRSASignPSS(key->rsaDer, key->rsaDerLen, SSF_RSA_HASH_SHA256, hash,
+                                 sizeof(hash), sig, sizeof(sig), &sigLen));
+        SSF_ASSERT(SSFRSAVerifyPSS(_pkRSAPubDer, sizeof(_pkRSAPubDer), SSF_RSA_HASH_SHA256, hash,
+                                   sizeof(hash), sizeof(hash), sig, sigLen));
 #endif /* SSF_RSA_CONFIG_ENABLE_PSS */
+    }
 #else
     (void)key;
 #endif /* SSF_RSA_CONFIG_ENABLE_2048 */
@@ -269,6 +374,7 @@ static void _UTCheckRSA(const SSFPKey_t *key)
 #define _UT_K256 SSF_PKEY_TYPE_P256, _pkP256Priv, 32u, _pkP256Pub, 65u
 #define _UT_K384 SSF_PKEY_TYPE_P384, _pkP384Priv, 48u, _pkP384Pub, 97u
 
+/* Runs the private key decoder unit tests. */
 void SSFPKeyUnitTest(void)
 {
     static uint8_t buf[2048];
@@ -305,8 +411,8 @@ void SSFPKeyUnitTest(void)
 
     /* ======== SSFPKeyWipe ======== */
     SSFPKeyWipe(&key);
-    SSF_ASSERT(_UTAllZero(&key, sizeof(key)) && (key.type == SSF_PKEY_TYPE_NONE));
-    SSF_ASSERT((int)SSF_PKEY_TYPE_NONE == 0);
+    SSF_ASSERT((_UTAllZero(&key, sizeof(key))) && (key.type == SSF_PKEY_TYPE_NONE));
+    SSF_ASSERT(((int)SSF_PKEY_TYPE_NONE) == 0);
 
     /* ======== Ed25519 v2 (OneAsymmetricKey with public key) ======== */
     _UTEd25519(&d, 1u, 32u, _pkEd25519Pub, 0u);
@@ -439,7 +545,7 @@ void SSFPKeyUnitTest(void)
                  sec1.b, sec1.len, NULL, 0);
         _UTRefuseDER(d.b, d.len);                                       /* they disagree */
         _UTPKCS8(&d, 0u, _utOidEC, sizeof(_utOidEC), 0x06u, _utOidP256, sizeof(_utOidP256),
-                 sec1.b, sec1.len - 1u, NULL, 0);
+                 sec1.b, (sec1.len - 1u), NULL, 0);
         _UTRefuseDER(d.b, d.len);                                       /* inner truncated */
     }
 
@@ -460,7 +566,7 @@ void SSFPKeyUnitTest(void)
         _UTRefuseDER(d.b, d.len);
         _UTPKCS8(&d, 1u, _utOidRSA, sizeof(_utOidRSA), 0x05u, NULL, 0, _pkRSAPKCS1Der,
                  sizeof(_pkRSAPKCS1Der), NULL, 0);
-        SSF_ASSERT(SSFPKeyDecodeDER(d.b, d.len, &key) == _UT_RSA);     /* v2 without it is fine */
+        SSF_ASSERT((SSFPKeyDecodeDER(d.b, d.len, &key)) == _UT_RSA);   /* v2 without it is fine */
     }
     _UTPKCS8(&d, 0u, _utOidRSA, sizeof(_utOidRSA), 0x05u, NULL, 0, _pkP256SEC1Der,
              sizeof(_pkP256SEC1Der), NULL, 0);
@@ -475,15 +581,15 @@ void SSFPKeyUnitTest(void)
     _UTRefuseDER(d.b, sizeof(_pkRSAPKCS1Der));
 
     /* ======== Framing: truncated, trailing bytes, garbage ======== */
-    _UTRefuseDER(_pkP256SEC1Der, sizeof(_pkP256SEC1Der) - 1u);
-    _UTRefuseDER(_pkP256PKCS8Der, sizeof(_pkP256PKCS8Der) - 1u);
-    _UTRefuseDER(_pkRSAPKCS1Der, sizeof(_pkRSAPKCS1Der) - 1u);
+    _UTRefuseDER(_pkP256SEC1Der, (sizeof(_pkP256SEC1Der) - 1u));
+    _UTRefuseDER(_pkP256PKCS8Der, (sizeof(_pkP256PKCS8Der) - 1u));
+    _UTRefuseDER(_pkRSAPKCS1Der, (sizeof(_pkRSAPKCS1Der) - 1u));
     memcpy(d.b, _pkP256SEC1Der, sizeof(_pkP256SEC1Der));
     d.b[sizeof(_pkP256SEC1Der)] = 0x00u;
-    _UTRefuseDER(d.b, sizeof(_pkP256SEC1Der) + 1u);
+    _UTRefuseDER(d.b, (sizeof(_pkP256SEC1Der) + 1u));
     memcpy(d.b, _pkEd25519PKCS8Der, sizeof(_pkEd25519PKCS8Der));
     d.b[sizeof(_pkEd25519PKCS8Der)] = 0x00u;
-    _UTRefuseDER(d.b, sizeof(_pkEd25519PKCS8Der) + 1u);
+    _UTRefuseDER(d.b, (sizeof(_pkEd25519PKCS8Der) + 1u));
     {
         static const uint8_t junk1[] = { 0x30, 0x00 };
         static const uint8_t junk2[] = { 0x30, 0x03, 0x02, 0x01, 0x00 };
@@ -513,7 +619,7 @@ void SSFPKeyUnitTest(void)
     n = _UTPem(pem, sizeof(pem), "RSA PRIVATE KEY", _pkP256SEC1Der, sizeof(_pkP256SEC1Der));
     _UTRefusePEM(pem, n);                                               /* label says PKCS#1 */
     n = _UTPem(pem, sizeof(pem), "PRIVATE KEY", _pkP256PKCS8Der, sizeof(_pkP256PKCS8Der));
-    SSF_ASSERT(SSFPKeyDecodePEM(pem, n, buf, sizeof(buf), &key) == _UT_P256); /* control */
+    SSF_ASSERT((SSFPKeyDecodePEM(pem, n, buf, sizeof(buf), &key)) == _UT_P256); /* control */
     {
         /* DER buffer too small: refused, buffer wiped */
         uint8_t small[64];
@@ -521,7 +627,7 @@ void SSFPKeyUnitTest(void)
         memset(&key, 0xAA, sizeof(key));
         SSF_ASSERT(SSFPKeyDecodePEM(_pkP256PKCS8Pem, strlen(_pkP256PKCS8Pem), small, sizeof(small),
                                     &key) == false);
-        SSF_ASSERT(_UTAllZero(small, sizeof(small)) && _UTAllZero(&key, sizeof(key)));
+        SSF_ASSERT((_UTAllZero(small, sizeof(small))) && (_UTAllZero(&key, sizeof(key))));
     }
     {
         /* A key block's DER that fails validation also wipes the buffer */

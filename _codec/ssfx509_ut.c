@@ -207,7 +207,7 @@ static const uint8_t _utCurveOid[] = {
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if a self-signed ECDSA cert is made; generates a key pair if privKey[0] == 0.    */
 /* --------------------------------------------------------------------------------------------- */
-static bool _GenTestCert(const char *cn, uint64_t notBefore, uint64_t notAfter,
+static bool _GenTestCert(const char *cnStr, uint64_t notBefore, uint64_t notAfter,
                          bool isCA, bool addBC, bool addKU, uint16_t kuBits,
                          uint8_t *certDer, uint32_t certDerSize, uint32_t *certDerLen,
                          uint8_t *privKey, uint8_t *pubKey, size_t *pubKeyLen)
@@ -220,9 +220,17 @@ static bool _GenTestCert(const char *cn, uint64_t notBefore, uint64_t notAfter,
     uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
     size_t sigLen;
 
-    /* Generate key pair if not already provided */
+    SSF_REQUIRE(cnStr != NULL);
+    SSF_REQUIRE(certDer != NULL);
+    SSF_REQUIRE(certDerLen != NULL);
+    SSF_REQUIRE(privKey != NULL);
+    SSF_REQUIRE(pubKey != NULL);
+    SSF_REQUIRE(pubKeyLen != NULL);
+
+    /* Key pair still to be generated? */
     if (privKey[0] == 0u)
     {
+        /* Yes, generate it */
         if (!SSFECDSAKeyGen(_UT_CURVE, privKey, SSF_ECDSA_MAX_PRIV_KEY_SIZE,
                             pubKey, SSF_ECDSA_MAX_PUB_KEY_SIZE, pubKeyLen)) return false;
     }
@@ -233,8 +241,8 @@ static bool _GenTestCert(const char *cn, uint64_t notBefore, uint64_t notAfter,
     params.serialLen = sizeof(serial);
     params.sigAlgOidRaw = _utSigAlgOid;
     params.sigAlgOidRawLen = sizeof(_utSigAlgOid);
-    params.issuer.cn = cn;
-    params.subject.cn = cn;
+    params.issuer.cn = cnStr;
+    params.subject.cn = cnStr;
     params.notBefore = notBefore;
     params.notAfter = notAfter;
     params.pubKeyAlgOidRaw = _utPubKeyAlgOid;
@@ -261,9 +269,9 @@ static bool _GenTestCert(const char *cn, uint64_t notBefore, uint64_t notAfter,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Helper: generate a leaf cert signed by a CA's key (issuer CN differs from subject CN).        */
+/* Returns true if a leaf cert signed by the CA key, issuer CN differing from subject, is made.  */
 /* --------------------------------------------------------------------------------------------- */
-static bool _GenSignedLeafCert(const char *leafCN, const char *issuerCN,
+static bool _GenSignedLeafCert(const char *leafCNStr, const char *issuerCNStr,
                                uint64_t notBefore, uint64_t notAfter,
                                uint8_t *certDer, uint32_t certDerSize, uint32_t *certDerLen,
                                const uint8_t *caPrivKey,
@@ -278,6 +286,14 @@ static bool _GenSignedLeafCert(const char *leafCN, const char *issuerCN,
     uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
     size_t sigLen;
 
+    SSF_REQUIRE(leafCNStr != NULL);
+    SSF_REQUIRE(issuerCNStr != NULL);
+    SSF_REQUIRE(certDer != NULL);
+    SSF_REQUIRE(certDerLen != NULL);
+    SSF_REQUIRE(caPrivKey != NULL);
+    SSF_REQUIRE(leafPubKey != NULL);
+    SSF_REQUIRE(leafPubKeyLen != NULL);
+
     /* Generate fresh key pair for the leaf */
     memset(leafPrivKey, 0, sizeof(leafPrivKey));
     if (!SSFECDSAKeyGen(_UT_CURVE, leafPrivKey, sizeof(leafPrivKey),
@@ -289,8 +305,8 @@ static bool _GenSignedLeafCert(const char *leafCN, const char *issuerCN,
     params.serialLen = sizeof(serial);
     params.sigAlgOidRaw = _utSigAlgOid;
     params.sigAlgOidRawLen = sizeof(_utSigAlgOid);
-    params.issuer.cn = issuerCN;
-    params.subject.cn = leafCN;
+    params.issuer.cn = issuerCNStr;
+    params.subject.cn = leafCNStr;
     params.notBefore = notBefore;
     params.notAfter = notAfter;
     params.pubKeyAlgOidRaw = _utPubKeyAlgOid;
@@ -323,6 +339,10 @@ static bool _GenSignedLeafCert(const char *leafCN, const char *issuerCN,
 static void _utGenBaseParams(SSFX509GenParams_t *p, const uint8_t *serial, const uint8_t *pubKey,
                              uint32_t pubKeyLen)
 {
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(serial != NULL);
+    SSF_REQUIRE(pubKey != NULL);
+
     memset(p, 0, sizeof(*p));
     p->version = 2u;
     p->serial = serial;
@@ -350,6 +370,11 @@ static void _utGenCheckConsistent(const SSFX509GenParams_t *p, const uint8_t *si
 {
     uint32_t measured;
     uint32_t written;
+
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(sig != NULL);
+    SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE(parsed != NULL);
 
     SSF_ASSERT(SSFX509EncodeTBS(NULL, 0, p, &measured) == true);
     SSF_ASSERT(SSFX509EncodeTBS(out, outSize, p, &written) == true);
@@ -379,6 +404,10 @@ static uint32_t _utSelfSign(SSFX509GenParams_t *p, uint8_t *pubKey, size_t pubKe
     uint8_t hash[32];
     uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
     size_t sigLen;
+
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(pubKey != NULL);
+    SSF_REQUIRE(out != NULL);
 
     if (!SSFECDSAKeyGen(_UT_CURVE, privKey, sizeof(privKey), pubKey, pubKeySize,
                         &pubKeyLen)) return 0;
@@ -417,6 +446,9 @@ static uint32_t _utBuildCertExts(uint32_t numExts, int32_t pathLen, bool oddDN, 
     uint32_t w;
     uint32_t i;
 
+    SSF_REQUIRE(numExts <= (SSF_X509_CONFIG_MAX_EXTENSIONS + 1u));
+    SSF_REQUIRE(out != NULL);
+
     memset(pub, 0x04u, sizeof(pub));
     memset(sig, 0x33u, sizeof(sig));
 
@@ -435,10 +467,12 @@ static uint32_t _utBuildCertExts(uint32_t numExts, int32_t pathLen, bool oddDN, 
         extsLen += w;
     }
 
-    /* Optional critical BasicConstraints { cA TRUE, pathLenConstraint } */
+    /* Critical BasicConstraints { cA TRUE, pathLenConstraint } requested? */
     if (pathLen >= 0)
     {
         static const uint8_t bcOid[] = { 0x55u, 0x1Du, 0x13u };
+
+        /* Yes, append it */
         n = 0;
         if (!SSFASN1EncBool(tmp2, sizeof(tmp2), true, &w)) return 0;
         n += w;
@@ -484,12 +518,13 @@ static uint32_t _utBuildCertExts(uint32_t numExts, int32_t pathLen, bool oddDN, 
     if (!SSFASN1EncWrap(&tbsContent[pos], sizeof(tbsContent) - pos, SSF_ASN1_TAG_SEQUENCE, tmp, n,
                         &w)) return 0;
     pos += w;
+    /* Subject with a non-string attribute value requested? */
     if (oddDN)
     {
         static const uint8_t snOid[] = { 0x55u, 0x04u, 0x05u };
         static const uint8_t cnOid[] = { 0x55u, 0x04u, 0x03u };
 
-        /* SET { SEQUENCE { serialNumber OID, INTEGER 7 } }: a non-string attribute value */
+        /* Yes, SET { SEQUENCE { serialNumber OID, INTEGER 7 } } then a commonName */
         n = 0;
         if (!SSFASN1EncOIDRaw(tmp2, sizeof(tmp2), snOid, sizeof(snOid), &w)) return 0;
         n += w;
@@ -514,6 +549,7 @@ static uint32_t _utBuildCertExts(uint32_t numExts, int32_t pathLen, bool oddDN, 
     }
     else
     {
+        /* No, empty subject */
         if (!SSFASN1EncWrap(&tbsContent[pos], sizeof(tbsContent) - pos, SSF_ASN1_TAG_SEQUENCE, tmp,
                             0u, &w)) return 0;
     }
@@ -532,8 +568,10 @@ static uint32_t _utBuildCertExts(uint32_t numExts, int32_t pathLen, bool oddDN, 
     if (!SSFASN1EncWrap(&tbsContent[pos], sizeof(tbsContent) - pos, SSF_ASN1_TAG_SEQUENCE, tmp, n,
                         &w)) return 0;
     pos += w;
+    /* Any extensions? */
     if (extsLen > 0u)
     {
+        /* Yes, wrap them in [3] */
         if (!SSFASN1EncWrap(extsSeq, sizeof(extsSeq), SSF_ASN1_TAG_SEQUENCE, exts, extsLen, &w))
             return 0;
         if (!SSFASN1EncWrap(&tbsContent[pos], sizeof(tbsContent) - pos,
@@ -569,6 +607,10 @@ static uint32_t _utSignCert(const SSFX509GenParams_t *p, const uint8_t *privKey,
     uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
     size_t sigLen;
 
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(privKey != NULL);
+    SSF_REQUIRE(out != NULL);
+
     (void)SSFX509EncodeTBS(tbs, sizeof(tbs), p, &tbsLen);
     if (tbsLen == 0u) return 0;
     SSFSHA256(tbs, tbsLen, hash, sizeof(hash));
@@ -578,20 +620,17 @@ static uint32_t _utSignCert(const SSFX509GenParams_t *p, const uint8_t *privKey,
     return certLen;
 }
 
-/* Chain verification detail: each verify call's result is checked, then poisoned so a call that */
-/* failed to write it cannot pass on a stale value.                                               */
+/* Last verify error; _UT_VERR checks it, then poisons it so a stale value cannot pass */
 static SSFX509VerifyErr_t _utVErr;
 #define _UT_VERR(_c, _i) do { \
     SSF_ASSERT(_utVErr.code == SSF_X509_VERIFY_##_c); \
     SSF_ASSERT(_utVErr.certIdx == (uint8_t)(_i)); \
-    _utVErr.code = SSF_X509_VERIFY_MAX; _utVErr.certIdx = 0xffu; } while (0)
+    _utVErr.code = SSF_X509_VERIFY_MAX; \
+    _utVErr.certIdx = 0xffu; } while (0)
 
 /* Receives lengths from encoder calls whose failure is the point of the test */
 static uint32_t _utScratchLen;
 
-/* --------------------------------------------------------------------------------------------- */
-/* Verifier trace callback: counts calls and keeps the last level, category, message and ctx.    */
-/* --------------------------------------------------------------------------------------------- */
 static uint32_t _utTraceCount;
 /* Trace checks run when tracing is compiled in; with it out the callback must never fire */
 #if SSF_TLS_CONFIG_ENABLE_TRACE == 1
@@ -605,6 +644,9 @@ static int _utTraceLastCategory;
 static void *_utTraceLastCtx;
 static char _utTraceLastMsg[256];
 
+/* --------------------------------------------------------------------------------------------- */
+/* Verifier trace callback: counts calls and keeps the last level, category, message and ctx.    */
+/* --------------------------------------------------------------------------------------------- */
 static void _utTrace(int level, int category, const char *msgStr, void *ctxOpt)
 {
     size_t n = 0;
@@ -612,6 +654,7 @@ static void _utTrace(int level, int category, const char *msgStr, void *ctxOpt)
     SSF_REQUIRE(msgStr != NULL);
 
     _utTraceCount++;
+    /* Error level trace? */
     if (level == (int)SSF_TLS_TRACE_ERROR) _utTraceErrors++;
     _utTraceLastLevel = level;
     _utTraceLastCategory = category;
@@ -644,6 +687,7 @@ static bool _utContains(const char *hayStr, const char *needleStr)
                     (hayStr[i + j] == needleStr[j]); j++)
         {
         }
+        /* Whole needle matched here? */
         if (needleStr[j] == '\0') return true;
     }
     return (needleStr[0] == '\0');
@@ -664,8 +708,10 @@ static bool _utFind(const uint8_t *buf, uint32_t bufLen, const uint8_t *pat, uin
 
     for (i = 0; (i + patLen) <= bufLen; i++)
     {
+        /* Pattern found at offset i? */
         if (memcmp(&buf[i], pat, patLen) == 0)
         {
+            /* Yes */
             *atOut = i;
             return true;
         }
@@ -673,12 +719,12 @@ static bool _utFind(const uint8_t *buf, uint32_t bufLen, const uint8_t *pat, uin
     return false;
 }
 
-/* --------------------------------------------------------------------------------------------- */
-/* Returns true if a v3 cert with optional GeneralizedTime validity and unique IDs is built.     */
-/* --------------------------------------------------------------------------------------------- */
 #define _UT_GT_NOT_BEFORE   (2524608000ull)   /* 2050-01-01T00:00:00Z */
 #define _UT_GT_NOT_AFTER    (2600000000ull)   /* 2052-05-26T... */
 
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if a v3 cert with optional GeneralizedTime validity and unique IDs is built.     */
+/* --------------------------------------------------------------------------------------------- */
 static bool _utBuildCertVariant(bool generalizedTime, bool uniqueIds, uint8_t *out,
                                 uint32_t outSize, uint32_t *lenOut)
 {
@@ -720,8 +766,10 @@ static bool _utBuildCertVariant(bool generalizedTime, bool uniqueIds, uint8_t *o
 
     /* Validity */
     n = 0;
+    /* GeneralizedTime validity requested? */
     if (generalizedTime)
     {
+        /* Yes, 2050 and later dates */
         if (!SSFASN1EncGeneralizedTime(tmp, sizeof(tmp), _UT_GT_NOT_BEFORE, &w)) return false;
         n += w;
         if (!SSFASN1EncGeneralizedTime(&tmp[n], sizeof(tmp) - n, _UT_GT_NOT_AFTER, &w))
@@ -730,6 +778,7 @@ static bool _utBuildCertVariant(bool generalizedTime, bool uniqueIds, uint8_t *o
     }
     else
     {
+        /* No, UTCTime dates */
         if (!SSFASN1EncUTCTime(tmp, sizeof(tmp), 1700000000ull, &w)) return false;
         n += w;
         if (!SSFASN1EncUTCTime(&tmp[n], sizeof(tmp) - n, 2000000000ull, &w)) return false;
@@ -758,9 +807,10 @@ static bool _utBuildCertVariant(bool generalizedTime, bool uniqueIds, uint8_t *o
                         &w)) return false;
     pos += w;
 
-    /* issuerUniqueID [1] IMPLICIT BIT STRING and subjectUniqueID [2] IMPLICIT BIT STRING */
+    /* issuerUniqueID [1] and subjectUniqueID [2] IMPLICIT BIT STRINGs requested? */
     if (uniqueIds)
     {
+        /* Yes, append both */
         if (!SSFASN1EncWrap(&tbsContent[pos], sizeof(tbsContent) - pos, 0x81u, uid, sizeof(uid),
                             &w)) return false;
         pos += w;
@@ -855,8 +905,10 @@ static uint32_t _utAppendJunk(const uint8_t *in, uint32_t inLen, const uint8_t *
     c.buf = in;
     c.bufLen = inLen;
     if (!SSFASN1DecGetTLV(&c, &tag, &val, &valLen, &next)) return 0;
+    /* Is this the element to append to? */
     if (pathLen == 0u)
     {
+        /* Yes, copy its content and append 05 00 */
         memcpy(buf, val, valLen);
         len = valLen;
         buf[len++] = 0x05u;
@@ -864,6 +916,7 @@ static uint32_t _utAppendJunk(const uint8_t *in, uint32_t inLen, const uint8_t *
     }
     else
     {
+        /* No, rebuild the children, descending into the one path names */
         child.buf = val;
         child.bufLen = valLen;
         while (!SSFASN1DecIsEmpty(&child))
@@ -876,8 +929,10 @@ static uint32_t _utAppendJunk(const uint8_t *in, uint32_t inLen, const uint8_t *
 
             if (!SSFASN1DecGetTLV(&child, &ct, &cv, &cvLen, &child)) return 0;
             childLen = (uint32_t)(child.buf - start);
+            /* Is this the child on the path? */
             if (idx == path[0])
             {
+                /* Yes, descend into it */
                 w = _utAppendJunk(start, childLen, &path[1], pathLen - 1u, &buf[len],
                                   (uint32_t)sizeof(content[0]) - len);
                 if (w == 0u) return 0;
@@ -885,6 +940,7 @@ static uint32_t _utAppendJunk(const uint8_t *in, uint32_t inLen, const uint8_t *
             }
             else
             {
+                /* No, copy it unchanged */
                 memcpy(&buf[len], start, childLen);
                 len += childLen;
             }
@@ -895,6 +951,9 @@ static uint32_t _utAppendJunk(const uint8_t *in, uint32_t inLen, const uint8_t *
     return w;
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Runs the ssfx509 unit tests.                                                                  */
+/* --------------------------------------------------------------------------------------------- */
 void SSFX509UnitTest(void)
 {
     static SSFX509Cert_t cert;
@@ -1343,9 +1402,7 @@ void SSFX509UnitTest(void)
             chain[0] = leafDer; chainLens[0] = leafDerLen;
             chain[1] = midDer;  chainLens[1] = midDerLen;
             trust[0] = midDer;  trustLens[0] = midDerLen;
-            /* A trust anchor's own Basic Constraints are not checked (ssfx509.md): mid.test as */
-            /* the anchor issues the leaf and its copy sent after it is not on the path, so all */
-            /* CA checks pass and only the last check, the host name, fails (no SAN here).      */
+            /* Anchor mid.test's own BC is unchecked, so only the host name check fails (no SAN) */
             SSF_ASSERT(SSFX509VerifyChain(chain, chainLens, 2,
                        trust, trustLens, 1, "leaf2.test", nowTime, &_utVErr) == false);
             _UT_VERR(ERR_HOSTNAME, 0u);
@@ -2223,8 +2280,7 @@ void SSFX509UnitTest(void)
         const uint8_t *trust[1] = { _utTestCertDER };
         uint32_t trustLens[1] = { sizeof(_utTestCertDER) };
 
-        /* IP hostname against DNS-only SANs -> must fail at host matching, at a time inside  */
-        /* the certificate's validity (notBefore 1775422718)                                 */
+        /* IP hostname against DNS-only SANs fails host matching (time inside validity) */
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLens, 1u,
                    trust, trustLens, 1u,
                    "192.168.1.1", 1780000000ull, &_utVErr) == false);
@@ -3669,16 +3725,14 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(edParsed.signatureLen == SSF_ED25519_SIG_SIZE);
         SSF_ASSERT(edParsed.ecCurveOidRaw == NULL);
 
-        /* Key and signature are separate questions: IsKey* test the subject public key, IsSig*  */
-        /* the algorithm the issuer signed with. Self-signed Ed25519: both Ed25519.              */
+        /* IsKey* tests the subject key, IsSig* the issuer's algorithm; self-signed: both Ed25519 */
         SSF_ASSERT(SSFX509IsKeyEd25519(&edParsed) == true);
         SSF_ASSERT(SSFX509IsSigEd25519(&edParsed) == true);
         SSF_ASSERT(SSFX509IsKeyP256(&edParsed) == false);
         SSF_ASSERT(SSFX509IsSigECDSASHA256(&edParsed) == false);
         SSF_ASSERT_TEST(SSFX509IsKeyEd25519(NULL));
 
-        /* An Ed25519 key issued by an ECDSA CA (the common server case): the key is Ed25519,  */
-        /* the signature is not. Parsing does not check the signature, so a placeholder serves. */
+        /* Ed25519 key issued by an ECDSA CA: key Ed25519, signature not (placeholder sig) */
         {
             static uint8_t mixedDer[1024];
             static SSFX509Cert_t mixed;
@@ -3802,7 +3856,7 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(certDerLen > 2048u);
         SSF_ASSERT(certDerLen <= SSF_X509_CONFIG_MAX_CERT_SIZE);
 
-        /* Parse the oversized cert and verify all SAN entries round-tripped intact.            */
+        /* Parse the oversized cert and verify all SAN entries round-tripped intact. */
         SSF_ASSERT(SSFX509Parse(certDer, certDerLen, &parsed) == true);
         SSF_ASSERT(parsed.sanLen == SSF_X509_CONFIG_MAX_SAN_ENTRIES);
         for (i = 0; i < SSF_X509_CONFIG_MAX_SAN_ENTRIES; i++)
@@ -4112,11 +4166,11 @@ void SSFX509UnitTest(void)
         /* id-ce-subjectAltName: 2.5.29.17 */
         static const uint8_t _sanOid[] = { 0x55u, 0x1Du, 0x11u };
 
-        /* Minimal empty BasicConstraints value: OCTET STRING content is an empty SEQUENCE.      */
+        /* Minimal empty BasicConstraints value: OCTET STRING content is an empty SEQUENCE. */
         static const uint8_t _bcEmptyVal[] = { 0x30u, 0x00u };
-        /* Minimal Key Usage value: BIT STRING with unused=0 and one zero byte.                  */
+        /* Minimal Key Usage value: BIT STRING with unused=0 and one zero byte. */
         static const uint8_t _kuVal[] = { 0x03u, 0x02u, 0x00u, 0x00u };
-        /* Minimal SAN value: SEQUENCE containing one [2] IMPLICIT IA5String "x".               */
+        /* Minimal SAN value: SEQUENCE containing one [2] IMPLICIT IA5String "x". */
         static const uint8_t _sanVal[] = { 0x30u, 0x03u, 0x82u, 0x01u, 0x78u };
 
         static uint8_t privKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
@@ -4489,7 +4543,7 @@ void SSFX509UnitTest(void)
         /* Negative: partial-label wildcard; the leftmost label must be exactly "*" */
         _WC_CASE("foo*.example.com", "foobar.example.com", false, ERR_HOSTNAME, 0u);
 
-        /* Negative: wildcard not in leftmost position - "foo.*.example.com" is invalid.        */
+        /* Negative: wildcard not in leftmost position - "foo.*.example.com" is invalid. */
         _WC_CASE("foo.*.example.com", "foo.bar.example.com", false, ERR_HOSTNAME, 0u);
 
         /* Known limitation: "*.co.uk" matches "foo.co.uk" (no Public Suffix List) */
@@ -4578,7 +4632,7 @@ void SSFX509UnitTest(void)
         /* 64 bytes: SHA-512 keyIdentifier, the maximum supported */
         _KID_ROUND_TRIP(64u);
 
-        /* Over-limit: 65-byte AKID/SKID. Encoder must refuse (return 0) rather than overflow.  */
+        /* Over-limit: 65-byte AKID/SKID. Encoder must refuse (return 0) rather than overflow. */
         {
             static SSFX509GenParams_t p;
             static uint8_t tbsDer[512];
@@ -4849,8 +4903,7 @@ void SSFX509UnitTest(void)
         _utGenBaseParams(&p, serial, bigKey, 65u);
         _utGenCheckConsistent(&p, fakeSig, 64u, out, sizeof(out), &parsed);
 
-        /* COV-10: every extension and DN attribute set; each encoder refuses every short */
-        /* buffer, 0 .. len - 1, and writes nothing past the size it was given.             */
+        /* COV-10: all extensions/DN set; every short buffer is refused with nothing past size */
         {
             static const uint8_t sanIp[] = { 192u, 168u, 1u, 1u };
             static const uint8_t *sanIps[] = { sanIp, NULL };
@@ -4892,9 +4945,10 @@ void SSFX509UnitTest(void)
                 p.addNameConstraints = true;
                 p.ncPermittedDNS = ncDns; p.ncPermittedIPs = ncIps;
                 p.ncExcludedDNS = ncExDns; p.ncExcludedIPs = ncExIps;
+                /* RSA-shaped pass? */
                 if (pass == 1u)
                 {
-                    /* RSA-shaped: no curve OID, sha256WithRSA with explicit NULL parameters */
+                    /* Yes, no curve OID, sha256WithRSA with explicit NULL parameters */
                     p.pubKeyAlgOidRaw = rsaOid; p.pubKeyAlgOidRawLen = sizeof(rsaOid);
                     p.ecCurveOidRaw = NULL; p.ecCurveOidRawLen = 0u;
                     p.sigAlgOidRaw = rsaSha256Oid; p.sigAlgOidRawLen = sizeof(rsaSha256Oid);
@@ -4927,8 +4981,7 @@ void SSFX509UnitTest(void)
             p.notBefore = UINT64_MAX;
             SSF_ASSERT(SSFX509EncodeTBS(out, sizeof(out), &p, &w) == false);
 
-            /* Each DN attribute one past its RFC 5280 upper bound is refused (C 2, ST/L 128, */
-            /* O/OU 64), and so is a Name Constraints dNSName past 253                        */
+            /* DN attributes past RFC 5280 bounds (C 2, ST/L 128, O/OU 64), NC dNSName > 253 */
             {
                 static char over129[130];
                 static char over254[255];
@@ -6533,13 +6586,16 @@ void SSFX509UnitTest(void)
             p.isCA = true;
             p.addKeyUsage = true;
             p.keyUsageBits = SSF_X509_KU_KEY_CERT_SIGN;
+            /* 8-byte excluded subtree CA? */
             if (ca == 0u)
             {
+                /* Yes, exclude 192.168.0.0/16 */
                 p.addNameConstraints = true;
                 p.ncExcludedIPs = exclIPs;
             }
             else
             {
+                /* No, raw Name Constraints with a 7-byte excluded subtree */
                 p.addRawExt = true;
                 p.rawExtOid = ncOid; p.rawExtOidLen = sizeof(ncOid);
                 p.rawExtValue = ncExcl7; p.rawExtValueLen = sizeof(ncExcl7);
@@ -6559,22 +6615,26 @@ void SSFX509UnitTest(void)
             SSF_ASSERT(leafLen != 0u);
             chain[0] = leafOut;
             chainLen[0] = leafLen;
+            /* 8-byte excluded subtree CA? */
             if (ca == 0u)
             {
+                /* Yes, 10.0.0.1 is outside 192.168/16 */
                 SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, trust, trustLen, 1u, "10.0.0.1",
                                               1800000000ull, &_utVErr) == true);
                 _UT_VERR(OK, 0u);
             }
             else
             {
+                /* No, the 7-byte subtree is refused */
                 SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, trust, trustLen, 1u, "10.0.0.1",
                                               1800000000ull, &_utVErr) == false);
                 _UT_VERR(ERR_NAME_CONSTRAINTS, 0u);
             }
 
-            /* A 5-byte iPAddress SAN: an IPv4 exclusion cannot rule it out, so it is refused */
+            /* 8-byte excluded subtree CA? */
             if (ca == 0u)
             {
+                /* Yes, a 5-byte iPAddress SAN cannot be ruled out by it, so it is refused */
                 _utGenBaseParams(&p, serial, leafPub, (uint32_t)leafPubLen);
                 p.issuer.cn = "ca";
                 p.subject.cn = "leaf";
@@ -6829,8 +6889,7 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(n != 0u);
         SSF_ASSERT(SSFX509Parse(out, n, &parsed) == false);
 
-        /* A CA whose Basic Constraints body is malformed cannot issue: on the path below a root */
-        /* (a trust anchor's own Basic Constraints are not checked), the chain is rejected        */
+        /* A CA with a malformed Basic Constraints body below a root cannot issue */
         SSF_ASSERT(_utMakeCA("root", serial, bcRootPriv, bcRootPub, &bcRootPubLen, bcRootOut,
                              sizeof(bcRootOut), &bcRootLen) == true);
         SSF_ASSERT(SSFECDSAKeyGen(_UT_CURVE, caPriv, sizeof(caPriv), caPub, sizeof(caPub),
@@ -7300,8 +7359,7 @@ void SSFX509UnitTest(void)
                                       1800000000ull, &_utVErr) == false);
         _UT_VERR(ERR_HOSTNAME, 0u);
 
-        /* SSF is IPv4 only, but a certificate may also list an IPv6 address: it parses and    */
-        /* still verifies by its DNS name; the IPv6 address itself never matches.              */
+        /* A cert also listing an IPv6 address parses and verifies by DNS; IPv6 never matches */
         p.rawExtValue = sanDnsV6;
         p.rawExtValueLen = sizeof(sanDnsV6);
         n = _utSelfSign(&p, pubKey, sizeof(pubKey), out, sizeof(out));
@@ -7454,8 +7512,10 @@ void SSFX509UnitTest(void)
             _utGenBaseParams(&p, serial, pub[idx], (uint32_t)pubLen[idx]);
             p.issuer.cn = (k == SSF_X509_CONFIG_MAX_CHAIN_DEPTH) ? "root" : cn[k];
             p.subject.cn = cn[idx];
+            /* CA on the chain? */
             if (idx > 0u)
             {
+                /* Yes, cA and keyCertSign */
                 p.addBasicConstraints = true;
                 p.isCA = true;
                 p.addKeyUsage = true;
@@ -7463,6 +7523,7 @@ void SSFX509UnitTest(void)
             }
             else
             {
+                /* No, the leaf with its SAN */
                 p.sanDNSNames = sanDeep;
             }
             len = _utSignCert(&p, (k == SSF_X509_CONFIG_MAX_CHAIN_DEPTH) ? rootPriv : priv[k],
@@ -7488,8 +7549,7 @@ void SSFX509UnitTest(void)
         _UT_VERR(ERR_UNKNOWN_CA, SSF_X509_CONFIG_MAX_CHAIN_DEPTH - 2u);
     }
 
-    /* ---- Path building (RFC 8446 4.4.2): extraneous certificates and any order after the  ---- */
-    /* ---- leaf; the path ends at the first certificate a trust anchor issued              ---- */
+    /* ---- Path building (RFC 8446 4.4.2): extras, any order after leaf, ends at anchor ---- */
     {
         enum { R_ROOT, R_OLD, R_OTHER, R_INT1, R_INT2, R_INT2W, R_LEAF, R_CROSS, R_CROSSX, R_JUNK,
                R_LA, R_LB, R_LEAFL, R_INT2S, R_INT2WS, R_LEAFK, R_INT2N, R_INT2KU, R_INT1P0,
@@ -7569,7 +7629,7 @@ void SSFX509UnitTest(void)
         _UT_PATH_CERT(R_CROSSX, "root", "old", R_OLD, R_ROOT, false);    /* ... and expired */
         _UT_PATH_CERT(R_JUNK, "junk", "other", R_OTHER, R_JUNK, false);  /* Unknown critical ext */
         _UT_PATH_CERT(R_LA, "la", "lb", R_LB, R_LA, false);              /* la and lb issue each */
-        _UT_PATH_CERT(R_LB, "lb", "la", R_LA, R_LB, false);              /* other: a loop        */
+        _UT_PATH_CERT(R_LB, "lb", "la", R_LA, R_LB, false);              /* other: a loop */
         _UT_PATH_CERT(R_LEAFL, "leaf", "la", R_LA, R_LEAFL, true);
         _UT_PATH_CERT(R_INT2S, "int2", "int1", R_INT1, R_INT2, false);   /* SKID AA */
         _UT_PATH_CERT(R_INT2WS, "int2", "int1", R_INT1, R_INT2W, false); /* SKID BB, other key */
@@ -7615,8 +7675,7 @@ void SSFX509UnitTest(void)
         _UT_PATH(false, ERR_KEY_ID_MISMATCH, 0u, R_LEAFK, R_INT2WS, R_INT1); /* Key id rules out */
         _UT_PATH(true, OK, 0u, R_LEAF, R_BAD, R_INT2, R_INT1);              /* Unparsable extra */
 
-        /* Checks after the path is built name the right certificate when the chain is sent out */
-        /* of order behind an unused one, so its chain index is not its place on the path        */
+        /* Post-build checks name the chain index, not the path position, of an out-of-order cert */
         _UT_PATH(false, ERR_NOT_CA, 3u, R_LEAF, R_OTHER, R_INT1, R_INT2N);
         _UT_PATH(false, ERR_CA_KEY_USAGE, 3u, R_LEAF, R_OTHER, R_INT1, R_INT2KU);
         _UT_PATH(false, ERR_PATH_LEN, 1u, R_LEAF, R_INT1P0, R_OTHER, R_INT2);
@@ -7725,8 +7784,7 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "evil.com",
                                       1800000000ull, &_utVErr) == false); _UT_VERR(ERR_PARSE, 0u);
 
-        /* Within capacity with the excluded name first: the leaf parses, and the anchor's      */
-        /* constraint rejects it whatever hostname is asked                                     */
+        /* Excluded name first within capacity: leaf parses, anchor constraint rejects any host */
         sans[0] = "evil.com";
         sans[SSF_X509_CONFIG_MAX_SAN_ENTRIES] = NULL;            /* Exactly MAX_SAN_ENTRIES */
         leafLen = _utSignCert(&p, caPriv, leafOut, sizeof(leafOut));

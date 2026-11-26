@@ -148,14 +148,20 @@ other big-integer libraries.
 
 ## [↑](#ssfbn--multi-precision-big-number-arithmetic) Configuration
 
-Options live in [`_opt/ssfbn_opt.h`](../_opt/ssfbn_opt.h). The single knob caps the limb
-storage callers can request; pick the smallest width that accommodates the largest modulus
-you will operate on.
+Options live in [`_opt/ssfbn_opt.h`](../_opt/ssfbn_opt.h). `SSF_BN_CONFIG_MAX_BITS` caps the
+limb storage callers can request; pick the smallest width that accommodates the largest modulus
+you will operate on. To override either auto-derived value, define it to a multiple of 32 (the
+limb width) in `_opt/ssfbn_opt.h`; for example, an out-of-tree consumer with a 1024-bit modulus
+and no algorithm flags enabled sets `SSF_BN_CONFIG_MAX_BITS` to `(1024u)` and
+`SSF_BN_MAX_MOD_LIMBS` to `(32u)`. Per-algorithm static asserts in `ssfbn.h` plus a runtime
+`SSF_REQUIRE` in `SSFBNModExpMont` catch a too-small override.
 
 | Macro | Default | Description |
 |-------|---------|-------------|
 | <a id="ssf-bn-config-max-bits"></a>`SSF_BN_CONFIG_MAX_BITS` | auto | Maximum big-number width in bits. **Auto-derived in `ssfbn.h`** as `2 × largest enabled operand` from [`SSF_EC_CONFIG_ENABLE_P256/P384`](ssfec.md#configuration) and [`SSF_RSA_CONFIG_ENABLE_2048/3072/4096`](ssfrsa.md#configuration). The doubling is mandatory: multiplication produces a `2N`-limb intermediate, and `SSFBNMul` / `SSFBNModMul` / `SSFBNModMulNIST` / `SSFBNModInvExt` all gate on `2N <= MAX_LIMBS`. Resulting values: `512` for P-256-only, `768` for P-256+P-384, `4096` for RSA-2048, `6144` for RSA-3072, `8192` for RSA-4096 — the maximum across all enabled algorithms wins; `256` when none is enabled. Override in [`_opt/ssfbn_opt.h`](../_opt/ssfbn_opt.h) only when an out-of-tree consumer needs a wider cap; the in-tree consumers self-size correctly. |
 | <a id="ssf-bn-max-mod-limbs"></a>`SSF_BN_MAX_MOD_LIMBS` | `(SSF_BN_MAX_LIMBS + 1) / 2` | Upper bound on `SSFBNMont_t::len` — the cap needed to hold a Montgomery residue (mod `m`). The `2N` derivation of `SSF_BN_CONFIG_MAX_BITS` makes `MAX_LIMBS / 2` exactly the largest possible modulus for any enabled algorithm; per-algo static asserts in `ssfbn.h` enforce this. [`SSFBNMontInit`](#montinit) rejects a wider modulus (`SSF_REQUIRE`), so every Montgomery buffer is sized at this width: [`SSFBNModExpMont`](#modexpmont)'s 16-entry window table and residue locals, the `SSFBNMontMul` / `SSFBNMontSquare` scratch, the `SSFBNModExp` / `SSFBNModExpPub` contexts, `SSFBNMontConvertOut` and `SSFBNIsProbablePrime` (OPTIMIZE RSA-STK). Sizing them at `SSF_BN_MAX_LIMBS` would double their stack without ever using the extra capacity. Override in [`_opt/ssfbn_opt.h`](../_opt/ssfbn_opt.h) only when pinning `SSF_BN_CONFIG_MAX_BITS` to a non-`2N` value (no algorithm flags enabled, or an out-of-tree modulus wider than `MAX_LIMBS / 2`). |
+| <a id="ssf-bn-karatsuba-threshold-opt"></a>`SSF_BN_KARATSUBA_THRESHOLD` | `32` | `SSFBNMul` limb count at or above which same-length, even-length operands take one-level Karatsuba; schoolbook is used below. Both code paths always link; the threshold only steers the runtime dispatch. The default is the RSA-1024 boundary; the `SSF_CRYPT_PROFILE_MAX_PERF` profile lowers it to `16` so RSA-2048 multiplies enter Karatsuba sooner. Must be `>= 4` (compile-time `#error` otherwise). |
+| <a id="ssf-bn-modexp-win-k"></a>`SSF_BN_MODEXP_WIN_K` | `4` | `SSFBNModExp` fixed-window size in bits, `1` to `8` (compile-time `#error` otherwise). The constant-time Montgomery exponentiation precomputes a `2^k`-entry table of Montgomery powers, then squares and multiplies through the exponent in `k`-bit windows; the top window may be partial. Each step of `k` halves or doubles the stack-resident table. Measured for RSA at the 4096 cap (Cortex-M4 `-Os` stack; host `-O2` time, RSA-2048 / 4096 sign): `k = 2`: keygen peak -6.2 KB, sign peak -1.1 KB, sign +16 to +19%; `k = 3` (`SSF_CRYPT_PROFILE_MIN_MEMORY`): keygen peak -4.2 KB, sign peak -1.1 KB, sign +5%; `k = 4`: the default; `k = 5` (`SSF_CRYPT_PROFILE_MAX_PERF`): keygen peak +8.3 KB, sign peak +4.2 KB, sign 0 to -3%. |
 
 The `SSFBN_t` struct itself is small (a pointer plus two `uint16_t` fields); the actual
 limb storage lives in whatever array the caller supplies. Dropping `SSF_BN_CONFIG_MAX_BITS`

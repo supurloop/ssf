@@ -48,17 +48,13 @@
 #include "ssfnet.h"
 #include "ssfpem.h"
 
-/* Max SNI hostname length (RFC 1035 DNS FQDN is 255 characters). Used to
-   bound reads from caller-supplied hostname pointers via SSFStrLen. */
+/* Max SNI hostname length (RFC 1035 DNS FQDN is 255 characters) */
 #define SSF_TLSC_MAX_HOSTNAME_LEN (255u)
 
-/* Largest fragment a compliant peer can send with the offered suites: a 2^14 + 1 byte           */
-/* TLSInnerPlaintext (RFC 8446 5.4) plus the 16-byte AEAD tag. Anything longer is the peer's      */
-/* record_overflow; anything longer than this build's buffers but within it is internal_error.  */
+/* Largest protected fragment a peer may send: 2^14 + 1 TLSInnerPlaintext plus the AEAD tag */
 #define SSF_TLSC_RFC_MAX_CIPHERTEXT (16384u + 1u + SSF_TLS_AEAD_TAG_SIZE)
 
-/* record_size_limit (RFC 8449 4): extension 28, a uint16 TLSInnerPlaintext limit (content,      */
-/* content type and padding), 64..2^14+1 in TLS 1.3.                                             */
+/* record_size_limit extension (RFC 8449 4): a TLSInnerPlaintext limit of 64..2^14+1 */
 #define SSF_TLSC_EXT_RECORD_SIZE_LIMIT (28u)
 #define SSF_TLSC_RSL_MIN (64u)
 /* signature_algorithms_cert (RFC 8446 4.2.3): schemes for signatures in certificates */
@@ -70,16 +66,12 @@
 #define SSF_TLSC_EMPTY_CERT_LEN (8u)
 #define SSF_TLSC_RSL_MAX (16384u + 1u)
 
-/* The chain limit is the verifier's, SSF_X509_CONFIG_MAX_CHAIN_DEPTH; the separate TLS option is */
-/* gone, so a build still setting it is told rather than silently given a different limit.     */
+/* The certificate chain limit is SSF_X509_CONFIG_MAX_CHAIN_DEPTH */
 #ifdef SSF_TLS_CONFIG_MAX_CHAIN_DEPTH
-#error SSF_TLS_CONFIG_MAX_CHAIN_DEPTH is removed; ssftlsc uses SSF_X509_CONFIG_MAX_CHAIN_DEPTH.
+#error SSF_TLS_CONFIG_MAX_CHAIN_DEPTH is not supported; ssftlsc uses SSF_X509_CONFIG_MAX_CHAIN_DEPTH.
 #endif
 
-/* The handshake scratch must hold each phase's largest content: the largest ClientHello1      */
-/* (255-byte host name, full ALPN list), the largest supported server key (RSA public key DER   */
-/* at SSF_RSA_MAX_KEY_BITS; EC and Ed25519 keys are smaller), and the largest client flight    */
-/* (an RSA signature at SSF_RSA_MAX_KEY_BITS in a CertificateVerify, then a SHA-384 Finished). */
+/* The handshake scratch must hold the largest ClientHello, server key and client flight */
 #if SSF_RSA_MAX_PUB_KEY_DER_SIZE > SSF_TLSC_CH_SIZE
 #error SSF_TLSC_CH_SIZE is too small for the largest supported server RSA key.
 #endif
@@ -87,22 +79,20 @@
 #error SSF_TLSC_CH_SIZE is too small for an RSA CertificateVerify and Finished (mutual TLS).
 #endif
 #if (SSF_TLSC_CH1_MAX_NO_ALPN + 6u + SSF_TLS_CONFIG_MAX_ALPN_LEN) > SSF_TLSC_CH_SIZE
-#error SSF_TLS_CONFIG_MAX_ALPN_LEN must be at most 219: a larger ALPN list may not fit the ClientHello.
+#error SSF_TLS_CONFIG_MAX_ALPN_LEN must be at most 219 for the ClientHello to fit.
 #endif
 
-/* Which curves and RSA paddings this build has. A group or signature scheme is advertised,     */
-/* accepted and used only when its primitive is compiled in, so a reduced configuration offers  */
-/* less instead of failing at run time.                                                         */
+/* Advertise, accept and use only the curves and RSA paddings compiled into this build */
 #define _SSF_TLSC_P256 (SSF_EC_CONFIG_ENABLE_P256 == 1)
 #define _SSF_TLSC_P384 (SSF_EC_CONFIG_ENABLE_P384 == 1)
 #define _SSF_TLSC_ECDSA_SIGN (SSF_ECDSA_CONFIG_ENABLE_SIGN == 1)
 #define _SSF_TLSC_PSS ((SSF_RSA_ANY_ENABLED == 1) && (SSF_RSA_CONFIG_ENABLE_PSS == 1))
 #define _SSF_TLSC_PKCS1 ((SSF_RSA_ANY_ENABLED == 1) && (SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1))
 
-/* Secret scrubbing. _SSF_TLSC_SCRUB wipes a secret at the end of its life; unit-test builds     */
-/* then report the buffer to _SSFTLSCScrubTestHook so a test can confirm the wipe happened.      */
+/* Secret scrubbing; unit-test builds report each wipe to _SSFTLSCScrubTestHook */
 #if SSF_CONFIG_TLSC_UNIT_TEST == 1
-void (*_SSFTLSCScrubTestHook)(void *ctx, const char *what, const void *buf, size_t len) = NULL;
+void (*_SSFTLSCScrubTestHook)(void *ctx, const char *whatStr, const void *buf,
+                             size_t bufLen) = NULL;
 void *_SSFTLSCScrubTestHookCtx = NULL;
 #define _SSF_TLSC_SCRUB_REPORT(what, buf, len) do { if (_SSFTLSCScrubTestHook != NULL) { \
     _SSFTLSCScrubTestHook(_SSFTLSCScrubTestHookCtx, (what), (buf), (len)); } } while (0)
@@ -126,49 +116,54 @@ static const uint8_t *_utInjectCH2;
 static size_t _utInjectCH2Len;
 static const uint8_t *_utInjectEC;
 
-/* Test hook: flips a bit of the received server Finished verify_data, as a peer whose Finished */
-/* is wrong would send. Records are AEAD protected, so no on-path party can produce this.       */
+/* Test hook: flips a bit of the received server Finished verify_data */
 bool _ssfTLSCUTCorruptServerFinished;
 #endif
 
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: binary encoding helpers (big-endian)                                                */
 /* --------------------------------------------------------------------------------------------- */
-static size_t _Put16(uint8_t *buf, uint16_t v)
+static size_t _SSFTLSCPut16(uint8_t *buf, uint16_t v)
 { buf[0] = (uint8_t)(v >> 8); buf[1] = (uint8_t)v; return 2; }
-static size_t _Put24(uint8_t *buf, uint32_t v)
+static size_t _SSFTLSCPut24(uint8_t *buf, uint32_t v)
 { buf[0] = (uint8_t)(v >> 16); buf[1] = (uint8_t)(v >> 8); buf[2] = (uint8_t)v; return 3; }
 
-static uint16_t _Get16(const uint8_t *buf) { return ((uint16_t)buf[0] << 8) | buf[1]; }
-static uint32_t _Get24(const uint8_t *buf)
-{ return ((uint32_t)buf[0] << 16) | ((uint32_t)buf[1] << 8) | buf[2]; }
+static uint16_t _SSFTLSCGet16(const uint8_t *buf)
+{ return (uint16_t)((((uint16_t)buf[0]) << 8) | ((uint16_t)buf[1])); }
+static uint32_t _SSFTLSCGet24(const uint8_t *buf)
+{ return (((uint32_t)buf[0]) << 16) | (((uint32_t)buf[1]) << 8) | ((uint32_t)buf[2]); }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: platform entropy                                                                    */
 /* --------------------------------------------------------------------------------------------- */
-static bool _GetEntropy(uint8_t *buf, size_t len)
+static bool _SSFTLSCGetEntropy(uint8_t *buf, size_t len)
 {
+    SSF_REQUIRE(buf != NULL);
+
     if (len > 0xffffu) return false;
     return SSFPortGetEntropy(buf, (uint16_t)len);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: inner transport adapters used by the record layer. Each issues one send() or recv()  */
-/* on the inner transport and returns at once. SUCCESS means the full count moved; WANT_WRITE /   */
-/* WANT_READ means partial or no progress with the transport still usable; ERROR means it failed  */
-/* or the peer closed (peerClosed is then set).                                                  */
+/* Internal: one send() on the inner transport; SUCCESS only once all of len has moved           */
 /* --------------------------------------------------------------------------------------------- */
-static SSFTLSIOResult_t _InnerSendOnce(SSFTLSCSession_t *s, const uint8_t *data, size_t len,
-                                       size_t *sentOut)
+static SSFTLSIOResult_t _SSFTLSCInnerSendOnce(SSFTLSCSession_t *s, const uint8_t *data, size_t len,
+                                              size_t *sentOut)
 {
     size_t sent = 0;
     SSFNetIOResult_t r;
 
+    SSF_REQUIRE(s != NULL);
+    SSF_REQUIRE((data != NULL) || (len == 0u));
+    SSF_REQUIRE(sentOut != NULL);
+
     *sentOut = 0;
     if (len == 0) return SSF_TLS_IO_SUCCESS;
     r = s->inner->send(s->inner, data, len, &sent);
+    /* Did the inner transport accept bytes? */
     if (r == SSF_NET_IO_SUCCESS)
     {
+        /* Yes, report how many */
         *sentOut = sent;
         return (sent == len) ? SSF_TLS_IO_SUCCESS : SSF_TLS_IO_WANT_WRITE;
     }
@@ -178,17 +173,26 @@ static SSFTLSIOResult_t _InnerSendOnce(SSFTLSCSession_t *s, const uint8_t *data,
     return SSF_TLS_IO_ERROR;
 }
 
-static SSFTLSIOResult_t _InnerRecvOnce(SSFTLSCSession_t *s, uint8_t *data, size_t len,
-                                       size_t *recvdOut)
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: one recv() on the inner transport; SUCCESS only once all of len has arrived         */
+/* --------------------------------------------------------------------------------------------- */
+static SSFTLSIOResult_t _SSFTLSCInnerRecvOnce(SSFTLSCSession_t *s, uint8_t *data, size_t len,
+                                              size_t *recvdOut)
 {
     size_t got = 0;
     SSFNetIOResult_t r;
 
+    SSF_REQUIRE(s != NULL);
+    SSF_REQUIRE((data != NULL) || (len == 0u));
+    SSF_REQUIRE(recvdOut != NULL);
+
     *recvdOut = 0;
     if (len == 0) return SSF_TLS_IO_SUCCESS;
     r = s->inner->recv(s->inner, data, len, &got);
+    /* Did the inner transport deliver bytes? */
     if (r == SSF_NET_IO_SUCCESS)
     {
+        /* Yes, report how many */
         *recvdOut = got;
         return (got == len) ? SSF_TLS_IO_SUCCESS : SSF_TLS_IO_WANT_READ;
     }
@@ -199,18 +203,20 @@ static SSFTLSIOResult_t _InnerRecvOnce(SSFTLSCSession_t *s, uint8_t *data, size_
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: continues writing the record in ioCtx.sendRecordBuf. SUCCESS once it is all out (or */
-/* none was pending), WANT_WRITE if some remains, ERROR on transport failure.                    */
+/* Internal: continues writing the pending record; WANT_WRITE while some of it remains           */
 /* --------------------------------------------------------------------------------------------- */
-static SSFTLSIOResult_t _SendPending(SSFTLSCSession_t *s)
+static SSFTLSIOResult_t _SSFTLSCSendPending(SSFTLSCSession_t *s)
 {
-    SSFTLSCIOCtx_t *io = &s->ioCtx;
+    SSFTLSCIOCtx_t *io;
+
+    SSF_REQUIRE(s != NULL);
+    io = &s->ioCtx;
 
     while (io->sendPending && (io->sendPos < io->sendTotal))
     {
         size_t sent = 0;
-        SSFTLSIOResult_t r = _InnerSendOnce(s, &io->sendRecordBuf[io->sendPos],
-                                            io->sendTotal - io->sendPos, &sent);
+        SSFTLSIOResult_t r = _SSFTLSCInnerSendOnce(s, &io->sendRecordBuf[io->sendPos],
+                                                   io->sendTotal - io->sendPos, &sent);
         io->sendPos += sent;
         if (r == SSF_TLS_IO_ERROR) { io->sendPending = false; return SSF_TLS_IO_ERROR; }
         if (io->sendPos < io->sendTotal) return SSF_TLS_IO_WANT_WRITE;
@@ -222,33 +228,37 @@ static SSFTLSIOResult_t _SendPending(SSFTLSCSession_t *s)
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: installs traffic keys in a record state, de-initializing any keys it already holds. */
 /* --------------------------------------------------------------------------------------------- */
-static void _RecordStateSet(SSFTLSCSession_t *s, SSFTLSRecordState_t *state, bool *inited,
-                            const uint8_t *key, const uint8_t *iv)
+static void _SSFTLSCRecordStateSet(SSFTLSCSession_t *s, SSFTLSRecordState_t *state, bool *inited,
+                                   const uint8_t *key, const uint8_t *iv)
 {
+    SSF_REQUIRE(s != NULL);
+    SSF_REQUIRE(state != NULL);
+    SSF_REQUIRE(inited != NULL);
+    SSF_REQUIRE(key != NULL);
+    SSF_REQUIRE(iv != NULL);
+
     if (*inited) SSFTLSRecordStateDeInit(state);
     SSFTLSRecordStateInit(state, s->cipherSuite, key, s->keyLen, iv, SSF_TLS_IV_SIZE);
     *inited = true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Resumable record helpers. They use _InnerSendOnce / _InnerRecvOnce and keep partial progress  */
-/* in session->ioCtx (sendRecordBuf/sendPending/sendPos/sendTotal for sends; hdr/hdrPos/          */
-/* hdrComplete/fragLen/fragPos for receives). On WANT_READ / WANT_WRITE they keep that state and  */
-/* return, so the next call resumes mid-record.                                                  */
+/* Internal: sends a plaintext record, resuming a partly written one                             */
 /* --------------------------------------------------------------------------------------------- */
-
-/* Send a plaintext record — resumable. */
-static SSFTLSIOResult_t _SendPlainRecordOnce(SSFTLSCSession_t *s, uint8_t ct,
-                                             const uint8_t *data, size_t len)
+static SSFTLSIOResult_t _SSFTLSCSendPlainRecordOnce(SSFTLSCSession_t *s, uint8_t ct,
+                                                    const uint8_t *data, size_t len)
 {
-    SSFTLSCIOCtx_t *io = &s->ioCtx;
+    SSFTLSCIOCtx_t *io;
 
-    /* First call for this record: frame header + data in send buffer. */
+    SSF_REQUIRE(s != NULL);
+    SSF_REQUIRE((data != NULL) || (len == 0u));
+    io = &s->ioCtx;
+
+    /* Is this the first call for this record? */
     if (!io->sendPending)
     {
-        /* Cannot fire: the largest plaintext record is the ClientHello, at most SSF_TLSC_CH_SIZE, */
-        /* and SSF_TLSC_CONFIG_MAX_SEND_RECORD is at least that (ssftlsc.h).                   */
-        if ((size_t)5u + len > sizeof(io->sendRecordBuf)) return SSF_TLS_IO_ERROR;
+        /* Yes, frame the header and data in the send buffer */
+        if (((size_t)5u + len) > sizeof(io->sendRecordBuf)) return SSF_TLS_IO_ERROR;
         io->sendRecordBuf[0] = ct;
         io->sendRecordBuf[1] = 0x03u; io->sendRecordBuf[2] = 0x03u;
         io->sendRecordBuf[3] = (uint8_t)((len >> 8) & 0xFFu);
@@ -259,20 +269,27 @@ static SSFTLSIOResult_t _SendPlainRecordOnce(SSFTLSCSession_t *s, uint8_t ct,
         io->sendPending = true;
     }
 
-    /* On WANT_WRITE sendPending/sendPos are kept so the next call resumes. */
-    return _SendPending(s);
+    return _SSFTLSCSendPending(s);
 }
 
-/* Send an encrypted record — resumable. */
-static SSFTLSIOResult_t _SendEncRecordOnce(SSFTLSCSession_t *s, uint8_t ct,
-                                           const uint8_t *data, size_t len)
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: sends an encrypted record, resuming a partly written one                            */
+/* --------------------------------------------------------------------------------------------- */
+static SSFTLSIOResult_t _SSFTLSCSendEncRecordOnce(SSFTLSCSession_t *s, uint8_t ct,
+                                                  const uint8_t *data, size_t len)
 {
-    SSFTLSCIOCtx_t *io = &s->ioCtx;
+    SSFTLSCIOCtx_t *io;
 
-    /* First call: encrypt once into sendRecordBuf. */
+    SSF_REQUIRE(s != NULL);
+    SSF_REQUIRE((data != NULL) || (len == 0u));
+    io = &s->ioCtx;
+
+    /* Is this the first call for this record? */
     if (!io->sendPending)
     {
+        /* Yes, encrypt it once into the send buffer */
         size_t recordLen;
+
         if (!SSFTLSRecordEncrypt(&s->sendState, ct, data, len,
                                  io->sendRecordBuf, sizeof(io->sendRecordBuf), &recordLen))
             return SSF_TLS_IO_ERROR;
@@ -281,47 +298,50 @@ static SSFTLSIOResult_t _SendEncRecordOnce(SSFTLSCSession_t *s, uint8_t ct,
         io->sendPending = true;
     }
 
-    return _SendPending(s);
+    return _SSFTLSCSendPending(s);
 }
 
-/* Receive one record: the header into ioCtx.hdr, the fragment straight to pt, where a protected */
-/* record is decrypted in place. pt has ptSize bytes of room for plaintext and, behind them,     */
-/* SSF_TLS_AEAD_TAG_SIZE more for a tag. Resumable across partial reads: a resumed call must    */
-/* pass the same pt.                                                                             */
-/* Partial state lives in io->hdrPos/hdrComplete/fragLen/fragPos; on SUCCESS or ERROR the        */
-/* state resets so the next call starts a fresh record.                                           */
-static SSFTLSIOResult_t _RecvRecordOnce(SSFTLSCSession_t *s, uint8_t *pt, size_t ptSize,
-                                        size_t *ptLen, uint8_t *contentType)
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: receives one record to pt, decrypting a protected one in place; resumable           */
+/* --------------------------------------------------------------------------------------------- */
+static SSFTLSIOResult_t _SSFTLSCRecvRecordOnce(SSFTLSCSession_t *s, uint8_t *pt, size_t ptSize,
+                                               size_t *ptLen, uint8_t *contentType)
 {
-    SSFTLSCIOCtx_t *io = &s->ioCtx;
+    SSFTLSCIOCtx_t *io;
 
-    /* Read 5-byte header (resumable). */
+    SSF_REQUIRE(s != NULL);
+    SSF_REQUIRE(pt != NULL);
+    SSF_REQUIRE(ptLen != NULL);
+    SSF_REQUIRE(contentType != NULL);
+    io = &s->ioCtx;
+
+    /* Read the 5-byte header, resumable */
     while (!io->hdrComplete)
     {
         size_t recvd = 0;
-        SSFTLSIOResult_t r = _InnerRecvOnce(s, &io->hdr[io->hdrPos],
-                                          (size_t)SSF_TLS_RECORD_HEADER_SIZE - io->hdrPos,
-                                          &recvd);
+        SSFTLSIOResult_t r = _SSFTLSCInnerRecvOnce(s, &io->hdr[io->hdrPos],
+                                                   ((size_t)SSF_TLS_RECORD_HEADER_SIZE) -
+                                                   io->hdrPos, &recvd);
         io->hdrPos += recvd;
+        /* Did the header read fail? */
         if (r == SSF_TLS_IO_ERROR)
         {
+            /* Yes, reset the receive state */
             SSF_TLS_TRACE_REC_ERROR(&s->trace, "RecvRecord: header read failed");
             io->hdrPos = 0; io->hdrComplete = false; io->fragPos = 0; io->fragLen = 0;
             return SSF_TLS_IO_ERROR;
         }
+        /* Is the header complete? */
         if (io->hdrPos >= SSF_TLS_RECORD_HEADER_SIZE)
         {
+            /* Yes, judge it before reading the fragment */
             io->hdrComplete = true;
-            io->fragLen = _Get16(&io->hdr[3]);
+            io->fragLen = _SSFTLSCGet16(&io->hdr[3]);
             io->fragPos = 0;
             SSF_TLS_TRACE_REC_DEBUG(&s->trace,
                                     "RecvRecord: ct=%u ver=0x%04x fragLen=%u",
-                                    io->hdr[0], _Get16(&io->hdr[1]), io->fragLen);
-            /* Judge the header before reading the fragment: an unknown content type is        */
-            /* unexpected_message (RFC 8446 5); a length over the RFC maximum is record_overflow */
-            /* (5.1, 5.2: 2^14 for a plaintext record, 2^14 + 1 + the 16-byte tag of every      */
-            /* suite offered for a protected one, whose TLSInnerPlaintext is at most 2^14 + 1). */
-            /* A legal length over this build's buffer is this client's limit: internal_error. */
+                                    io->hdr[0], _SSFTLSCGet16(&io->hdr[1]), io->fragLen);
+            /* Is the content type unknown (RFC 8446 5)? */
             if ((io->hdr[0] < SSF_TLS_CT_CHANGE_CIPHER) ||
                 (io->hdr[0] > SSF_TLS_CT_APPLICATION))
             {
@@ -330,11 +350,7 @@ static SSFTLSIOResult_t _RecvRecordOnce(SSFTLSCSession_t *s, uint8_t *pt, size_t
                 io->hdrPos = 0; io->hdrComplete = false; io->fragPos = 0; io->fragLen = 0;
                 _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_UNEXPECTED_MSG); return SSF_TLS_IO_ERROR;
             }
-            /* The type for the moment, before the size, so a record of the wrong type is      */
-            /* unexpected_message whatever its length (RFC 8446 5, 5.2): change_cipher_spec only */
-            /* during the handshake and of one byte; before keys handshake and alert only;    */
-            /* once keys are active application_data outside only (a plaintext handshake or   */
-            /* alert record was not sent by the peer: an injected message or forged close).  */
+            /* Is the content type wrong for this point of the connection (RFC 8446 5, 5.2)? */
             if ((io->hdr[0] == SSF_TLS_CT_CHANGE_CIPHER) ?
                 (s->connected || (io->fragLen != 1u)) :
                 (s->recvEncrypted != (io->hdr[0] == SSF_TLS_CT_APPLICATION)))
@@ -344,14 +360,12 @@ static SSFTLSIOResult_t _RecvRecordOnce(SSFTLSCSession_t *s, uint8_t *pt, size_t
                 io->hdrPos = 0; io->hdrComplete = false; io->fragPos = 0; io->fragLen = 0;
                 _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_UNEXPECTED_MSG); return SSF_TLS_IO_ERROR;
             }
-            if (io->fragLen > SSF_TLSC_CONFIG_MAX_RECV_RECORD + 1u + SSF_TLS_AEAD_TAG_SIZE)
+            /* Is the fragment larger than this build's receive record? */
+            if (io->fragLen > (SSF_TLSC_CONFIG_MAX_RECV_RECORD + 1u + SSF_TLS_AEAD_TAG_SIZE))
             {
+                /* Yes, record_overflow if over the RFC or advertised limit, else internal_error */
                 SSF_TLS_TRACE_REC_ERROR(&s->trace, "RecvRecord: fragment too large (%u)",
                                         io->fragLen);
-                /* Over the RFC maximum (2^14 for a plaintext record, 5.1), or (protected, once */
-                /* the server accepted our record_size_limit) over the limit advertised: the    */
-                /* peer's record_overflow (RFC 8449 4). Otherwise a legal record larger than    */
-                /* this build's buffer. Protected records always say application_data outside.  */
                 _SSF_TLSC_ALERT(s, ((io->fragLen > SSF_TLSC_RFC_MAX_CIPHERTEXT) ||
                                     ((io->hdr[0] != SSF_TLS_CT_APPLICATION) ?
                                      (io->fragLen > 16384u) : (s->peerRecordLimit != 0u))) ?
@@ -359,30 +373,28 @@ static SSFTLSIOResult_t _RecvRecordOnce(SSFTLSCSession_t *s, uint8_t *pt, size_t
                 io->hdrPos = 0; io->hdrComplete = false; io->fragPos = 0; io->fragLen = 0;
                 return SSF_TLS_IO_ERROR;
             }
-            /* The fragment is read straight to pt, so it must fit before a byte is read. A    */
-            /* plaintext record over 2^14 is the peer's error (RFC 8446 5.1). A plaintext       */
-            /* record, or a protected one's plaintext, beyond the room offered (during          */
-            /* reassembly, what is left of hsBuf) is this build's limit; a protected record's  */
-            /* tag goes in the room behind. (A one-byte change_cipher_spec always fits: hsBuf   */
-            /* never fills with a message still incomplete.)                                    */
+            /* Does the fragment fit the room offered at pt? */
             {
                 uint8_t alert = 0;
 
+                /* Is the record protected? */
                 if (s->recvEncrypted)
                 {
+                    /* Yes, its plaintext must fit; the tag goes in the room behind */
                     if (((size_t)io->fragLen > SSF_TLS_AEAD_TAG_SIZE) &&
                         (((size_t)io->fragLen - SSF_TLS_AEAD_TAG_SIZE) > ptSize))
                     { alert = SSF_TLS_ALERT_INTERNAL_ERROR; }
                 }
                 else if (io->fragLen > 16384u)
                 {
-                    /* The peer's error, not this build's limit */
+                    /* No, and a plaintext record over 2^14 is the peer's error */
                     SSF_TLS_TRACE_REC_ERROR(&s->trace, "RecvRecord: plaintext record of %u "
                                             "bytes", io->fragLen);
                     alert = SSF_TLS_ALERT_RECORD_OVERFLOW;
                 }
                 else if ((size_t)io->fragLen > ptSize) { alert = SSF_TLS_ALERT_INTERNAL_ERROR; }
                 else { /* Fits */ }
+                /* Is the record over this build's limit? */
                 if (alert == SSF_TLS_ALERT_INTERNAL_ERROR)
                 {
                     SSF_TLS_TRACE_REC_ERROR(&s->trace, "RecvRecord: %u bytes do not fit (%zu "
@@ -397,19 +409,19 @@ static SSFTLSIOResult_t _RecvRecordOnce(SSFTLSCSession_t *s, uint8_t *pt, size_t
             io->fragDst = pt;
             break;
         }
-        /* Partial header — resume next call. */
+        /* No, resume the partial header next call */
         return SSF_TLS_IO_WANT_READ;
     }
 
-    /* Read fragment bytes straight to pt (resumable). Nothing may move pt while a fragment is  */
-    /* part read: reassembly compacts hsBuf only between records.                                */
+    /* Read the fragment straight to pt, resumable; pt must not move mid-fragment */
     SSF_ASSERT(pt == io->fragDst);
     while (io->fragPos < io->fragLen)
     {
         size_t recvd = 0;
-        SSFTLSIOResult_t r = _InnerRecvOnce(s, &pt[io->fragPos], io->fragLen - io->fragPos,
-                                            &recvd);
+        SSFTLSIOResult_t r = _SSFTLSCInnerRecvOnce(s, &pt[io->fragPos], io->fragLen - io->fragPos,
+                                                   &recvd);
         io->fragPos += recvd;
+        /* Did the fragment read fail? */
         if (r == SSF_TLS_IO_ERROR)
         {
             SSF_TLS_TRACE_REC_ERROR(&s->trace, "RecvRecord: fragment read failed");
@@ -420,18 +432,17 @@ static SSFTLSIOResult_t _RecvRecordOnce(SSFTLSCSession_t *s, uint8_t *pt, size_t
         return SSF_TLS_IO_WANT_READ;
     }
 
-    /* Record complete — dispatch. Reset the receive state; the header stays in ioCtx.hdr as  */
-    /* the AEAD additional data until the next record overwrites it.                           */
+    /* Record complete; the header stays in ioCtx.hdr as the AEAD additional data */
     {
         uint8_t hdr_ct = io->hdr[0];
         uint16_t fragLen = io->fragLen;
+
         io->hdrPos = 0; io->hdrComplete = false; io->fragPos = 0;
 
-        /* RFC 8446 5: a plaintext change_cipher_spec of the single byte 0x01 may arrive after   */
-        /* ClientHello and before the peer's Finished, and is dropped by the caller. Its time   */
-        /* and length were judged at the header; any other value is unexpected_message.         */
+        /* Is it a plaintext change_cipher_spec (RFC 8446 5)? */
         if (hdr_ct == SSF_TLS_CT_CHANGE_CIPHER)
         {
+            /* Yes, only the single byte 0x01 is allowed; the caller drops it */
             if (pt[0] != 0x01u)
             {
                 SSF_TLS_TRACE_REC_ERROR(&s->trace, "RecvRecord: unexpected change_cipher_spec");
@@ -442,22 +453,21 @@ static SSFTLSIOResult_t _RecvRecordOnce(SSFTLSCSession_t *s, uint8_t *pt, size_t
             return SSF_TLS_IO_SUCCESS;
         }
 
+        /* Is the record protected? */
         if (s->recvEncrypted)
         {
+            /* Yes, decrypt it in place */
             bool ok;
-
-            /* Outer type application_data and size: judged at the header (RFC 8446 5.2). The */
-            /* fragment is at pt: decrypt it in place.                                          */
             ok = SSFTLSRecordDecrypt(&s->recvState, io->hdr, pt, (size_t)fragLen, pt, ptSize,
                                      ptLen, contentType);
+            /* Did decryption fail? */
             if (!ok)
             {
                 SSF_TLS_TRACE_REC_ERROR(&s->trace, "RecordDecrypt failed (fragLen=%u seq=%llu)",
                                         fragLen, (unsigned long long)s->recvState.seqNum);
                 _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_BAD_RECORD_MAC); return SSF_TLS_IO_ERROR;
             }
-            /* RFC 8446 5: a protected change_cipher_spec, or any unknown inner type, is        */
-            /* unexpected_message.                                                              */
+            /* Is the inner type change_cipher_spec or unknown (RFC 8446 5)? */
             if ((*contentType != SSF_TLS_CT_HANDSHAKE) && (*contentType != SSF_TLS_CT_ALERT) &&
                 (*contentType != SSF_TLS_CT_APPLICATION))
             {
@@ -468,58 +478,70 @@ static SSFTLSIOResult_t _RecvRecordOnce(SSFTLSCSession_t *s, uint8_t *pt, size_t
         }
         else
         {
-            /* Before keys: handshake or alert, type and size judged at the header; the        */
-            /* plaintext is already at pt                                                       */
+            /* No, the plaintext is already at pt */
             *contentType = hdr_ct;
             *ptLen = fragLen;
         }
 
-        /* RFC 8446 5.1 / 6: handshake records are never empty; an alert record holds exactly   */
-        /* one two-byte alert.                                                                   */
+        /* Is it an empty handshake record (RFC 8446 5.1)? */
         if ((*contentType == SSF_TLS_CT_HANDSHAKE) && (*ptLen == 0u))
         {
             SSF_TLS_TRACE_REC_ERROR(&s->trace, "RecvRecord: empty handshake record");
             _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_DECODE_ERROR); return SSF_TLS_IO_ERROR;
         }
+        /* Is it an alert, which must hold exactly one two-byte alert (RFC 8446 6)? */
         if (*contentType == SSF_TLS_CT_ALERT)
         {
+            /* Yes, record which alert ended the connection */
             if (*ptLen != 2u)
             {
                 SSF_TLS_TRACE_REC_ERROR(&s->trace, "RecvRecord: alert length %zu", *ptLen);
                 _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_DECODE_ERROR); return SSF_TLS_IO_ERROR;
             }
             SSF_TLS_TRACE_ALERT(&s->trace, "RecvRecord: ALERT level=%u desc=%u", pt[0], pt[1]);
+            /* Did the server require a client certificate? */
             if (pt[1] == SSF_TLS_ALERT_CERTIFICATE_REQUIRED)
             {
+                /* Yes, say so */
                 SSF_TLS_TRACE_HS_ERROR(&s->trace, "Server requires a client certificate "
                                        "(certificate_required); none is configured");
             }
+            /* Did the server require an ALPN protocol not offered? */
             if (pt[1] == SSF_TLS_ALERT_NO_APPLICATION_PROTOCOL)
             {
+                /* Yes, say so */
                 SSF_TLS_TRACE_HS_ERROR(&s->trace, "Server requires an ALPN protocol the client "
                                        "did not offer (no_application_protocol)");
             }
-            /* close_notify is answered with close_notify; any other alert ends the connection */
-            /* without a reply (RFC 8446 6.1, 6.2).                                             */
+            /* Is it close_notify (RFC 8446 6.1, 6.2)? */
             if (pt[1] == SSF_TLS_ALERT_CLOSE_NOTIFY)
             {
+                /* Yes, it is answered with close_notify */
                 s->peerCloseNotify = true;
                 s->peerClosed = true;
             }
-            else s->peerAlerted = true;
+            else
+            {
+                /* No, any other alert ends the connection without a reply */
+                s->peerAlerted = true;
+            }
         }
         return SSF_TLS_IO_SUCCESS;
     }
 }
 
-/* Receive one handshake message, reassembled in place in hsBuf from as many records as it takes */
-/* (RFC 8446 5.1) — resumable. The message is returned in place and stays valid until the next */
-/* call, which may move the unread bytes to the front of hsBuf: callers finish with a message, */
-/* including any crypto step that reads it, before receiving the next. addToTranscript false   */
-/* leaves the transcript to the caller (ServerHello / HelloRetryRequest).                      */
-static SSFTLSIOResult_t _RecvHandshakeOnce(SSFTLSCSession_t *s, const uint8_t **msgOut,
-                                           size_t *bodyLen, uint8_t *hsType, bool addToTranscript)
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: receives one handshake message, reassembled in place in hsBuf; resumable            */
+/* --------------------------------------------------------------------------------------------- */
+static SSFTLSIOResult_t _SSFTLSCRecvHandshakeOnce(SSFTLSCSession_t *s, const uint8_t **msgOut,
+                                                  size_t *bodyLen, uint8_t *hsType,
+                                                  bool addToTranscript)
 {
+    SSF_REQUIRE(s != NULL);
+    SSF_REQUIRE(msgOut != NULL);
+    SSF_REQUIRE(bodyLen != NULL);
+    SSF_REQUIRE(hsType != NULL);
+
     for (;;)
     {
         size_t avail = s->hsBufLen - s->hsBufPos;
@@ -527,24 +549,26 @@ static SSFTLSIOResult_t _RecvHandshakeOnce(SSFTLSCSession_t *s, const uint8_t **
         size_t ptLen = 0;
         SSFTLSIOResult_t r;
 
-        /* A whole message buffered? */
+        /* Is a message header buffered? */
         if (avail >= 4u)
         {
-            size_t msgLen = (size_t)_Get24(&s->hsBuf[s->hsBufPos + 1u]);
-            /* hsBuf holds a record's plaintext; a protected record's also holds its inner   */
-            /* content type, so a protected message can be at most one byte less             */
+            /* Yes, a protected record's inner content type leaves one byte less for a message */
+            size_t msgLen = (size_t)_SSFTLSCGet24(&s->hsBuf[s->hsBufPos + 1u]);
             size_t msgMax = SSF_TLSC_HSBUF_SIZE - (s->recvEncrypted ? 1u : 0u);
 
+            /* Is the message larger than this build's buffer? */
             if ((4u + msgLen) > msgMax)
             {
                 SSF_TLS_TRACE_HS_ERROR(&s->trace, "Handshake message of %lu bytes exceeds the "
                                        "%lu-byte buffer", (unsigned long)(4u + msgLen),
                                        (unsigned long)msgMax);
-                _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_INTERNAL_ERROR);     /* This build's limit */
+                _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_INTERNAL_ERROR);
                 return SSF_TLS_IO_ERROR;
             }
+            /* Is the whole message buffered? */
             if (avail >= (4u + msgLen))
             {
+                /* Yes, return it in place */
                 *hsType = s->hsBuf[s->hsBufPos];
                 *msgOut = &s->hsBuf[s->hsBufPos];
                 *bodyLen = msgLen;
@@ -554,19 +578,18 @@ static SSFTLSIOResult_t _RecvHandshakeOnce(SSFTLSCSession_t *s, const uint8_t **
             }
         }
 
-        /* No: move the unread bytes to the front, then append the next record's plaintext. */
+        /* No, move the unread bytes to the front, then append the next record's plaintext */
         if (s->hsBufPos > 0u)
         {
             if (avail > 0u) memmove(s->hsBuf, &s->hsBuf[s->hsBufPos], avail);
             s->hsBufPos = 0;
             s->hsBufLen = avail;
         }
-        r = _RecvRecordOnce(s, &s->hsBuf[s->hsBufLen], SSF_TLSC_HSBUF_SIZE - s->hsBufLen, &ptLen,
-                            &ct);
+        r = _SSFTLSCRecvRecordOnce(s, &s->hsBuf[s->hsBufLen], SSF_TLSC_HSBUF_SIZE - s->hsBufLen,
+                                   &ptLen, &ct);
         if (r != SSF_TLS_IO_SUCCESS) return r;
 
-        /* A compatibility CCS may come between messages, never inside one: fragments of a     */
-        /* message MUST NOT be interleaved with other records (RFC 8446 5.1).                 */
+        /* Is it a compatibility CCS, never allowed inside a fragmented message (RFC 8446 5.1)? */
         if (ct == SSF_TLS_CT_CHANGE_CIPHER)
         {
             if (avail == 0u) continue;
@@ -575,8 +598,10 @@ static SSFTLSIOResult_t _RecvHandshakeOnce(SSFTLSCSession_t *s, const uint8_t **
             _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_UNEXPECTED_MSG);
             return SSF_TLS_IO_ERROR;
         }
+        /* Is it other than a handshake record? */
         if (ct != SSF_TLS_CT_HANDSHAKE)
         {
+            /* Yes, an alert ends the handshake; anything else is unexpected */
             if (ct != SSF_TLS_CT_ALERT) _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_UNEXPECTED_MSG);
             return SSF_TLS_IO_ERROR;
         }
@@ -585,22 +610,23 @@ static SSFTLSIOResult_t _RecvHandshakeOnce(SSFTLSCSession_t *s, const uint8_t **
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: true if the record holding the last message ended with it. A message that ends a   */
-/* key epoch (ServerHello, HelloRetryRequest, server Finished) must also end its record: the    */
-/* next bytes are under different keys (RFC 8446 5.1).                                          */
+/* Internal: true if the last message ended its record, as one ending a key epoch must          */
 /* --------------------------------------------------------------------------------------------- */
-static bool _HandshakeAtRecordEnd(SSFTLSCSession_t *s, const char *what)
+static bool _SSFTLSCHandshakeAtRecordEnd(SSFTLSCSession_t *s, const char *whatStr)
 {
+    SSF_REQUIRE(s != NULL);
+    SSF_REQUIRE(whatStr != NULL);
+
     if (s->hsBufPos == s->hsBufLen) return true;
-    SSF_TLS_TRACE_HS_ERROR(&s->trace, "%s does not end its record (spans a key change)", what);
+    SSF_TLS_TRACE_HS_ERROR(&s->trace, "%s does not end its record (spans a key change)", whatStr);
     _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_UNEXPECTED_MSG);
     return false;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: returns true if host is a literal IP address (no SNI may name it).                  */
+/* Internal: returns true if hostStr is a literal IP address (no SNI may name it).               */
 /* --------------------------------------------------------------------------------------------- */
-static bool _IsIPLiteral(const char *host)
+static bool _SSFTLSCIsIPLiteral(const char *hostStr)
 {
     size_t len = 0;
     size_t i;
@@ -608,14 +634,14 @@ static bool _IsIPLiteral(const char *host)
     uint32_t digits = 0;
     uint32_t value = 0;
     bool hasColon = false;
+    SSF_REQUIRE(hostStr != NULL);
 
-    if (!SSFStrLen(host, SSF_TLSC_MAX_HOST_SIZE, &len) || (len == 0u)) return false;
+    if (!SSFStrLen(hostStr, SSF_TLSC_MAX_HOST_SIZE, &len) || (len == 0u)) return false;
 
-    /* IPv6: a DNS name never contains ':'. Hex digits, ':' and '.' (embedded IPv4), then an    */
-    /* optional "%zone" suffix.                                                                  */
-    for (i = 0; (i < len) && (host[i] != '%'); i++)
+    /* IPv6: hex digits, ':' and '.' (embedded IPv4) with at least one ':', then "%zone" */
+    for (i = 0; (i < len) && (hostStr[i] != '%'); i++)
     {
-        char c = host[i];
+        char c = hostStr[i];
 
         if (c == ':') { hasColon = true; continue; }
         if (!(((c >= '0') && (c <= '9')) || ((c >= 'a') && (c <= 'f')) ||
@@ -624,23 +650,30 @@ static bool _IsIPLiteral(const char *host)
     }
     if (hasColon) return true;
 
-    /* IPv4: exactly four dot-separated decimal parts of 1-3 digits, each at most 255. */
+    /* IPv4: exactly four dot-separated decimal parts of 1-3 digits, each at most 255 */
     for (i = 0; i <= len; i++)
     {
-        char c = (i < len) ? host[i] : '.';
+        char c = (i < len) ? hostStr[i] : '.';
 
+        /* Is it a digit? */
         if ((c >= '0') && (c <= '9'))
         {
+            /* Yes, accumulate the part's value */
             if (++digits > 3u) return false;
             value = (value * 10u) + (uint32_t)(c - '0');
         }
         else if ((c == '.') && (digits > 0u) && (value <= 255u))
         {
+            /* No, a dot ends a valid part */
             parts++;
             digits = 0;
             value = 0;
         }
-        else return false;
+        else
+        {
+            /* No, anything else is not an IPv4 literal */
+            return false;
+        }
     }
     return (parts == 4u);
 }
@@ -648,10 +681,9 @@ static bool _IsIPLiteral(const char *host)
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: returns true if a CertificateVerify scheme can be made with the leaf's key type.    */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SchemeMatchesKey(uint16_t scheme, SSFTLSCLeafKey_t key)
+static bool _SSFTLSCSchemeMatchesKey(uint16_t scheme, SSFTLSCLeafKey_t key)
 {
-    /* RFC 8446 4.2.3: the ECDSA schemes also fix the curve; rsa_pss_rsae_* need an           */
-    /* rsaEncryption key. A scheme whose primitive is compiled out matches no key.             */
+    /* The ECDSA schemes also fix the curve; a scheme compiled out matches no key */
     switch (scheme)
     {
 #if _SSF_TLSC_P256
@@ -672,7 +704,7 @@ static bool _SchemeMatchesKey(uint16_t scheme, SSFTLSCLeafKey_t key)
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: returns true if the client can sign a CertificateVerify with scheme and key type.   */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SchemeCanSign(uint16_t scheme, SSFTLSCLeafKey_t key)
+static bool _SSFTLSCSchemeCanSign(uint16_t scheme, SSFTLSCLeafKey_t key)
 {
     /* Is it an ECDSA scheme in a build without ECDSA signing? */
     if (((scheme == SSF_TLS_SIG_ECDSA_SECP256R1_SHA256) ||
@@ -682,14 +714,16 @@ static bool _SchemeCanSign(uint16_t scheme, SSFTLSCLeafKey_t key)
         return false;
     }
     /* No */
-    return _SchemeMatchesKey(scheme, key);
+    return _SSFTLSCSchemeMatchesKey(scheme, key);
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: returns the key type of a parsed certificate (its subject public key).              */
 /* --------------------------------------------------------------------------------------------- */
-static SSFTLSCLeafKey_t _LeafKeyType(const SSFX509Cert_t *cert)
+static SSFTLSCLeafKey_t _SSFTLSCLeafKeyType(const SSFX509Cert_t *cert)
 {
+    SSF_REQUIRE(cert != NULL);
+
     if (SSFX509IsKeyRSA(cert)) return SSF_TLSC_LEAF_KEY_RSA;
     if (SSFX509IsKeyP256(cert)) return SSF_TLSC_LEAF_KEY_P256;
     if (SSFX509IsKeyP384(cert)) return SSF_TLSC_LEAF_KEY_P384;
@@ -697,8 +731,10 @@ static SSFTLSCLeafKey_t _LeafKeyType(const SSFX509Cert_t *cert)
     return SSF_TLSC_LEAF_KEY_UNKNOWN;
 }
 
-/* Maps a private key type to the leaf key type its certificate carries (UNKNOWN for none). */
-static SSFTLSCLeafKey_t _PKeyLeafType(SSFPKeyType_t type)
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: maps a private key type to the leaf key type its certificate carries.               */
+/* --------------------------------------------------------------------------------------------- */
+static SSFTLSCLeafKey_t _SSFTLSCPKeyLeafType(SSFPKeyType_t type)
 {
     switch (type)
     {
@@ -711,19 +747,19 @@ static SSFTLSCLeafKey_t _PKeyLeafType(SSFPKeyType_t type)
 }
 
 #if SSF_CONFIG_TLSC_UNIT_TEST == 1
-bool _SSFTLSCIsIPLiteralForTest(const char *host) { return _IsIPLiteral(host); }
-static bool _SaveLeafKey(SSFTLSCSession_t *session, const uint8_t *der, uint32_t derLen);
-static uint8_t _ChainAlert(SSFX509VerifyCode_t code);
+bool _SSFTLSCIsIPLiteralForTest(const char *hostStr) { return _SSFTLSCIsIPLiteral(hostStr); }
+static bool _SSFTLSCSaveLeafKey(SSFTLSCSession_t *session, const uint8_t *der, uint32_t derLen);
+static uint8_t _SSFTLSCChainAlert(SSFX509VerifyCode_t code);
 
-uint8_t _SSFTLSCChainAlertForTest(SSFX509VerifyCode_t code) { return _ChainAlert(code); }
+uint8_t _SSFTLSCChainAlertForTest(SSFX509VerifyCode_t code) { return _SSFTLSCChainAlert(code); }
 bool _SSFTLSCSaveLeafKeyForTest(SSFTLSCSession_t *session, const uint8_t *der, uint32_t derLen)
 {
-    return _SaveLeafKey(session, der, derLen);
+    return _SSFTLSCSaveLeafKey(session, der, derLen);
 }
 
 bool _SSFTLSCSchemeMatchesKeyForTest(uint16_t scheme, SSFTLSCLeafKey_t key)
 {
-    return _SchemeMatchesKey(scheme, key);
+    return _SSFTLSCSchemeMatchesKey(scheme, key);
 }
 #endif /* SSF_CONFIG_TLSC_UNIT_TEST */
 
@@ -738,27 +774,37 @@ typedef struct
     bool ok;
 } SSFTLSCWriter_t;
 
-static void _WBytes(SSFTLSCWriter_t *w, const void *data, size_t len)
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: appends bytes to a bounded writer                                                   */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFTLSCWBytes(SSFTLSCWriter_t *w, const void *data, size_t len)
 {
     if ((w->ok == false) || (len > (w->cap - w->pos))) { w->ok = false; return; }
     if (len > 0u) memcpy(&w->buf[w->pos], data, len);
     w->pos += len;
 }
-static void _W8(SSFTLSCWriter_t *w, uint8_t v) { _WBytes(w, &v, 1); }
-static void _W16(SSFTLSCWriter_t *w, uint16_t v)
+
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: appends a byte to a bounded writer                                                  */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFTLSCW8(SSFTLSCWriter_t *w, uint8_t v) { _SSFTLSCWBytes(w, &v, 1); }
+
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: appends a big-endian uint16 to a bounded writer                                     */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFTLSCW16(SSFTLSCWriter_t *w, uint16_t v)
 {
     uint8_t b[2];
 
     b[0] = (uint8_t)(v >> 8);
     b[1] = (uint8_t)v;
-    _WBytes(w, b, sizeof(b));
+    _SSFTLSCWBytes(w, b, sizeof(b));
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: returns the length of an ALPN protocol name, 1..255, or 0 if NULL, empty or longer   */
-/* (RFC 7301 3.1: ProtocolName<1..2^8-1>).                                                       */
+/* Internal: returns the length of ALPN name, 1..255, or 0 if NULL, empty or longer (RFC 7301)   */
 /* --------------------------------------------------------------------------------------------- */
-static size_t _AlpnLen(const char *name)
+static size_t _SSFTLSCAlpnLen(const char *name)
 {
     size_t len;
 
@@ -766,7 +812,7 @@ static size_t _AlpnLen(const char *name)
     return len;
 }
 
-/* One key share for _BuildClientHello(). */
+/* One key share for _SSFTLSCBuildClientHello() */
 typedef struct
 {
     uint16_t group;
@@ -775,14 +821,12 @@ typedef struct
 } SSFTLSCKeyShare_t;
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: builds the ClientHello into s->hsScratch.clientHello; the only builder, so ClientHello1 and */
-/* ClientHello2 cannot drift apart. ClientHello2 passes ClientHello1's random and session id, the */
-/* one share the HelloRetryRequest asked for, and its cookie extension_data, which is all RFC     */
-/* 8446 4.1.2 lets change. Returns false if the message does not fit.                            */
+/* Internal: builds ClientHello1 or ClientHello2 into s->hsScratch.clientHello                   */
 /* --------------------------------------------------------------------------------------------- */
-static bool _BuildClientHello(SSFTLSCSession_t *s, const uint8_t random[32], const uint8_t *sid,
-                              uint8_t sidLen, const SSFTLSCKeyShare_t *shares, uint8_t shareCount,
-                              const uint8_t *cookieExtOpt, uint16_t cookieExtLen)
+static bool _SSFTLSCBuildClientHello(SSFTLSCSession_t *s, const uint8_t random[32],
+                                     const uint8_t *sid, uint8_t sidLen,
+                                     const SSFTLSCKeyShare_t *shares, uint8_t shareCount,
+                                     const uint8_t *cookieExtOpt, uint16_t cookieExtLen)
 {
     SSFTLSCWriter_t w;
     size_t extLenPos;
@@ -790,7 +834,11 @@ static bool _BuildClientHello(SSFTLSCSession_t *s, const uint8_t random[32], con
     size_t hostLen = 0;
     uint8_t i;
 
+    SSF_REQUIRE(s != NULL);
+    SSF_REQUIRE(random != NULL);
+    SSF_REQUIRE((sid != NULL) || (sidLen == 0u));
     SSF_REQUIRE(sidLen <= 32u);
+    SSF_REQUIRE((shares != NULL) || (shareCount == 0u));
     SSF_REQUIRE((cookieExtOpt != NULL) || (cookieExtLen == 0u));
     for (i = 0; i < shareCount; i++) ksLen += 4u + shares[i].len;
     (void)SSFStrLen(s->host, sizeof(s->host), &hostLen);     /* Validated by open() */
@@ -800,120 +848,117 @@ static bool _BuildClientHello(SSFTLSCSession_t *s, const uint8_t random[32], con
     w.pos = 0;
     w.ok = true;
 
-    _W8(&w, SSF_TLS_HS_CLIENT_HELLO);
-    _W8(&w, 0); _W16(&w, 0);                                  /* Length, patched below */
-    _W16(&w, SSF_TLS_VERSION_12);                            /* legacy_version */
-    _WBytes(&w, random, 32);
-    _W8(&w, sidLen);
-    _WBytes(&w, sid, sidLen);
-    /* cipher_suites, in preference order. ChaCha20-Poly1305 first: ssfchacha20 is constant-time */
-    /* while ssfaes (under AES-GCM and AES-CCM) is not, and it is fast without AES hardware.     */
-    /* Then AES-128-GCM (mandatory to implement; SHA-256 is cheaper than SHA-384 on 32-bit       */
-    /* cores), AES-256-GCM, AES-128-CCM.                                                         */
-    _W16(&w, 8);
-    _W16(&w, SSF_TLS_CS_CHACHA20_POLY1305_SHA256);
-    _W16(&w, SSF_TLS_CS_AES_128_GCM_SHA256);
-    _W16(&w, SSF_TLS_CS_AES_256_GCM_SHA384);
-    _W16(&w, SSF_TLS_CS_AES_128_CCM_SHA256);
-    _W8(&w, 1); _W8(&w, 0);                                  /* legacy_compression_methods */
+    _SSFTLSCW8(&w, SSF_TLS_HS_CLIENT_HELLO);
+    _SSFTLSCW8(&w, 0); _SSFTLSCW16(&w, 0);                          /* Length, patched below */
+    _SSFTLSCW16(&w, SSF_TLS_VERSION_12);                            /* legacy_version */
+    _SSFTLSCWBytes(&w, random, 32);
+    _SSFTLSCW8(&w, sidLen);
+    _SSFTLSCWBytes(&w, sid, sidLen);
+    /* cipher_suites in preference order (see _net/README.md) */
+    _SSFTLSCW16(&w, 8);
+    _SSFTLSCW16(&w, SSF_TLS_CS_CHACHA20_POLY1305_SHA256);
+    _SSFTLSCW16(&w, SSF_TLS_CS_AES_128_GCM_SHA256);
+    _SSFTLSCW16(&w, SSF_TLS_CS_AES_256_GCM_SHA384);
+    _SSFTLSCW16(&w, SSF_TLS_CS_AES_128_CCM_SHA256);
+    _SSFTLSCW8(&w, 1); _SSFTLSCW8(&w, 0);                           /* legacy_compression_methods */
     extLenPos = w.pos;
-    _W16(&w, 0);                                             /* Extensions length, patched */
+    _SSFTLSCW16(&w, 0);                                             /* Extensions length, patched */
 
-    _W16(&w, SSF_TLS_EXT_SUPPORTED_VERSIONS);                /* TLS 1.3 only */
-    _W16(&w, 3); _W8(&w, 2); _W16(&w, SSF_TLS_VERSION_13);
+    _SSFTLSCW16(&w, SSF_TLS_EXT_SUPPORTED_VERSIONS);                /* TLS 1.3 only */
+    _SSFTLSCW16(&w, 3); _SSFTLSCW8(&w, 2); _SSFTLSCW16(&w, SSF_TLS_VERSION_13);
 
     /* Only groups and schemes this build can compute are offered (counts fixed at build time) */
 #define _SSF_TLSC_NGROUPS (1u + (_SSF_TLSC_P256 ? 1u : 0u) + (_SSF_TLSC_P384 ? 1u : 0u))
 #define _SSF_TLSC_NSIGALGS ((_SSF_TLSC_P256 ? 1u : 0u) + (_SSF_TLSC_P384 ? 1u : 0u) + \
                             (_SSF_TLSC_PSS ? 2u : 0u) + (_SSF_TLSC_PKCS1 ? 2u : 0u) + 1u)
-    _W16(&w, SSF_TLS_EXT_SUPPORTED_GROUPS);
-    _W16(&w, (uint16_t)(2u + (2u * _SSF_TLSC_NGROUPS)));
-    _W16(&w, (uint16_t)(2u * _SSF_TLSC_NGROUPS));
-    _W16(&w, SSF_TLS_GROUP_X25519);
+    _SSFTLSCW16(&w, SSF_TLS_EXT_SUPPORTED_GROUPS);
+    _SSFTLSCW16(&w, (uint16_t)(2u + (2u * _SSF_TLSC_NGROUPS)));
+    _SSFTLSCW16(&w, (uint16_t)(2u * _SSF_TLSC_NGROUPS));
+    _SSFTLSCW16(&w, SSF_TLS_GROUP_X25519);
 #if _SSF_TLSC_P256
-    _W16(&w, SSF_TLS_GROUP_SECP256R1);
+    _SSFTLSCW16(&w, SSF_TLS_GROUP_SECP256R1);
 #endif
 #if _SSF_TLSC_P384
-    _W16(&w, SSF_TLS_GROUP_SECP384R1);
+    _SSFTLSCW16(&w, SSF_TLS_GROUP_SECP384R1);
 #endif
 
-    _W16(&w, SSF_TLS_EXT_SIGNATURE_ALGS);
-    _W16(&w, (uint16_t)(2u + (2u * _SSF_TLSC_NSIGALGS)));
-    _W16(&w, (uint16_t)(2u * _SSF_TLSC_NSIGALGS));
+    _SSFTLSCW16(&w, SSF_TLS_EXT_SIGNATURE_ALGS);
+    _SSFTLSCW16(&w, (uint16_t)(2u + (2u * _SSF_TLSC_NSIGALGS)));
+    _SSFTLSCW16(&w, (uint16_t)(2u * _SSF_TLSC_NSIGALGS));
 #if _SSF_TLSC_P256
-    _W16(&w, SSF_TLS_SIG_ECDSA_SECP256R1_SHA256);
+    _SSFTLSCW16(&w, SSF_TLS_SIG_ECDSA_SECP256R1_SHA256);
 #endif
 #if _SSF_TLSC_P384
-    _W16(&w, SSF_TLS_SIG_ECDSA_SECP384R1_SHA384);
+    _SSFTLSCW16(&w, SSF_TLS_SIG_ECDSA_SECP384R1_SHA384);
 #endif
 #if _SSF_TLSC_PSS
-    _W16(&w, SSF_TLS_SIG_RSA_PSS_RSAE_SHA256);
-    _W16(&w, SSF_TLS_SIG_RSA_PSS_RSAE_SHA384);
+    _SSFTLSCW16(&w, SSF_TLS_SIG_RSA_PSS_RSAE_SHA256);
+    _SSFTLSCW16(&w, SSF_TLS_SIG_RSA_PSS_RSAE_SHA384);
 #endif
 #if _SSF_TLSC_PKCS1
     /* rsa_pkcs1_*: certificate signatures only, never accepted in CertificateVerify */
-    _W16(&w, SSF_TLS_SIG_RSA_PKCS1_SHA256);
-    _W16(&w, SSF_TLS_SIG_RSA_PKCS1_SHA384);
+    _SSFTLSCW16(&w, SSF_TLS_SIG_RSA_PKCS1_SHA256);
+    _SSFTLSCW16(&w, SSF_TLS_SIG_RSA_PKCS1_SHA384);
 #endif
-    _W16(&w, SSF_TLS_SIG_ED25519);
+    _SSFTLSCW16(&w, SSF_TLS_SIG_ED25519);
 #undef _SSF_TLSC_NGROUPS
 #undef _SSF_TLSC_NSIGALGS
 
-    _W16(&w, SSF_TLS_EXT_KEY_SHARE);
-    _W16(&w, (uint16_t)(2u + ksLen)); _W16(&w, (uint16_t)ksLen);
+    _SSFTLSCW16(&w, SSF_TLS_EXT_KEY_SHARE);
+    _SSFTLSCW16(&w, (uint16_t)(2u + ksLen)); _SSFTLSCW16(&w, (uint16_t)ksLen);
     for (i = 0; i < shareCount; i++)
     {
-        _W16(&w, shares[i].group);
-        _W16(&w, shares[i].len);
-        _WBytes(&w, shares[i].pub, shares[i].len);
+        _SSFTLSCW16(&w, shares[i].group);
+        _SSFTLSCW16(&w, shares[i].len);
+        _SSFTLSCWBytes(&w, shares[i].pub, shares[i].len);
     }
 
-    _W16(&w, SSF_TLS_EXT_PSK_KEY_EXCHANGE);                  /* psk_dhe_ke, for servers that */
-    _W16(&w, 2); _W8(&w, 1); _W8(&w, 1);                     /* insist on it                 */
+    /* psk_dhe_ke, for servers that insist on it */
+    _SSFTLSCW16(&w, SSF_TLS_EXT_PSK_KEY_EXCHANGE);
+    _SSFTLSCW16(&w, 2); _SSFTLSCW8(&w, 1); _SSFTLSCW8(&w, 1);
 
     /* record_size_limit (RFC 8449 4): the receive buffer's TLSInnerPlaintext size, always sent */
-    /* ("SHOULD advertise ... even if they have no need to limit"). Identical in ClientHello2.  */
-    _W16(&w, SSF_TLSC_EXT_RECORD_SIZE_LIMIT);
-    _W16(&w, 2); _W16(&w, (uint16_t)(SSF_TLSC_CONFIG_MAX_RECV_RECORD + 1u));
+    _SSFTLSCW16(&w, SSF_TLSC_EXT_RECORD_SIZE_LIMIT);
+    _SSFTLSCW16(&w, 2); _SSFTLSCW16(&w, (uint16_t)(SSF_TLSC_CONFIG_MAX_RECV_RECORD + 1u));
 
-    if (cookieExtOpt != NULL)                                /* Echoed unchanged (4.2.2) */
+    /* Is there a HelloRetryRequest cookie to echo unchanged (RFC 8446 4.2.2)? */
+    if (cookieExtOpt != NULL)
     {
-        _W16(&w, 44u);
-        _W16(&w, cookieExtLen);
-        _WBytes(&w, cookieExtOpt, cookieExtLen);
+        _SSFTLSCW16(&w, 44u);
+        _SSFTLSCW16(&w, cookieExtLen);
+        _SSFTLSCWBytes(&w, cookieExtOpt, cookieExtLen);
     }
 
-    /* server_name (RFC 6066 3): "Literal IPv4 and IPv6 addresses are not permitted". */
-    if ((hostLen > 0u) && !_IsIPLiteral(s->host))
+    /* Is the host a name, as server_name may not carry an IP literal (RFC 6066 3)? */
+    if ((hostLen > 0u) && !_SSFTLSCIsIPLiteral(s->host))
     {
-        _W16(&w, SSF_TLS_EXT_SERVER_NAME);
-        _W16(&w, (uint16_t)(5u + hostLen)); _W16(&w, (uint16_t)(3u + hostLen));
-        _W8(&w, 0);
-        _W16(&w, (uint16_t)hostLen);
-        _WBytes(&w, s->host, hostLen);
+        _SSFTLSCW16(&w, SSF_TLS_EXT_SERVER_NAME);
+        _SSFTLSCW16(&w, (uint16_t)(5u + hostLen)); _SSFTLSCW16(&w, (uint16_t)(3u + hostLen));
+        _SSFTLSCW8(&w, 0);
+        _SSFTLSCW16(&w, (uint16_t)hostLen);
+        _SSFTLSCWBytes(&w, s->host, hostLen);
     }
 
-    /* application_layer_protocol_negotiation (RFC 7301 3.1), when set. Identical in            */
-    /* ClientHello2. SSFTLSCSetALPN() bounded the list by SSF_TLS_CONFIG_MAX_ALPN_LEN.          */
+    /* Is ALPN set (RFC 7301 3.1), its list already bounded by SSFTLSCSetALPN()? */
     if (s->alpnCount != 0u)
     {
         size_t listLen = 0;
 
-        for (i = 0; i < s->alpnCount; i++) listLen += 1u + _AlpnLen(s->alpnProtos[i]);
-        _W16(&w, SSF_TLS_EXT_ALPN);
-        _W16(&w, (uint16_t)(2u + listLen)); _W16(&w, (uint16_t)listLen);
+        for (i = 0; i < s->alpnCount; i++) listLen += 1u + _SSFTLSCAlpnLen(s->alpnProtos[i]);
+        _SSFTLSCW16(&w, SSF_TLS_EXT_ALPN);
+        _SSFTLSCW16(&w, (uint16_t)(2u + listLen)); _SSFTLSCW16(&w, (uint16_t)listLen);
         for (i = 0; i < s->alpnCount; i++)
         {
-            size_t n = _AlpnLen(s->alpnProtos[i]);
+            size_t n = _SSFTLSCAlpnLen(s->alpnProtos[i]);
 
-            _W8(&w, (uint8_t)n);
-            _WBytes(&w, s->alpnProtos[i], n);
+            _SSFTLSCW8(&w, (uint8_t)n);
+            _SSFTLSCWBytes(&w, s->alpnProtos[i], n);
         }
     }
 
-    if ((w.ok == false) || ((w.pos - extLenPos - 2u) > 0xffffu)) return false;
-    _Put16(&w.buf[extLenPos], (uint16_t)(w.pos - extLenPos - 2u));
-    _Put24(&w.buf[1], (uint32_t)(w.pos - 4u));
+    if ((w.ok == false) || (((w.pos - extLenPos) - 2u) > 0xffffu)) return false;
+    _SSFTLSCPut16(&w.buf[extLenPos], (uint16_t)((w.pos - extLenPos) - 2u));
+    _SSFTLSCPut24(&w.buf[1], (uint32_t)(w.pos - 4u));
     s->hsScratchLen = w.pos;
     return true;
 }
@@ -921,7 +966,7 @@ static bool _BuildClientHello(SSFTLSCSession_t *s, const uint8_t random[32], con
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: returns the exact key_exchange length for a group's key share, else 0.              */
 /* --------------------------------------------------------------------------------------------- */
-static uint16_t _KeyShareLen(uint16_t group)
+static uint16_t _SSFTLSCKeyShareLen(uint16_t group)
 {
     if (group == SSF_TLS_GROUP_X25519) return 32u;
     if (group == SSF_TLS_GROUP_SECP256R1) return 65u;    /* Uncompressed SEC 1 point */
@@ -931,11 +976,11 @@ static uint16_t _KeyShareLen(uint16_t group)
 
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: returns true if the latest ClientHello carried a key share for group.               */
-/* ClientHello1 carries X25519 and, when built, secp384r1; ClientHello2 only the group the HRR   */
-/* selected.                                                                                     */
 /* --------------------------------------------------------------------------------------------- */
-static bool _KeyShareOffered(const SSFTLSCSession_t *s, uint16_t group)
+static bool _SSFTLSCKeyShareOffered(const SSFTLSCSession_t *s, uint16_t group)
 {
+    SSF_REQUIRE(s != NULL);
+
     if (s->hrrDone) return (group == s->hrrGroup);
     if (group == SSF_TLS_GROUP_X25519) return true;
 #if _SSF_TLSC_P384
@@ -947,7 +992,7 @@ static bool _KeyShareOffered(const SSFTLSCSession_t *s, uint16_t group)
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: returns true if group is in the ClientHello supported_groups list.                  */
 /* --------------------------------------------------------------------------------------------- */
-static bool _GroupSupported(uint16_t group)
+static bool _SSFTLSCGroupSupported(uint16_t group)
 {
     if (group == SSF_TLS_GROUP_X25519) return true;
 #if _SSF_TLSC_P256
@@ -960,26 +1005,25 @@ static bool _GroupSupported(uint16_t group)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: false if a ServerHello body did not negotiate TLS 1.3: its extension block is       */
-/* absent (a TLS 1.2 ServerHello may have none) or well formed without supported_versions        */
-/* (4.2.1). Walks only the framing, so it runs before the checks a TLS 1.2 server fails its own */
-/* way (session id echo, cipher suite, extensions). True otherwise, malformed framing included: */
-/* the full parse then reports decode_error. bodyLen is at least 35 (the caller checks).         */
+/* Internal: false only if a ServerHello body's framing shows it did not negotiate TLS 1.3       */
 /* --------------------------------------------------------------------------------------------- */
-static bool _ShHasVersions(const uint8_t *body, size_t bodyLen)
+static bool _SSFTLSCShHasVersions(const uint8_t *body, size_t bodyLen)
 {
     size_t pos = 2u + 32u;
     size_t extEnd;
 
-    pos += 1u + (size_t)body[pos] + 2u + 1u;          /* session id, cipher suite, compression */
+    SSF_REQUIRE(body != NULL);
+    SSF_REQUIRE(bodyLen >= 35u);
+
+    pos += ((1u + ((size_t)body[pos])) + 2u) + 1u;    /* session id, cipher suite, compression */
     if (pos == bodyLen) return false;                 /* No extension block */
     if ((pos + 2u) > bodyLen) return true;
-    extEnd = pos + 2u + (size_t)_Get16(&body[pos]);
+    extEnd = (pos + 2u) + ((size_t)_SSFTLSCGet16(&body[pos]));
     if (extEnd != bodyLen) return true;
-    for (pos += 2u; pos < extEnd; pos += 4u + (size_t)_Get16(&body[pos + 2u]))
+    for (pos += 2u; pos < extEnd; pos += (4u + ((size_t)_SSFTLSCGet16(&body[pos + 2u]))))
     {
         if ((extEnd - pos) < 4u) return true;
-        if (_Get16(&body[pos]) == SSF_TLS_EXT_SUPPORTED_VERSIONS) return true;
+        if (_SSFTLSCGet16(&body[pos]) == SSF_TLS_EXT_SUPPORTED_VERSIONS) return true;
     }
     return (pos != extEnd);                           /* Overrun: malformed */
 }
@@ -991,15 +1035,12 @@ static bool _ShHasVersions(const uint8_t *body, size_t bodyLen)
     return false; } while (0)
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: validates and parses a ServerHello or HelloRetryRequest body (RFC 8446 4.1.3,       */
-/* 4.1.4, 4.2). Sets the negotiated suite and hash. For a ServerHello returns the server key     */
-/* share; for an HRR returns the selected group and any cookie (pointing into body). Returns     */
-/* false, with a trace, on anything the RFC requires a client to abort on.                       */
+/* Internal: validates and parses a ServerHello or HelloRetryRequest body (RFC 8446 4.1.3-4.2)   */
 /* --------------------------------------------------------------------------------------------- */
-static bool _ParseServerHello(SSFTLSCSession_t *s, const uint8_t *body, size_t bodyLen,
-                              bool isHrr, uint8_t *serverPubKey, size_t *serverPubKeyLen,
-                              uint16_t *serverGroup, const uint8_t **cookieOut,
-                              uint16_t *cookieLenOut)
+static bool _SSFTLSCParseServerHello(SSFTLSCSession_t *s, const uint8_t *body, size_t bodyLen,
+                                     bool isHrr, uint8_t *serverPubKey, size_t *serverPubKeyLen,
+                                     uint16_t *serverGroup, const uint8_t **cookieOut,
+                                     uint16_t *cookieLenOut)
 {
     size_t pos = 0;
     size_t extEnd;
@@ -1011,18 +1052,22 @@ static bool _ParseServerHello(SSFTLSCSession_t *s, const uint8_t *body, size_t b
     bool hasKeyShare = false;
     bool hasCookie = false;
 
+    SSF_REQUIRE(s != NULL);
+    SSF_REQUIRE(body != NULL);
+    SSF_REQUIRE(serverGroup != NULL);
+
     if (serverPubKeyLen != NULL) *serverPubKeyLen = 0;
     if (cookieOut != NULL) *cookieOut = NULL;
     if (cookieLenOut != NULL) *cookieLenOut = 0;
     *serverGroup = 0;
 
     /* legacy_version (ignored when supported_versions is present, 4.2.1) + random */
-    if (bodyLen < 2u + 32u + 1u) _SSF_TLSC_SH_REJECT(s, "too short", SSF_TLS_ALERT_DECODE_ERROR);
+    if (bodyLen < (2u + 32u + 1u))
+    { _SSF_TLSC_SH_REJECT(s, "too short", SSF_TLS_ALERT_DECODE_ERROR); }
     pos = 2u + 32u;
 
-    /* A server that does not know supported_versions answers with TLS 1.2 or earlier: say so */
-    /* rather than fail on its fresh session id or TLS 1.2 cipher suite.                      */
-    if (!_ShHasVersions(body, bodyLen))
+    /* Did a server that does not know supported_versions answer with TLS 1.2 or earlier? */
+    if (!_SSFTLSCShHasVersions(body, bodyLen))
     {
         _SSF_TLSC_SH_REJECT(s, "the server negotiated TLS 1.2 or earlier; TLS 1.3 is required",
                             SSF_TLS_ALERT_PROTOCOL_VERSION);
@@ -1032,16 +1077,16 @@ static bool _ParseServerHello(SSFTLSCSession_t *s, const uint8_t *body, size_t b
     sidLen = body[pos++];
     chSidLen = s->hsScratch.clientHello[38];
     chSid = &s->hsScratch.clientHello[39];
-    if ((sidLen > 32u) || (pos + sidLen > bodyLen))
+    if ((sidLen > 32u) || ((pos + sidLen) > bodyLen))
     { _SSF_TLSC_SH_REJECT(s, "session id length", SSF_TLS_ALERT_DECODE_ERROR); }
     if ((sidLen != chSidLen) || (memcmp(&body[pos], chSid, sidLen) != 0))
     { _SSF_TLSC_SH_REJECT(s, "session id echo mismatch", SSF_TLS_ALERT_ILLEGAL_PARAMETER); }
     pos += sidLen;
 
     /* cipher_suite: one we can run; after an HRR, the one the HRR chose (4.1.4) */
-    if (pos + 2u + 1u + 2u > bodyLen)
+    if ((((pos + 2u) + 1u) + 2u) > bodyLen)
     { _SSF_TLSC_SH_REJECT(s, "truncated", SSF_TLS_ALERT_DECODE_ERROR); }
-    cs = _Get16(&body[pos]); pos += 2;
+    cs = _SSFTLSCGet16(&body[pos]); pos += 2;
     switch (cs)
     {
     case SSF_TLS_CS_AES_128_GCM_SHA256:
@@ -1050,9 +1095,9 @@ static bool _ParseServerHello(SSFTLSCSession_t *s, const uint8_t *body, size_t b
         s->hash = SSF_HMAC_HASH_SHA384; s->hashLen = 48; s->keyLen = 32; break;
     case SSF_TLS_CS_CHACHA20_POLY1305_SHA256:
         s->hash = SSF_HMAC_HASH_SHA256; s->hashLen = 32; s->keyLen = 32; break;
-    case SSF_TLS_CS_AES_128_CCM_SHA256:        /* Record layer: ssftls / ssfaesccm, 16-byte tag */
+    case SSF_TLS_CS_AES_128_CCM_SHA256:
         s->hash = SSF_HMAC_HASH_SHA256; s->hashLen = 32; s->keyLen = 16; break;
-    default:                                   /* Not offered (4.1.3) */
+    default:
         _SSF_TLSC_SH_REJECT(s, "cipher suite", SSF_TLS_ALERT_ILLEGAL_PARAMETER);
     }
     if (s->hrrDone && (cs != s->hrrSuite))
@@ -1064,7 +1109,7 @@ static bool _ParseServerHello(SSFTLSCSession_t *s, const uint8_t *body, size_t b
     { _SSF_TLSC_SH_REJECT(s, "compression method", SSF_TLS_ALERT_ILLEGAL_PARAMETER); }
 
     /* extensions: the list must fill the rest of the body exactly */
-    extEnd = pos + 2u + _Get16(&body[pos]);
+    extEnd = (pos + 2u) + _SSFTLSCGet16(&body[pos]);
     pos += 2;
     if (extEnd != bodyLen) _SSF_TLSC_SH_REJECT(s, "extensions length", SSF_TLS_ALERT_DECODE_ERROR);
 
@@ -1073,72 +1118,74 @@ static bool _ParseServerHello(SSFTLSCSession_t *s, const uint8_t *body, size_t b
         uint16_t eType;
         uint16_t eLen;
 
-        if (pos + 4u > extEnd)
+        if ((pos + 4u) > extEnd)
         { _SSF_TLSC_SH_REJECT(s, "extension header", SSF_TLS_ALERT_DECODE_ERROR); }
-        eType = _Get16(&body[pos]);
-        eLen = _Get16(&body[pos + 2u]);
+        eType = _SSFTLSCGet16(&body[pos]);
+        eLen = _SSFTLSCGet16(&body[pos + 2u]);
         pos += 4;
-        if (pos + eLen > extEnd)
+        if ((pos + eLen) > extEnd)
         { _SSF_TLSC_SH_REJECT(s, "extension length", SSF_TLS_ALERT_DECODE_ERROR); }
 
+        /* Is it supported_versions? */
         if (eType == SSF_TLS_EXT_SUPPORTED_VERSIONS)
         {
-            /* Selected version: exactly TLS 1.3 (4.2.1) */
+            /* Yes, the selected version must be exactly TLS 1.3 (4.2.1) */
             if (hasVersions)
             { _SSF_TLSC_SH_REJECT(s, "duplicate supported_versions",
                                   SSF_TLS_ALERT_ILLEGAL_PARAMETER); }
             hasVersions = true;
-            if ((eLen != 2u) || (_Get16(&body[pos]) != SSF_TLS_VERSION_13))
+            if ((eLen != 2u) || (_SSFTLSCGet16(&body[pos]) != SSF_TLS_VERSION_13))
             { _SSF_TLSC_SH_REJECT(s, "supported_versions is not TLS 1.3",
                                   SSF_TLS_ALERT_ILLEGAL_PARAMETER); }
         }
         else if (eType == SSF_TLS_EXT_KEY_SHARE)
         {
+            /* No, key_share */
             uint16_t group;
 
             if (hasKeyShare)
             { _SSF_TLSC_SH_REJECT(s, "duplicate key_share", SSF_TLS_ALERT_ILLEGAL_PARAMETER); }
             hasKeyShare = true;
             if (eLen < 2u) _SSF_TLSC_SH_REJECT(s, "key_share length", SSF_TLS_ALERT_DECODE_ERROR);
-            group = _Get16(&body[pos]);
+            group = _SSFTLSCGet16(&body[pos]);
+            /* Is it a HelloRetryRequest? */
             if (isHrr)
             {
-                /* HRR: selected_group only. It MUST be in supported_groups and MUST NOT be a  */
-                /* group the ClientHello already carried a share for (4.2.8).                  */
+                /* Yes, selected_group only, supported and without a share already sent (4.2.8) */
                 if (eLen != 2u)
                 { _SSF_TLSC_SH_REJECT(s, "key_share length", SSF_TLS_ALERT_DECODE_ERROR); }
-                if (!_GroupSupported(group))
+                if (!_SSFTLSCGroupSupported(group))
                 { _SSF_TLSC_SH_REJECT(s, "group not offered", SSF_TLS_ALERT_ILLEGAL_PARAMETER); }
-                if (_KeyShareOffered(s, group))
+                if (_SSFTLSCKeyShareOffered(s, group))
                 { _SSF_TLSC_SH_REJECT(s, "group already has a key share",
                                       SSF_TLS_ALERT_ILLEGAL_PARAMETER); }
             }
             else
             {
-                /* ServerHello: one share, for a group the ClientHello sent a share for, with  */
-                /* exactly that group's key length (4.2.8).                                    */
+                /* No, one share for a group the ClientHello sent a share for (4.2.8) */
                 uint16_t kLen;
 
                 if (eLen < 4u)
                 { _SSF_TLSC_SH_REJECT(s, "key_share length", SSF_TLS_ALERT_DECODE_ERROR); }
-                kLen = _Get16(&body[pos + 2u]);
-                if (eLen != 4u + kLen)
+                kLen = _SSFTLSCGet16(&body[pos + 2u]);
+                if (eLen != (4u + kLen))
                 { _SSF_TLSC_SH_REJECT(s, "key_share length", SSF_TLS_ALERT_DECODE_ERROR); }
-                if (!_KeyShareOffered(s, group))
+                if (!_SSFTLSCKeyShareOffered(s, group))
                 { _SSF_TLSC_SH_REJECT(s, "group not offered", SSF_TLS_ALERT_ILLEGAL_PARAMETER); }
-                if (kLen != _KeyShareLen(group))
+                if (kLen != _SSFTLSCKeyShareLen(group))
                 { _SSF_TLSC_SH_REJECT(s, "key share size", SSF_TLS_ALERT_ILLEGAL_PARAMETER); }
                 if (serverPubKey != NULL) memcpy(serverPubKey, &body[pos + 4u], kLen);
                 if (serverPubKeyLen != NULL) *serverPubKeyLen = kLen;
             }
             *serverGroup = group;
         }
-        else if (isHrr && (eType == 44u))         /* cookie (4.2.2) */
+        else if (isHrr && (eType == 44u))
         {
+            /* No, an HRR cookie (4.2.2) */
             if (hasCookie)
             { _SSF_TLSC_SH_REJECT(s, "duplicate cookie", SSF_TLS_ALERT_ILLEGAL_PARAMETER); }
             hasCookie = true;
-            if ((eLen < 3u) || (_Get16(&body[pos]) != (uint16_t)(eLen - 2u)))
+            if ((eLen < 3u) || (_SSFTLSCGet16(&body[pos]) != (uint16_t)(eLen - 2u)))
             { _SSF_TLSC_SH_REJECT(s, "cookie length", SSF_TLS_ALERT_DECODE_ERROR); }
             if (cookieOut != NULL) *cookieOut = &body[pos];   /* Whole extension_data */
             if (cookieLenOut != NULL) *cookieLenOut = eLen;
@@ -1148,23 +1195,18 @@ static bool _ParseServerHello(SSFTLSCSession_t *s, const uint8_t *body, size_t b
                  (eType == SSF_TLS_EXT_PSK_KEY_EXCHANGE) ||
                  (eType == SSF_TLSC_EXT_RECORD_SIZE_LIMIT) || (eType == 44u))
         {
-            /* Recognized (the client sends these), but not specified for this message, cookie  */
-            /* outside a HelloRetryRequest included: illegal_parameter (4.2).                   */
+            /* No, recognized but not allowed in this message (4.2) */
             _SSF_TLSC_SH_REJECT(s, "extension not allowed here", SSF_TLS_ALERT_ILLEGAL_PARAMETER);
         }
         else
         {
-            /* Anything else, pre_shared_key included (no PSK is offered), was not requested */
-            /* and MUST be rejected with unsupported_extension (4.2).                         */
+            /* No, unsolicited; pre_shared_key included as no PSK is offered (4.2) */
             _SSF_TLSC_SH_REJECT(s, "unsolicited extension", SSF_TLS_ALERT_UNSUPPORTED_EXT);
         }
         pos += eLen;
     }
 
-    /* supported_versions is present (_ShHasVersions() above) and was checked when found */
-    /* A HelloRetryRequest that would change nothing in the ClientHello is illegal_parameter */
-    /* (4.1.4). A cookie-only one is legal but not supported (ClientHello2 always carries a  */
-    /* new share): missing_extension, as for a ServerHello without key_share (no PSK mode).  */
+    /* Is key_share missing? A cookie-only HRR is not supported (4.1.4) */
     if (!hasKeyShare)
     {
         _SSF_TLSC_SH_REJECT(s, "missing key_share", (isHrr && !hasCookie) ?
@@ -1176,8 +1218,7 @@ static bool _ParseServerHello(SSFTLSCSession_t *s, const uint8_t *body, size_t b
 #undef _SSF_TLSC_SH_REJECT
 
 #if SSF_CONFIG_TLSC_UNIT_TEST == 1
-/* Replays a fixed trace (RFC 8448): the next ClientHello1 is chOpt[0..chLen) and the x25519   */
-/* private key x25519PrivOpt, in place of fresh randomness and _BuildClientHello(). NULL clears. */
+/* Test hook: replays a fixed RFC 8448 trace for the next ClientHello1; NULL clears              */
 void _SSFTLSCInjectClientHelloForTest(const uint8_t *chOpt, size_t chLen,
                                       const uint8_t *x25519PrivOpt)
 {
@@ -1188,9 +1229,7 @@ void _SSFTLSCInjectClientHelloForTest(const uint8_t *chOpt, size_t chLen,
     _utInjectX25519 = x25519PrivOpt;
 }
 
-/* Replays a fixed HelloRetryRequest trace: the next ClientHello2 is ch2Opt[0..ch2Len) and the */
-/* private key for the group the HRR selects ecPrivOpt (its size), in place of fresh keys and  */
-/* _BuildClientHello(). NULL clears.                                                            */
+/* Test hook: replays a fixed HelloRetryRequest trace for the next ClientHello2; NULL clears     */
 void _SSFTLSCInjectClientHello2ForTest(const uint8_t *ch2Opt, size_t ch2Len,
                                        const uint8_t *ecPrivOpt)
 {
@@ -1201,9 +1240,7 @@ void _SSFTLSCInjectClientHello2ForTest(const uint8_t *ch2Opt, size_t ch2Len,
     _utInjectEC = ecPrivOpt;
 }
 
-/* Builds a ClientHello1 into session (random 32 x 0x11, session id 32 x 0x22, x25519 and        */
-/* secp384r1 shares), then parses body as a ServerHello, or a HelloRetryRequest if isHrr.       */
-/* *alertOut is the alert the client would send, 0 when the message is accepted.               */
+/* Test hook: builds a ClientHello1, then parses body as a ServerHello or HelloRetryRequest      */
 bool _SSFTLSCParseServerHelloExForTest(SSFTLSCSession_t *session, const uint8_t *body,
                                        size_t bodyLen, bool isHrr, uint16_t hrrGroup,
                                        uint16_t hrrSuite, uint8_t *alertOut, uint16_t *groupOut,
@@ -1223,15 +1260,14 @@ bool _SSFTLSCParseServerHelloExForTest(SSFTLSCSession_t *session, const uint8_t 
     p384Pub[0] = 0x04u;
     shares[0].group = SSF_TLS_GROUP_X25519; shares[0].pub = x25519Pub; shares[0].len = 32u;
     shares[1].group = SSF_TLS_GROUP_SECP384R1; shares[1].pub = p384Pub; shares[1].len = 97u;
-    SSF_REQUIRE(_BuildClientHello(session, random, sid, (uint8_t)sizeof(sid), shares, 2u, NULL,
-                                  0u));
-    /* hrrGroup != 0: parse as the ServerHello that follows a HelloRetryRequest for it */
+    SSF_REQUIRE(_SSFTLSCBuildClientHello(session, random, sid, (uint8_t)sizeof(sid), shares, 2u,
+                                         NULL, 0u));
     session->hrrDone = (hrrGroup != 0u);
     session->hrrGroup = hrrGroup;
     session->hrrSuite = hrrSuite;
     session->pendingAlert = 0;
-    ok = _ParseServerHello(session, body, bodyLen, isHrr, pubOut, pubLenOut, groupOut, cookieOut,
-                           cookieLenOut);
+    ok = _SSFTLSCParseServerHello(session, body, bodyLen, isHrr, pubOut, pubLenOut, groupOut,
+                                  cookieOut, cookieLenOut);
     *alertOut = ok ? 0u : session->pendingAlert;
     return ok;
 }
@@ -1251,13 +1287,13 @@ bool _SSFTLSCParseServerHelloForTest(SSFTLSCSession_t *session, const uint8_t *b
 #endif /* SSF_CONFIG_TLSC_UNIT_TEST */
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: complete the key exchange and derive handshake traffic keys.                        */
+/* Internal: completes the key exchange and derives the handshake traffic keys.                  */
 /* --------------------------------------------------------------------------------------------- */
-static bool _DeriveHandshakeKeys(SSFTLSCSession_t *s,
-                                 const uint8_t *serverPubKey, size_t serverPubKeyLen,
-                                 uint16_t serverGroup)
+static bool _SSFTLSCDeriveHandshakeKeys(SSFTLSCSession_t *s,
+                                        const uint8_t *serverPubKey, size_t serverPubKeyLen,
+                                        uint16_t serverGroup)
 {
-    uint8_t sharedSecret[48]; /* max for P-384 */
+    uint8_t sharedSecret[48];
     size_t sharedLen = 0;
     uint8_t ecdhSecret[SSF_ECDH_MAX_SECRET_SIZE];
     uint8_t earlySecret[SSF_TLS_MAX_HASH_SIZE];
@@ -1267,23 +1303,27 @@ static bool _DeriveHandshakeKeys(SSFTLSCSession_t *s,
     uint8_t transcriptHash[SSF_TLS_MAX_HASH_SIZE];
     uint8_t zeroPSK[SSF_TLS_MAX_HASH_SIZE];
     uint8_t zeroIKM[SSF_TLS_MAX_HASH_SIZE];
-    uint8_t key[SSF_TLS_MAX_KEY_SIZE], iv[SSF_TLS_IV_SIZE];
+    uint8_t key[SSF_TLS_MAX_KEY_SIZE];
+    uint8_t iv[SSF_TLS_IV_SIZE];
     bool ok = false;
 
-    /* Complete key exchange */
+    SSF_REQUIRE(s != NULL);
+    SSF_REQUIRE(serverPubKey != NULL);
+
+    /* Is the server's group X25519? */
     if (serverGroup == SSF_TLS_GROUP_X25519)
     {
+        /* Yes, complete the X25519 key exchange */
         if (!SSFX25519ComputeSecret(s->ephemeralPrivKey, serverPubKey, sharedSecret)) goto done;
         sharedLen = 32;
     }
-    else if (serverGroup == SSF_TLS_GROUP_SECP256R1 || serverGroup == SSF_TLS_GROUP_SECP384R1)
+    else if ((serverGroup == SSF_TLS_GROUP_SECP256R1) || (serverGroup == SSF_TLS_GROUP_SECP384R1))
     {
+        /* No, complete the ECDH key exchange; the P-384 key follows the X25519 key */
         SSFECCurve_t curve = (serverGroup == SSF_TLS_GROUP_SECP256R1) ?
                               SSF_EC_CURVE_P256 : SSF_EC_CURVE_P384;
         const SSFECCurveParams_t *cp = SSFECGetCurveParams(curve);
         size_t secretLen;
-        /* P-384 private key is at ephemeralPrivKey[32] (after X25519 key at [0]) */
-        /* P-256 private key would be at ephemeralPrivKey[0] (in HRR case) */
         uint8_t *ecPriv = (serverGroup == SSF_TLS_GROUP_SECP384R1) ?
                            &s->ephemeralPrivKey[32] : s->ephemeralPrivKey;
 
@@ -1300,6 +1340,7 @@ static bool _DeriveHandshakeKeys(SSFTLSCSession_t *s,
     }
     else
     {
+        /* No, unsupported group */
         SSF_TLS_TRACE_CRYPTO_ERROR(&s->trace, "Unsupported key exchange group 0x%04x",
                                    serverGroup);
         goto done;
@@ -1308,11 +1349,12 @@ static bool _DeriveHandshakeKeys(SSFTLSCSession_t *s,
     /* Hash("") for deriving the "derived" secret */
     {
         SSFTLSTranscript_t tmp;
+
         SSFTLSTranscriptInit(&tmp, s->hash);
         SSFTLSTranscriptHash(&tmp, emptyHash, sizeof(emptyHash));
     }
 
-    /* Early Secret = HKDF-Extract(0, 0) -- no PSK */
+    /* Early Secret = HKDF-Extract(0, 0), no PSK */
     memset(zeroPSK, 0, s->hashLen);
     memset(zeroIKM, 0, s->hashLen);
     SSFHKDFExtract(s->hash, zeroIKM, s->hashLen, zeroPSK, s->hashLen,
@@ -1340,14 +1382,13 @@ static bool _DeriveHandshakeKeys(SSFTLSCSession_t *s,
     /* Set up server handshake traffic keys for decryption */
     SSFTLSDeriveTrafficKeys(s->hash, s->serverHsTrafficSecret, s->hashLen,
                             key, s->keyLen, iv, SSF_TLS_IV_SIZE);
-    _RecordStateSet(s, &s->recvState, &s->recvStateInited, key, iv);
+    _SSFTLSCRecordStateSet(s, &s->recvState, &s->recvStateInited, key, iv);
     s->recvEncrypted = true;
 
-    /* Client handshake traffic keys protect everything the client sends from here on: its     */
-    /* Finished and any alert (RFC 8446 6, 7.3).                                               */
+    /* Client handshake traffic keys protect all the client sends from here (RFC 8446 6, 7.3) */
     SSFTLSDeriveTrafficKeys(s->hash, s->clientHsTrafficSecret, s->hashLen,
                             key, s->keyLen, iv, SSF_TLS_IV_SIZE);
-    _RecordStateSet(s, &s->sendState, &s->sendStateInited, key, iv);
+    _SSFTLSCRecordStateSet(s, &s->sendState, &s->sendStateInited, key, iv);
     s->sendEncrypted = true;
 
     /* Save handshake secret for later master secret derivation */
@@ -1355,8 +1396,7 @@ static bool _DeriveHandshakeKeys(SSFTLSCSession_t *s,
     ok = true;
 
 done:
-    /* Every path: the ephemeral private keys are spent (one ECDH attempt per handshake), and  */
-    /* no intermediate of the key schedule outlives this function.                              */
+    /* The ephemeral private keys are spent and no key schedule intermediate outlives this */
     _SSF_TLSC_SCRUB_N("ephemeralPrivKey", s->ephemeralPrivKey, sizeof(s->ephemeralPrivKey));
     _SSF_TLSC_SCRUB(sharedSecret);
     _SSF_TLSC_SCRUB(ecdhSecret);
@@ -1369,20 +1409,25 @@ done:
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: derive application traffic keys from master secret.                                 */
+/* Internal: derives the application traffic keys from the master secret.                       */
 /* --------------------------------------------------------------------------------------------- */
-static bool _DeriveAppKeys(SSFTLSCSession_t *s, const uint8_t *handshakeSecret)
+static bool _SSFTLSCDeriveAppKeys(SSFTLSCSession_t *s, const uint8_t *handshakeSecret)
 {
     uint8_t emptyHash[SSF_TLS_MAX_HASH_SIZE];
     uint8_t derivedSecret[SSF_TLS_MAX_HASH_SIZE];
     uint8_t masterSecret[SSF_TLS_MAX_HASH_SIZE];
     uint8_t zeroIKM[SSF_TLS_MAX_HASH_SIZE];
     uint8_t transcriptHash[SSF_TLS_MAX_HASH_SIZE];
-    uint8_t key[SSF_TLS_MAX_KEY_SIZE], iv[SSF_TLS_IV_SIZE];
+    uint8_t key[SSF_TLS_MAX_KEY_SIZE];
+    uint8_t iv[SSF_TLS_IV_SIZE];
+
+    SSF_REQUIRE(s != NULL);
+    SSF_REQUIRE(handshakeSecret != NULL);
 
     /* Hash("") */
     {
         SSFTLSTranscript_t tmp;
+
         SSFTLSTranscriptInit(&tmp, s->hash);
         SSFTLSTranscriptHash(&tmp, emptyHash, sizeof(emptyHash));
     }
@@ -1408,11 +1453,10 @@ static bool _DeriveAppKeys(SSFTLSCSession_t *s, const uint8_t *handshakeSecret)
                        "s ap traffic", transcriptHash, s->hashLen,
                        s->serverAppTrafficSecret, s->hashLen);
 
-    /* Set up server application traffic keys for receiving.                                       */
-    /* Client send keys are set up separately after sending client Finished.                      */
+    /* Set up server application traffic keys for receiving; client send keys follow Finished */
     SSFTLSDeriveTrafficKeys(s->hash, s->serverAppTrafficSecret, s->hashLen,
                             key, s->keyLen, iv, SSF_TLS_IV_SIZE);
-    _RecordStateSet(s, &s->recvState, &s->recvStateInited, key, iv);
+    _SSFTLSCRecordStateSet(s, &s->recvState, &s->recvStateInited, key, iv);
 
     _SSF_TLSC_SCRUB(derivedSecret);
     _SSF_TLSC_SCRUB(masterSecret);
@@ -1422,30 +1466,34 @@ static bool _DeriveAppKeys(SSFTLSCSession_t *s, const uint8_t *handshakeSecret)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Set trace callback for a TLS client session.                                                  */
+/* Sets the trace callback for a TLS client session.                                             */
 /* --------------------------------------------------------------------------------------------- */
-void SSFTLSCSetTrace(SSFTLSCSession_t *session, SSFTLSTraceFn_t traceFn, void *traceCtx)
+void SSFTLSCSetTrace(SSFTLSCSession_t *session, SSFTLSTraceFn_t traceFnOpt, void *traceCtxOpt)
 {
     SSF_REQUIRE(session != NULL);
-    session->trace.fn = traceFn;
-    session->trace.userCtx = traceCtx;
+
+    session->trace.fn = traceFnOpt;
+    session->trace.userCtx = traceCtxOpt;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Crypto step: derive handshake keys (ECDH + HKDF).                                             */
+/* Internal: crypto step that derives the handshake keys (ECDH + HKDF).                          */
 /* --------------------------------------------------------------------------------------------- */
-static void _TLSCDeriveHSKeysWork(void *ctx)
+static void _SSFTLSCDeriveHSKeysWork(void *ctx)
 {
     SSFTLSCCryptoWork_t *w = (SSFTLSCCryptoWork_t *)ctx;
-    w->keyExchangeOk = _DeriveHandshakeKeys(w->session, w->serverPubKey,
-                                             (size_t)w->serverPubKeyLen, w->serverGroup);
+
+    SSF_REQUIRE(w != NULL);
+    SSF_REQUIRE(w->session != NULL);
+
+    w->keyExchangeOk = _SSFTLSCDeriveHandshakeKeys(w->session, w->serverPubKey,
+                                                   (size_t)w->serverPubKeyLen, w->serverGroup);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: the RFC 8446 6.2 alert for a failed chain verification. A host name the certificate */
-/* does not name is bad_certificate, as OpenSSL and GnuTLS clients send.                         */
+/* Internal: maps a failed chain verification to its RFC 8446 6.2 alert.                         */
 /* --------------------------------------------------------------------------------------------- */
-static uint8_t _ChainAlert(SSFX509VerifyCode_t code)
+static uint8_t _SSFTLSCChainAlert(SSFX509VerifyCode_t code)
 {
     SSF_REQUIRE((code > SSF_X509_VERIFY_OK) && (code < SSF_X509_VERIFY_MAX));
 
@@ -1453,30 +1501,34 @@ static uint8_t _ChainAlert(SSFX509VerifyCode_t code)
     {
     case SSF_X509_VERIFY_ERR_VERSION:
     case SSF_X509_VERIFY_ERR_CRITICAL_EXT:
-        return SSF_TLS_ALERT_UNSUPPORTED_CERTIFICATE;  /* "a certificate of an unsupported type" */
+        return SSF_TLS_ALERT_UNSUPPORTED_CERTIFICATE;
     case SSF_X509_VERIFY_ERR_NOT_YET_VALID:
     case SSF_X509_VERIFY_ERR_EXPIRED:
-        return SSF_TLS_ALERT_CERTIFICATE_EXPIRED;      /* "expired or is not currently valid" */
+        return SSF_TLS_ALERT_CERTIFICATE_EXPIRED;
     case SSF_X509_VERIFY_ERR_UNKNOWN_CA:
-        return SSF_TLS_ALERT_UNKNOWN_CA;               /* "CA certificate could not be located" */
+        return SSF_TLS_ALERT_UNKNOWN_CA;
     case SSF_X509_VERIFY_ERR_NOT_CA:
     case SSF_X509_VERIFY_ERR_CA_KEY_USAGE:
     case SSF_X509_VERIFY_ERR_PATH_LEN:
     case SSF_X509_VERIFY_ERR_NAME_CONSTRAINTS:
     case SSF_X509_VERIFY_ERR_EKU:
     case SSF_X509_VERIFY_ERR_LEAF_KEY_USAGE:
-        return SSF_TLS_ALERT_CERTIFICATE_UNKNOWN;      /* Valid, but CA or usage rules refuse it */
+        return SSF_TLS_ALERT_CERTIFICATE_UNKNOWN;
     default:
-        return SSF_TLS_ALERT_BAD_CERTIFICATE;          /* Corrupt, does not verify, wrong host */
+        return SSF_TLS_ALERT_BAD_CERTIFICATE;
     }
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Crypto step: verify certificate chain.                                                        */
+/* Internal: crypto step that verifies the server certificate chain.                             */
 /* --------------------------------------------------------------------------------------------- */
-static void _TLSCVerifyChainWork(void *ctx)
+static void _SSFTLSCVerifyChainWork(void *ctx)
 {
     SSFTLSCCryptoWork_t *w = (SSFTLSCCryptoWork_t *)ctx;
+
+    SSF_REQUIRE(w != NULL);
+    SSF_REQUIRE(w->session != NULL);
+
     w->chainVerifyOk = SSFX509VerifyChain(w->chainDerPtrs, w->chainDerLens, w->chainLen,
                                            w->session->trust.caDer,
                                            w->session->trust.caDerLen,
@@ -1485,19 +1537,21 @@ static void _TLSCVerifyChainWork(void *ctx)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Crypto step: verify CertificateVerify signature.                                              */
+/* Internal: crypto step that verifies the server CertificateVerify signature.                   */
 /* --------------------------------------------------------------------------------------------- */
-static void _TLSCVerifySigWork(void *ctx)
+static void _SSFTLSCVerifySigWork(void *ctx)
 {
     SSFTLSCCryptoWork_t *w = (SSFTLSCCryptoWork_t *)ctx;
     bool verified = false;
 
-    /* A scheme compiled out of this build is never verified (_SchemeMatchesKey refuses it) */
+    SSF_REQUIRE(w != NULL);
+
+    /* Is the scheme Ed25519, which verifies over the raw content in contentHash? */
     if (w->sigScheme == SSF_TLS_SIG_ED25519)
     {
-        /* Ed25519 verifies over the raw sign content stored in contentHash.                    */
-        if (w->leafPubKeyLen == SSF_ED25519_PUB_KEY_SIZE &&
-            w->sigDataLen == SSF_ED25519_SIG_SIZE)
+        /* Yes, verify it if the key and signature sizes are right */
+        if ((w->leafPubKeyLen == SSF_ED25519_PUB_KEY_SIZE) &&
+            (w->sigDataLen == SSF_ED25519_SIG_SIZE))
         {
             verified = SSFEd25519Verify(w->leafPubKey, w->contentHash, w->contentHashLen,
                                          w->sigData);
@@ -1506,6 +1560,7 @@ static void _TLSCVerifySigWork(void *ctx)
 #if _SSF_TLSC_P256
     else if (w->sigScheme == SSF_TLS_SIG_ECDSA_SECP256R1_SHA256)
     {
+        /* No, ECDSA P-256 */
         verified = SSFECDSAVerify(SSF_EC_CURVE_P256, w->leafPubKey, (size_t)w->leafPubKeyLen,
                                   w->contentHash, 32, w->sigData, (size_t)w->sigDataLen);
     }
@@ -1513,6 +1568,7 @@ static void _TLSCVerifySigWork(void *ctx)
 #if _SSF_TLSC_P384
     else if (w->sigScheme == SSF_TLS_SIG_ECDSA_SECP384R1_SHA384)
     {
+        /* No, ECDSA P-384 */
         verified = SSFECDSAVerify(SSF_EC_CURVE_P384, w->leafPubKey, (size_t)w->leafPubKeyLen,
                                   w->contentHash, 48, w->sigData, (size_t)w->sigDataLen);
     }
@@ -1520,77 +1576,68 @@ static void _TLSCVerifySigWork(void *ctx)
 #if _SSF_TLSC_PSS
     else if (w->sigScheme == SSF_TLS_SIG_RSA_PSS_RSAE_SHA256)
     {
+        /* No, RSA-PSS SHA-256, salt length the hash length */
         verified = SSFRSAVerifyPSS(w->leafPubKey, (size_t)w->leafPubKeyLen,
                                    SSF_RSA_HASH_SHA256,
-                                   w->contentHash, 32, 32u, /* salt = hash length (RFC 8446) */
+                                   w->contentHash, 32, 32u,
                                    w->sigData, (size_t)w->sigDataLen);
     }
     else if (w->sigScheme == SSF_TLS_SIG_RSA_PSS_RSAE_SHA384)
     {
+        /* No, RSA-PSS SHA-384, salt length the hash length */
         verified = SSFRSAVerifyPSS(w->leafPubKey, (size_t)w->leafPubKeyLen,
                                    SSF_RSA_HASH_SHA384,
-                                   w->contentHash, 48, 48u, /* salt = hash length (RFC 8446) */
+                                   w->contentHash, 48, 48u,
                                    w->sigData, (size_t)w->sigDataLen);
     }
 #endif
-    /* rsa_pkcs1_* is never verified here: not a TLS 1.3 handshake signature (RFC 8446 4.2.3) */
+    /* No, any other scheme, rsa_pkcs1_* included, fails (RFC 8446 4.2.3) */
     w->sigVerifyOk = verified;
 }
 
-/* --------------------------------------------------------------------------------------------- */
-/* Handshake state machine.                                                                      */
-/* Each active-state helper runs one contiguous section of the handshake up to a crypto step (or */
-/* to completion for the final step), resuming through helperStep on WANT_READ / WANT_WRITE. The */
-/* driver then runs the crypto step on the next pollOpen() call, so no call does both I/O and a  */
-/* public-key operation.                                                                         */
-/* --------------------------------------------------------------------------------------------- */
-
-/* State SEND_CH: await inner connect, send CH, recv SH (incl. HRR), parse; ECDH+HKDF follows.  */
-/* RFC 8446 Section 4.1.3: HelloRetryRequest sentinel random. Used by case 4 for HRR detection */
-/* and by case 11 to reject a double HRR.                                                       */
-static const uint8_t _TlscHrrSentinel[32] = {
+/* HelloRetryRequest sentinel random (RFC 8446 4.1.3) */
+static const uint8_t _SSFTLSCHrrSentinel[32] = {
     0xCFu, 0x21u, 0xADu, 0x74u, 0xE5u, 0x9Au, 0x61u, 0x11u,
     0xBEu, 0x1Du, 0x8Cu, 0x02u, 0x1Eu, 0x65u, 0xB8u, 0x91u,
     0xC2u, 0xA2u, 0x11u, 0x16u, 0x7Au, 0xBBu, 0x8Cu, 0x5Eu,
     0x07u, 0x9Eu, 0x09u, 0xE2u, 0xC8u, 0xA8u, 0x33u, 0x9Cu
 };
 
-/* Resumable state machine. Substates:                                                           */
-/*   0: entry — wait for the inner transport to connect + transcript init, advance to 1         */
-/*   1: build ClientHello into session->hsScratch.clientHello + transcript update (non-idempotent)      */
-/*   2: send ClientHello record                                                                   */
-/*   3: send CCS record (middlebox compat)                                                        */
-/*   4: recv ServerHello + HRR detect; non-HRR → parse + SHA-384 reinit + stash into cryptoWork  */
-/*      → case 20. HRR → parse HRR + synthetic transcript reinit + build CH2 into hsScratch.clientHello */
-/*      + transcript update → case 10.                                                            */
-/*   10: (HRR) send CH2 record                                                                    */
-/*   11: (HRR) recv second ServerHello + reject double-HRR + parse + stash → case 20             */
-/*   20: done; the driver runs the ECDH + HKDF step next                                         */
-/* Substate transitions use for-loop + switch + continue to jump between non-adjacent cases.     */
-static SSFTLSIOResult_t _TlscHandleSendCH(SSFTLSCSession_t *session)
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: SEND_CH state; sends the ClientHello and receives the ServerHello, resumable        */
+/* --------------------------------------------------------------------------------------------- */
+static SSFTLSIOResult_t _SSFTLSCHandleSendCH(SSFTLSCSession_t *session)
 {
-    uint8_t *buf = session->hsBuf;             /* ServerHello / HRR record, in place */
-    uint8_t serverPubKey[97]; /* max SEC1 P-384 */
+    uint8_t *buf;
+    uint8_t serverPubKey[97];
     size_t serverPubKeyLen = 0;
     uint16_t serverGroup = 0;
     SSFTLSIOResult_t r;
 
+    SSF_REQUIRE(session != NULL);
+    SSF_REQUIRE(session->inner != NULL);
+    buf = session->hsBuf;
+
+    /* Is this the entry substate? */
     if (session->helperStep == 0)
     {
-        /* Wait for the inner transport opened by open() to connect. */
+        /* Yes, wait for the inner transport opened by open() to connect */
         SSFNetIOResult_t ir = session->inner->pollOpen(session->inner);
 
+        /* Is the inner transport still connecting? */
         if ((ir == SSF_NET_IO_WANT_READ) || (ir == SSF_NET_IO_WANT_WRITE))
         { return SSF_TLS_IO_WANT_READ; }
+        /* Did the inner open fail? */
         if (ir != SSF_NET_IO_SUCCESS)
         {
+            /* Yes */
             if (ir == SSF_NET_IO_CLOSED) session->peerClosed = true;
             session->ioFailed = true;
             SSF_TLS_TRACE_HS_ERROR(&session->trace, "Inner transport open failed");
             return SSF_TLS_IO_ERROR;
         }
 
-        /* Connected: initialize the handshake transcript and build the ClientHello. */
+        /* Connected: initialize the handshake transcript */
         SSFTLSTranscriptInit(&session->transcript, SSF_HMAC_HASH_SHA256);
         session->hash = SSF_HMAC_HASH_SHA256;
         session->hashLen = 32;
@@ -1603,8 +1650,7 @@ static SSFTLSIOResult_t _TlscHandleSendCH(SSFTLSCSession_t *session)
         {
         case 1:
         {
-            /* Build ClientHello1. Non-idempotent (fresh random, session id and ephemeral keys):  */
-            /* runs once, then advances.                                                          */
+            /* Build ClientHello1 once: fresh random, session id and ephemeral keys */
             uint8_t random[32];
             uint8_t sid[32];
             uint8_t x25519Pub[32];
@@ -1617,13 +1663,13 @@ static SSFTLSIOResult_t _TlscHandleSendCH(SSFTLSCSession_t *session)
             uint8_t shareCount = 1u;
 
             SSF_TLS_TRACE_HS_INFO(&session->trace, "Sending ClientHello to %.200s", session->host);
-            if (!_GetEntropy(random, sizeof(random)) || !_GetEntropy(sid, sizeof(sid)) ||
-                !_GetEntropy(session->ephemeralPrivKey, 32))
+            if (!_SSFTLSCGetEntropy(random, sizeof(random)) ||
+                !_SSFTLSCGetEntropy(sid, sizeof(sid)) ||
+                !_SSFTLSCGetEntropy(session->ephemeralPrivKey, 32))
             { return SSF_TLS_IO_ERROR; }
             SSFX25519PubKeyFromPrivKey(session->ephemeralPrivKey, x25519Pub);
 
-            /* X25519 and, when built, secp384r1 shares: avoids a HelloRetryRequest from most   */
-            /* servers. Without P-384 the client offers X25519 alone (supported_groups agrees). */
+            /* X25519 and, when built, secp384r1 shares, which avoid most HelloRetryRequests */
             shares[0].group = SSF_TLS_GROUP_X25519;
             shares[0].pub = x25519Pub;
             shares[0].len = 32u;
@@ -1638,14 +1684,16 @@ static SSFTLSIOResult_t _TlscHandleSendCH(SSFTLSCSession_t *session)
             shares[1].len = (uint16_t)ecPubLen;
             shareCount = 2u;
 #endif
-            if (!_BuildClientHello(session, random, sid, (uint8_t)sizeof(sid), shares, shareCount,
-                                   NULL, 0u))
+            if (!_SSFTLSCBuildClientHello(session, random, sid, (uint8_t)sizeof(sid), shares,
+                                          shareCount, NULL, 0u))
             {
-                SSF_TLS_TRACE_HS_ERROR(&session->trace, "ClientHello does not fit hsScratch.clientHello");
+                SSF_TLS_TRACE_HS_ERROR(&session->trace,
+                                       "ClientHello does not fit hsScratch.clientHello");
                 return SSF_TLS_IO_ERROR;
             }
 #if SSF_CONFIG_TLSC_UNIT_TEST == 1
-            if (_utInjectCH != NULL)                   /* A fixed trace's ClientHello and key */
+            /* Is a fixed trace's ClientHello and key injected? */
+            if (_utInjectCH != NULL)
             {
                 memcpy(session->hsScratch.clientHello, _utInjectCH, _utInjectCHLen);
                 session->hsScratchLen = _utInjectCHLen;
@@ -1658,8 +1706,8 @@ static SSFTLSIOResult_t _TlscHandleSendCH(SSFTLSCSession_t *session)
         }
         /* fall through */
         case 2:
-            r = _SendPlainRecordOnce(session, SSF_TLS_CT_HANDSHAKE,
-                                     session->hsScratch.clientHello, session->hsScratchLen);
+            r = _SSFTLSCSendPlainRecordOnce(session, SSF_TLS_CT_HANDSHAKE,
+                                            session->hsScratch.clientHello, session->hsScratchLen);
             if (r != SSF_TLS_IO_SUCCESS) return r;
             session->clientHelloSent = true;
             session->helperStep = 3;
@@ -1667,7 +1715,8 @@ static SSFTLSIOResult_t _TlscHandleSendCH(SSFTLSCSession_t *session)
         case 3:
         {
             uint8_t ccs = 0x01u;
-            r = _SendPlainRecordOnce(session, SSF_TLS_CT_CHANGE_CIPHER, &ccs, 1);
+
+            r = _SSFTLSCSendPlainRecordOnce(session, SSF_TLS_CT_CHANGE_CIPHER, &ccs, 1);
             if (r != SSF_TLS_IO_SUCCESS) return r;
             session->helperStep = 4;
         }
@@ -1679,21 +1728,20 @@ static SSFTLSIOResult_t _TlscHandleSendCH(SSFTLSCSession_t *session)
             uint8_t hsType = 0;
             size_t ptLen;
 
-            /* ServerHello or HelloRetryRequest, reassembled if fragmented; the transcript is    */
-            /* handled below (HelloRetryRequest message_hash rule, SHA-384 re-init).             */
-            r = _RecvHandshakeOnce(session, &msg, &bodyLen, &hsType, false);
+            /* ServerHello or HelloRetryRequest; the transcript is updated below */
+            r = _SSFTLSCRecvHandshakeOnce(session, &msg, &bodyLen, &hsType, false);
             if (r != SSF_TLS_IO_SUCCESS) return r;
             if (hsType != SSF_TLS_HS_SERVER_HELLO)
             { SSF_TLS_TRACE_HS_ERROR(&session->trace, "Not ServerHello: type=%u", hsType);
               _SSF_TLSC_ALERT(session, SSF_TLS_ALERT_UNEXPECTED_MSG); return SSF_TLS_IO_ERROR; }
-            if (!_HandshakeAtRecordEnd(session, "ServerHello")) return SSF_TLS_IO_ERROR;
+            if (!_SSFTLSCHandshakeAtRecordEnd(session, "ServerHello")) return SSF_TLS_IO_ERROR;
             buf = (uint8_t *)msg;                 /* In hsBuf: header + body */
             ptLen = 4u + bodyLen;
 
-            /* HRR detection (RFC 8446 4.1.4) */
-            if (ptLen >= 38u && memcmp(&buf[6], _TlscHrrSentinel, 32) == 0)
+            /* Is it a HelloRetryRequest (RFC 8446 4.1.4)? */
+            if ((ptLen >= 38u) && (memcmp(&buf[6], _SSFTLSCHrrSentinel, 32) == 0))
             {
-                /* === HRR branch: all non-idempotent work runs here, then jumps to case 10. === */
+                /* Yes, all its non-idempotent work runs here, then case 10 */
                 uint16_t hrrGroup = 0;
                 uint16_t hrrSuite;
                 SSFHMACHash_t hrrHash;
@@ -1702,8 +1750,8 @@ static SSFTLSIOResult_t _TlscHandleSendCH(SSFTLSCSession_t *session)
 
                 SSF_TLS_TRACE_HS_INFO(&session->trace, "HelloRetryRequest received");
 
-                if (!_ParseServerHello(session, &buf[4], ptLen - 4u, true, NULL, NULL, &hrrGroup,
-                                       &hrrCookie, &hrrCookieLen))
+                if (!_SSFTLSCParseServerHello(session, &buf[4], ptLen - 4u, true, NULL, NULL,
+                                              &hrrGroup, &hrrCookie, &hrrCookieLen))
                 { return SSF_TLS_IO_ERROR; }
 
                 hrrSuite = session->cipherSuite;
@@ -1720,9 +1768,12 @@ static SSFTLSIOResult_t _TlscHandleSendCH(SSFTLSCSession_t *session)
                     uint8_t synthMsg[4 + SSF_TLS_MAX_HASH_SIZE];
                     uint16_t hLen = (hrrHash == SSF_HMAC_HASH_SHA384) ? 48u : 32u;
 
+                    /* Is the HRR's hash other than the SHA-256 the transcript started with? */
                     if (hrrHash != SSF_HMAC_HASH_SHA256)
                     {
+                        /* Yes, rehash ClientHello1 with it */
                         SSFTLSTranscript_t tmpT;
+
                         SSFTLSTranscriptInit(&tmpT, hrrHash);
                         SSFTLSTranscriptUpdate(&tmpT, session->hsScratch.clientHello,
                                                session->hsScratchLen);
@@ -1730,11 +1781,12 @@ static SSFTLSIOResult_t _TlscHandleSendCH(SSFTLSCSession_t *session)
                     }
                     else
                     {
+                        /* No, the running transcript already holds ClientHello1's hash */
                         SSFTLSTranscriptHash(&session->transcript, ch1Hash, sizeof(ch1Hash));
                     }
 
                     synthMsg[0] = 254u;
-                    _Put24(&synthMsg[1], hLen);
+                    _SSFTLSCPut24(&synthMsg[1], hLen);
                     memcpy(&synthMsg[4], ch1Hash, hLen);
 
                     SSFTLSTranscriptInit(&session->transcript, hrrHash);
@@ -1743,11 +1795,10 @@ static SSFTLSIOResult_t _TlscHandleSendCH(SSFTLSCSession_t *session)
                     SSFTLSTranscriptUpdate(&session->transcript, buf, ptLen);
                 }
 
-                /* ClientHello2 is ClientHello1 with key_share replaced by the selected group and */
-                /* the cookie added; random and session id stay the same (RFC 8446 4.1.2).        */
-                if (hrrGroup == SSF_TLS_GROUP_SECP256R1 ||
-                         hrrGroup == SSF_TLS_GROUP_SECP384R1)
+                /* Is the selected group an ECDH group, to rebuild ClientHello2 for (4.1.2)? */
+                if ((hrrGroup == SSF_TLS_GROUP_SECP256R1) || (hrrGroup == SSF_TLS_GROUP_SECP384R1))
                 {
+                    /* Yes, keep ClientHello1's random and session id, replace the key share */
                     SSFECCurve_t curve = (hrrGroup == SSF_TLS_GROUP_SECP256R1) ?
                                           SSF_EC_CURVE_P256 : SSF_EC_CURVE_P384;
                     uint8_t ecPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
@@ -1767,16 +1818,16 @@ static SSFTLSIOResult_t _TlscHandleSendCH(SSFTLSCSession_t *session)
                     memcpy(session->ephemeralPrivKey, ecPriv, cp->bytes);
                     _SSF_TLSC_SCRUB(ecPriv);
 
-                    /* hsScratch.clientHello is rebuilt in place, so take ClientHello1's values first. */
+                    /* Take ClientHello1's values first: hsScratch.clientHello is rebuilt */
                     memcpy(random, &session->hsScratch.clientHello[6], sizeof(random));
                     memcpy(sid, &session->hsScratch.clientHello[39], sidLen);
                     share.group = hrrGroup;
                     share.pub = ecPub;
                     share.len = (uint16_t)ecPubLen;
-                    if (!_BuildClientHello(session, random, sid, sidLen, &share, 1u,
-                                           hrrCookie, hrrCookieLen))
+                    if (!_SSFTLSCBuildClientHello(session, random, sid, sidLen, &share, 1u,
+                                                  hrrCookie, hrrCookieLen))
                     {
-                        /* Never send ClientHello2 without the cookie: the server must reject it. */
+                        /* Never send ClientHello2 without the cookie */
                         SSF_TLS_TRACE_HS_ERROR(&session->trace,
                                                "HRR: ClientHello2 does not fit (cookie %u bytes)",
                                                hrrCookieLen);
@@ -1784,7 +1835,8 @@ static SSFTLSIOResult_t _TlscHandleSendCH(SSFTLSCSession_t *session)
                         return SSF_TLS_IO_ERROR;
                     }
 #if SSF_CONFIG_TLSC_UNIT_TEST == 1
-                    if (_utInjectCH2 != NULL)              /* A fixed trace's ClientHello2, key */
+                    /* Is a fixed trace's ClientHello2 and key injected? */
+                    if (_utInjectCH2 != NULL)
                     {
                         memcpy(session->hsScratch.clientHello, _utInjectCH2, _utInjectCH2Len);
                         session->hsScratchLen = _utInjectCH2Len;
@@ -1801,25 +1853,28 @@ static SSFTLSIOResult_t _TlscHandleSendCH(SSFTLSCSession_t *session)
                 }
                 else
                 {
+                    /* No, unsupported group */
                     SSF_TLS_TRACE_HS_ERROR(&session->trace, "HRR: unsupported group 0x%04x",
                                            hrrGroup);
                     return SSF_TLS_IO_ERROR;
                 }
             }
 
-            /* === Non-HRR branch: parse SH, optionally SHA-384 reinit, stash into cryptoWork, */
-            /* jump to case 20 for dispatch.                                                   */
+            /* No, a ServerHello: parse it, rehash for SHA-384 if needed, stash for case 20 */
             SSFTLSTranscriptUpdate(&session->transcript, buf, ptLen);
 
-            if (!_ParseServerHello(session, &buf[4], ptLen - 4u, false,
-                                   serverPubKey, &serverPubKeyLen, &serverGroup, NULL, NULL))
+            if (!_SSFTLSCParseServerHello(session, &buf[4], ptLen - 4u, false,
+                                          serverPubKey, &serverPubKeyLen, &serverGroup, NULL,
+                                          NULL))
             { return SSF_TLS_IO_ERROR; }
             SSF_TLS_TRACE_HS_INFO(&session->trace,
                                   "ServerHello: suite=0x%04x group=0x%04x keyLen=%zu",
                                   session->cipherSuite, serverGroup, serverPubKeyLen);
 
+            /* Did the server choose a SHA-384 suite? */
             if (session->hash == SSF_HMAC_HASH_SHA384)
             {
+                /* Yes, rebuild the transcript with SHA-384 */
                 SSF_TLS_TRACE_CRYPTO_INFO(&session->trace,
                                           "Re-initializing transcript for SHA-384 (CH=%zu SH=%zu)",
                                           session->hsScratchLen, ptLen);
@@ -1833,7 +1888,7 @@ static SSFTLSIOResult_t _TlscHandleSendCH(SSFTLSCSession_t *session)
                 SSFTLSTranscriptUpdate(&session->transcript, buf, ptLen);
             }
 
-            /* Stash parse results into cryptoWork (session-lifetime — survives to case 20). */
+            /* Stash the results into cryptoWork, which lives as long as the session */
             session->cryptoWork.session = session;
             memcpy(session->cryptoWork.serverPubKey, serverPubKey, serverPubKeyLen);
             session->cryptoWork.serverPubKeyLen = (uint8_t)serverPubKeyLen;
@@ -1842,37 +1897,38 @@ static SSFTLSIOResult_t _TlscHandleSendCH(SSFTLSCSession_t *session)
             continue;
         }
         case 10:
-            /* HRR: send CH2 from session->hsScratch.clientHello (built in case 4 HRR branch). */
-            r = _SendPlainRecordOnce(session, SSF_TLS_CT_HANDSHAKE,
-                                     session->hsScratch.clientHello, session->hsScratchLen);
+            /* HRR: send ClientHello2, built in case 4 */
+            r = _SSFTLSCSendPlainRecordOnce(session, SSF_TLS_CT_HANDSHAKE,
+                                            session->hsScratch.clientHello, session->hsScratchLen);
             if (r != SSF_TLS_IO_SUCCESS) return r;
             session->helperStep = 11;
             /* fall through */
         case 11:
         {
-            /* HRR: recv second ServerHello, reassembled if fragmented. Reject double HRR. */
+            /* HRR: receive the second ServerHello; a second HRR is rejected */
             const uint8_t *msg = NULL;
             size_t bodyLen = 0;
             uint8_t hsType = 0;
             size_t ptLen;
 
-            r = _RecvHandshakeOnce(session, &msg, &bodyLen, &hsType, false);
+            r = _SSFTLSCRecvHandshakeOnce(session, &msg, &bodyLen, &hsType, false);
             if (r != SSF_TLS_IO_SUCCESS) return r;
             if (hsType != SSF_TLS_HS_SERVER_HELLO)
             { SSF_TLS_TRACE_HS_ERROR(&session->trace, "Not ServerHello after HRR");
               _SSF_TLSC_ALERT(session, SSF_TLS_ALERT_UNEXPECTED_MSG); return SSF_TLS_IO_ERROR; }
-            if (!_HandshakeAtRecordEnd(session, "ServerHello")) return SSF_TLS_IO_ERROR;
+            if (!_SSFTLSCHandshakeAtRecordEnd(session, "ServerHello")) return SSF_TLS_IO_ERROR;
             buf = (uint8_t *)msg;
             ptLen = 4u + bodyLen;
 
-            if (ptLen >= 38u && memcmp(&buf[6], _TlscHrrSentinel, 32) == 0)
+            if ((ptLen >= 38u) && (memcmp(&buf[6], _SSFTLSCHrrSentinel, 32) == 0))
             { SSF_TLS_TRACE_HS_ERROR(&session->trace, "Double HRR not supported");
               _SSF_TLSC_ALERT(session, SSF_TLS_ALERT_UNEXPECTED_MSG); return SSF_TLS_IO_ERROR; }
 
             SSFTLSTranscriptUpdate(&session->transcript, buf, ptLen);
 
-            if (!_ParseServerHello(session, &buf[4], ptLen - 4u, false,
-                                   serverPubKey, &serverPubKeyLen, &serverGroup, NULL, NULL))
+            if (!_SSFTLSCParseServerHello(session, &buf[4], ptLen - 4u, false,
+                                          serverPubKey, &serverPubKeyLen, &serverGroup, NULL,
+                                          NULL))
             { return SSF_TLS_IO_ERROR; }
 
             SSF_TLS_TRACE_HS_INFO(&session->trace,
@@ -1887,8 +1943,7 @@ static SSFTLSIOResult_t _TlscHandleSendCH(SSFTLSCSession_t *session)
             continue;
         }
         case 20:
-            /* Dispatch ECDH + HKDF. cryptoWork was populated in case 4 or case 11. */
-            /* The driver runs the ECDH + key schedule step on the next pollOpen() call. */
+            /* Done; the driver runs the ECDH + key schedule step on the next pollOpen() call */
             session->helperStep = 0;
             return SSF_TLS_IO_SUCCESS;
         default:
@@ -1898,13 +1953,12 @@ static SSFTLSIOResult_t _TlscHandleSendCH(SSFTLSCSession_t *session)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: validates an EncryptedExtensions body (RFC 8446 4.3.1, 4.2). alpn / alpnCount are  */
-/* the names the ClientHello offered (none when 0); *alpnChosenOut gets 1 + the index of the    */
-/* server's choice, or 0. Returns true, else false with the alert to send.                      */
+/* Internal: validates an EncryptedExtensions body (RFC 8446 4.3.1, 4.2)                         */
 /* --------------------------------------------------------------------------------------------- */
-static bool _ParseEncryptedExtensions(const uint8_t *body, size_t bodyLen, uint8_t *alertOut,
-                                      uint16_t *recordLimitOut, const char *const *alpn,
-                                      uint8_t alpnCount, uint8_t *alpnChosenOut)
+static bool _SSFTLSCParseEncryptedExtensions(const uint8_t *body, size_t bodyLen,
+                                             uint8_t *alertOut, uint16_t *recordLimitOut,
+                                             const char *const *alpnOpt, uint8_t alpnCount,
+                                             uint8_t *alpnChosenOut)
 {
     size_t pos = 2;
     size_t end;
@@ -1913,41 +1967,46 @@ static bool _ParseEncryptedExtensions(const uint8_t *body, size_t bodyLen, uint8
     bool hasRecordLimit = false;
     uint8_t chosen = 0;
 
+    SSF_REQUIRE(body != NULL);
+    SSF_REQUIRE(alertOut != NULL);
+    SSF_REQUIRE(recordLimitOut != NULL);
+    SSF_REQUIRE((alpnOpt != NULL) || (alpnCount == 0u));
+    SSF_REQUIRE(alpnChosenOut != NULL);
+
     *alertOut = SSF_TLS_ALERT_DECODE_ERROR;
     *recordLimitOut = 0;
     *alpnChosenOut = 0;
 
-    /* The message is exactly extensions<0..2^16-1> (4.3.1). */
+    /* The message is exactly extensions<0..2^16-1> (4.3.1) */
     if (bodyLen < 2u) return false;
-    end = 2u + (size_t)_Get16(&body[0]);
+    end = 2u + ((size_t)_SSFTLSCGet16(&body[0]));
     if (end != bodyLen) return false;
 
-    /* pos never passes end, so the differences below cannot wrap. */
+    /* pos never passes end, so the differences below cannot wrap */
     while (pos < end)
     {
         uint16_t eType;
         uint16_t eLen;
 
         if ((end - pos) < 4u) return false;
-        eType = _Get16(&body[pos]);
-        eLen = _Get16(&body[pos + 2u]);
+        eType = _SSFTLSCGet16(&body[pos]);
+        eLen = _SSFTLSCGet16(&body[pos + 2u]);
         pos += 4;
         if (eLen > (end - pos)) return false;
 
         switch (eType)
         {
         case SSF_TLS_EXT_SERVER_NAME:
-            /* Acknowledges the SNI the ClientHello sent, with empty extension_data (RFC 6066 3) */
+            /* Acknowledges the SNI sent, with empty extension_data (RFC 6066 3) */
             if (hasSni) { *alertOut = SSF_TLS_ALERT_ILLEGAL_PARAMETER; return false; }
             hasSni = true;
             if (eLen != 0u) return false;
             break;
         case SSF_TLS_EXT_SUPPORTED_GROUPS:
-            /* The server's group preferences (4.2.7), informational here: NamedGroupList is a   */
-            /* non-empty list of 2-byte groups filling the extension.                            */
+            /* Informational server group preferences (4.2.7): a non-empty NamedGroupList */
             if (hasGroups) { *alertOut = SSF_TLS_ALERT_ILLEGAL_PARAMETER; return false; }
             hasGroups = true;
-            if ((eLen < 4u) || (_Get16(&body[pos]) != (uint16_t)(eLen - 2u)) ||
+            if ((eLen < 4u) || (_SSFTLSCGet16(&body[pos]) != (uint16_t)(eLen - 2u)) ||
                 (((eLen - 2u) & 1u) != 0u))
             { return false; }
             break;
@@ -1955,12 +2014,11 @@ static bool _ParseEncryptedExtensions(const uint8_t *body, size_t bodyLen, uint8
         {
             uint16_t limit;
 
-            /* RFC 8449 4: a single uint16; below 64 MUST be illegal_parameter. Above 2^14+1 a  */
-            /* client MAY abort; it is accepted and capped, since records never exceed it.      */
+            /* A single uint16 (RFC 8449 4): below 64 is illegal, above 2^14+1 is capped */
             if (hasRecordLimit) { *alertOut = SSF_TLS_ALERT_ILLEGAL_PARAMETER; return false; }
             hasRecordLimit = true;
             if (eLen != 2u) return false;
-            limit = _Get16(&body[pos]);
+            limit = _SSFTLSCGet16(&body[pos]);
             if (limit < SSF_TLSC_RSL_MIN)
             { *alertOut = SSF_TLS_ALERT_ILLEGAL_PARAMETER; return false; }
             *recordLimitOut = (limit > SSF_TLSC_RSL_MAX) ? (uint16_t)SSF_TLSC_RSL_MAX : limit;
@@ -1970,17 +2028,16 @@ static bool _ParseEncryptedExtensions(const uint8_t *body, size_t bodyLen, uint8
         {
             uint8_t i;
 
-            /* RFC 7301 3.1: only if offered; a ProtocolNameList of exactly one non-empty name, */
-            /* one the client offered.                                                         */
+            /* Only if offered: exactly one non-empty name the client offered (RFC 7301 3.1) */
             if (alpnCount == 0u) { *alertOut = SSF_TLS_ALERT_UNSUPPORTED_EXT; return false; }
             if (chosen != 0u) { *alertOut = SSF_TLS_ALERT_ILLEGAL_PARAMETER; return false; }
-            if ((eLen < 4u) || (_Get16(&body[pos]) != (uint16_t)(eLen - 2u)) ||
+            if ((eLen < 4u) || (_SSFTLSCGet16(&body[pos]) != (uint16_t)(eLen - 2u)) ||
                 ((size_t)body[pos + 2u] != (size_t)(eLen - 3u)))
             { return false; }
             for (i = 0; i < alpnCount; i++)
             {
-                if ((_AlpnLen(alpn[i]) == (size_t)(eLen - 3u)) &&
-                    (memcmp(alpn[i], &body[pos + 3u], (size_t)(eLen - 3u)) == 0))
+                if ((_SSFTLSCAlpnLen(alpnOpt[i]) == (size_t)(eLen - 3u)) &&
+                    (memcmp(alpnOpt[i], &body[pos + 3u], (size_t)(eLen - 3u)) == 0))
                 { chosen = (uint8_t)(i + 1u); }
             }
             if (chosen == 0u) { *alertOut = SSF_TLS_ALERT_ILLEGAL_PARAMETER; return false; }
@@ -1994,8 +2051,7 @@ static bool _ParseEncryptedExtensions(const uint8_t *body, size_t bodyLen, uint8
             *alertOut = SSF_TLS_ALERT_ILLEGAL_PARAMETER;
             return false;
         default:
-            /* Not offered by the ClientHello (ALPN, pre_shared_key, ...): unsupported_extension */
-            /* (4.2).                                                                          */
+            /* Not offered by the ClientHello: unsupported_extension (4.2) */
             *alertOut = SSF_TLS_ALERT_UNSUPPORTED_EXT;
             return false;
         }
@@ -2012,10 +2068,9 @@ bool _SSFTLSCParseEncryptedExtensionsForTest(const uint8_t *body, size_t bodyLen
                                              uint8_t *alertOut)
 {
     uint16_t limit;
-
     uint8_t chosen;
 
-    return _ParseEncryptedExtensions(body, bodyLen, alertOut, &limit, NULL, 0u, &chosen);
+    return _SSFTLSCParseEncryptedExtensions(body, bodyLen, alertOut, &limit, NULL, 0u, &chosen);
 }
 
 bool _SSFTLSCParseEncryptedExtensionsAlpnForTest(SSFTLSCSession_t *session, const uint8_t *body,
@@ -2023,8 +2078,8 @@ bool _SSFTLSCParseEncryptedExtensionsAlpnForTest(SSFTLSCSession_t *session, cons
 {
     uint16_t limit;
 
-    return _ParseEncryptedExtensions(body, bodyLen, alertOut, &limit, session->alpnProtos,
-                                     session->alpnCount, &session->alpnChosen);
+    return _SSFTLSCParseEncryptedExtensions(body, bodyLen, alertOut, &limit, session->alpnProtos,
+                                            session->alpnCount, &session->alpnChosen);
 }
 
 bool _SSFTLSCParseEncryptedExtensionsRslForTest(const uint8_t *body, size_t bodyLen,
@@ -2032,22 +2087,18 @@ bool _SSFTLSCParseEncryptedExtensionsRslForTest(const uint8_t *body, size_t body
 {
     uint8_t chosen;
 
-    return _ParseEncryptedExtensions(body, bodyLen, alertOut, recordLimitOut, NULL, 0u, &chosen);
+    return _SSFTLSCParseEncryptedExtensions(body, bodyLen, alertOut, recordLimitOut, NULL, 0u,
+                                            &chosen);
 }
 #endif /* SSF_CONFIG_TLSC_UNIT_TEST */
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: validates a CertificateRequest body (RFC 8446 4.3.2) and chooses the client's       */
-/* CertificateVerify scheme: the first one in the server's signature_algorithms that a key of   */
-/* keyType can make, or 0 (no key, SSF_PKEY_TYPE_NONE, or no such scheme: the client then sends */
-/* an empty Certificate). *certAlgsOut / *certAlgsLenOut get the scheme list that certificate  */
-/* signatures must come from (4.4.2.3): signature_algorithms_cert if sent, else                 */
-/* signature_algorithms; they point into body. Returns true, or false with the alert to send   */
-/* and *schemeOut 0.                                                                             */
+/* Internal: validates a CertificateRequest body (RFC 8446 4.3.2) and chooses the client scheme  */
 /* --------------------------------------------------------------------------------------------- */
-static bool _ParseCertificateRequest(const uint8_t *body, size_t bodyLen, SSFPKeyType_t keyType,
-                                     uint16_t *schemeOut, const uint8_t **certAlgsOut,
-                                     size_t *certAlgsLenOut, uint8_t *alertOut)
+static bool _SSFTLSCParseCertificateRequest(const uint8_t *body, size_t bodyLen,
+                                            SSFPKeyType_t keyType, uint16_t *schemeOut,
+                                            const uint8_t **certAlgsOut, size_t *certAlgsLenOut,
+                                            uint8_t *alertOut)
 {
     size_t pos;
     size_t start;
@@ -2060,6 +2111,12 @@ static bool _ParseCertificateRequest(const uint8_t *body, size_t bodyLen, SSFPKe
     const uint8_t *certAlgs = NULL;
     size_t certAlgsLen = 0;
 
+    SSF_REQUIRE(body != NULL);
+    SSF_REQUIRE(schemeOut != NULL);
+    SSF_REQUIRE(certAlgsOut != NULL);
+    SSF_REQUIRE(certAlgsLenOut != NULL);
+    SSF_REQUIRE(alertOut != NULL);
+
     *alertOut = SSF_TLS_ALERT_DECODE_ERROR;
     *schemeOut = 0;
     *certAlgsOut = NULL;
@@ -2069,13 +2126,13 @@ static bool _ParseCertificateRequest(const uint8_t *body, size_t bodyLen, SSFPKe
     if (bodyLen < 1u) return false;
     ctxLen = body[0];
     if ((bodyLen - 1u) < (ctxLen + 2u)) return false;
-    start = 1u + ctxLen + 2u;
-    end = start + (size_t)_Get16(&body[1u + ctxLen]);
+    start = (1u + ctxLen) + 2u;
+    end = start + ((size_t)_SSFTLSCGet16(&body[1u + ctxLen]));
     if ((end != bodyLen) || ((end - start) < 2u)) return false;
-    /* The context is for post-handshake authentication, which the client never offers */
+    /* Is there a context, used only for post-handshake authentication the client never offers? */
     if (ctxLen != 0u) { *alertOut = SSF_TLS_ALERT_ILLEGAL_PARAMETER; return false; }
 
-    /* pos never passes end, so the differences below cannot wrap. */
+    /* pos never passes end, so the differences below cannot wrap */
     for (pos = start; pos < end; )
     {
         uint16_t eType;
@@ -2083,14 +2140,14 @@ static bool _ParseCertificateRequest(const uint8_t *body, size_t bodyLen, SSFPKe
         size_t prev;
 
         if ((end - pos) < 4u) return false;
-        eType = _Get16(&body[pos]);
-        eLen = _Get16(&body[pos + 2u]);
-        if (eLen > (end - pos - 4u)) return false;
+        eType = _SSFTLSCGet16(&body[pos]);
+        eLen = _SSFTLSCGet16(&body[pos + 2u]);
+        if (eLen > ((end - pos) - 4u)) return false;
 
         /* No extension type twice in one block (4.2), recognized or not */
-        for (prev = start; prev < pos; prev += 4u + (size_t)_Get16(&body[prev + 2u]))
+        for (prev = start; prev < pos; prev += (4u + ((size_t)_SSFTLSCGet16(&body[prev + 2u]))))
         {
-            if (_Get16(&body[prev]) == eType)
+            if (_SSFTLSCGet16(&body[prev]) == eType)
             { *alertOut = SSF_TLS_ALERT_ILLEGAL_PARAMETER; return false; }
         }
 
@@ -2099,10 +2156,12 @@ static bool _ParseCertificateRequest(const uint8_t *body, size_t bodyLen, SSFPKe
         case SSF_TLS_EXT_SIGNATURE_ALGS:
         case SSF_TLSC_EXT_SIG_ALGS_CERT:
             /* SignatureSchemeList<2..2^16-2> filling the extension (4.2.3) */
-            if ((eLen < 4u) || (_Get16(&body[pos + 4u]) != (uint16_t)(eLen - 2u)) ||
+            if ((eLen < 4u) || (_SSFTLSCGet16(&body[pos + 4u]) != (uint16_t)(eLen - 2u)) ||
                 ((eLen & 1u) != 0u)) return false;
+            /* Is it signature_algorithms_cert? */
             if (eType == SSF_TLSC_EXT_SIG_ALGS_CERT)
             {
+                /* Yes, keep its list for the certificate signatures */
                 certAlgs = &body[pos + 6u];
                 certAlgsLen = (size_t)eLen - 2u;
                 break;
@@ -2115,9 +2174,10 @@ static bool _ParseCertificateRequest(const uint8_t *body, size_t bodyLen, SSFPKe
 
                 for (k = 0; (k < sigAlgsLen) && (chosen == 0u); k += 2u)
                 {
-                    if (_SchemeCanSign(_Get16(&sigAlgs[k]), _PKeyLeafType(keyType)))
+                    if (_SSFTLSCSchemeCanSign(_SSFTLSCGet16(&sigAlgs[k]),
+                                              _SSFTLSCPKeyLeafType(keyType)))
                     {
-                        chosen = _Get16(&sigAlgs[k]);
+                        chosen = _SSFTLSCGet16(&sigAlgs[k]);
                     }
                 }
             }
@@ -2133,11 +2193,10 @@ static bool _ParseCertificateRequest(const uint8_t *body, size_t bodyLen, SSFPKe
             *alertOut = SSF_TLS_ALERT_ILLEGAL_PARAMETER;
             return false;
         default:
-            /* certificate_authorities, oid_filters, signature_algorithms_cert, status_request, */
-            /* SCT and anything unrecognized: ignored (4.3.2)                                  */
+            /* Anything else, e.g. certificate_authorities or oid_filters, is ignored (4.3.2) */
             break;
         }
-        pos += 4u + (size_t)eLen;
+        pos += (4u + ((size_t)eLen));
     }
 
     /* signature_algorithms MUST be present (4.3.2); a missing one is missing_extension (9.2) */
@@ -2151,93 +2210,115 @@ static bool _ParseCertificateRequest(const uint8_t *body, size_t bodyLen, SSFPKe
     return true;
 }
 
-/* --------------------------------------------------------------------------------------------- */
-/* Internal: client authentication (mutual TLS, RFC 8446 4.4.2, 4.4.3).                          */
-/* --------------------------------------------------------------------------------------------- */
-static size_t _SendRecordMax(const SSFTLSCSession_t *s);
+/* Forward declaration for client authentication (mutual TLS, RFC 8446 4.4.2, 4.4.3) */
+static size_t _SSFTLSCSendRecordMax(const SSFTLSCSession_t *s);
 
-/* Length of the client Certificate message: header, empty context, certificate_list of        */
-/* CertificateEntry { cert_data<1..2^24-1>, extensions<0..2^16-1> (empty) }.                    */
-static size_t _ClientCertMsgLen(const SSFTLSCSession_t *s)
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: returns the length of the client Certificate message.                               */
+/* --------------------------------------------------------------------------------------------- */
+static size_t _SSFTLSCClientCertMsgLen(const SSFTLSCSession_t *s)
 {
     size_t len = 4u + 1u + 3u;
     uint8_t i;
 
-    for (i = 0; i < s->clientChainCount; i++) len += 3u + (size_t)s->clientChainLens[i] + 2u;
+    SSF_REQUIRE(s != NULL);
+    SSF_REQUIRE((s->clientChainLens != NULL) || (s->clientChainCount == 0u));
+
+    for (i = 0; i < s->clientChainCount; i++)
+    {
+        len += ((3u + ((size_t)s->clientChainLens[i])) + 2u);
+    }
     return len;
 }
 
-/* Copies the part of piece[0..pieceLen) that falls in the window *off / *dst / *n, then moves  */
-/* the window past the piece.                                                                     */
-static void _CopyPiece(size_t *off, uint8_t **dst, size_t *n, const uint8_t *piece,
-                       size_t pieceLen)
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: copies the part of piece inside the window *off / *dst / *dstSize, then passes it   */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFTLSCCopyPiece(size_t *off, uint8_t **dst, size_t *dstSize, const uint8_t *piece,
+                              size_t pieceLen)
 {
     size_t c;
 
+    SSF_REQUIRE(off != NULL);
+    SSF_REQUIRE(dst != NULL);
+    SSF_REQUIRE(dstSize != NULL);
+    SSF_REQUIRE(piece != NULL);
+
     if (*off >= pieceLen) { *off -= pieceLen; return; }
     c = pieceLen - *off;
-    if (c > *n) c = *n;
+    if (c > *dstSize) c = *dstSize;
     memcpy(*dst, &piece[*off], c);
     *dst += c;
-    *n -= c;
+    *dstSize -= c;
     *off = 0;
 }
 
-/* Copies bytes off..off+n of the client Certificate message to dst, without building it: the  */
-/* certificates are read in place from the caller's memory, so a chain of any size is sent     */
-/* record by record with no buffer of its size.                                                 */
-static void _ClientCertMsgCopy(const SSFTLSCSession_t *s, size_t off, uint8_t *dst, size_t n)
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: copies bytes off..off+dstSize of the client Certificate message, read in place      */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFTLSCClientCertMsgCopy(const SSFTLSCSession_t *s, size_t off, uint8_t *dst,
+                                      size_t dstSize)
 {
     static const uint8_t noExts[2] = { 0, 0 };
     uint8_t hdr[8];
     uint8_t len24[3];
-    size_t body = _ClientCertMsgLen(s) - 4u;
+    size_t body;
     uint8_t i;
 
+    SSF_REQUIRE(s != NULL);
+    SSF_REQUIRE(dst != NULL);
+    SSF_REQUIRE((s->clientChainDer != NULL) || (s->clientChainCount == 0u));
+
+    body = _SSFTLSCClientCertMsgLen(s) - 4u;
     hdr[0] = SSF_TLS_HS_CERTIFICATE;
-    _Put24(&hdr[1], body);
+    _SSFTLSCPut24(&hdr[1], body);
     hdr[4] = 0;                                                  /* certificate_request_context */
-    _Put24(&hdr[5], body - 4u);                                  /* certificate_list length     */
-    _CopyPiece(&off, &dst, &n, hdr, sizeof(hdr));
-    for (i = 0; (i < s->clientChainCount) && (n > 0u); i++)
+    _SSFTLSCPut24(&hdr[5], body - 4u);                           /* certificate_list length */
+    _SSFTLSCCopyPiece(&off, &dst, &dstSize, hdr, sizeof(hdr));
+    for (i = 0; (i < s->clientChainCount) && (dstSize > 0u); i++)
     {
-        _Put24(len24, s->clientChainLens[i]);
-        _CopyPiece(&off, &dst, &n, len24, sizeof(len24));
-        _CopyPiece(&off, &dst, &n, s->clientChainDer[i], s->clientChainLens[i]);
-        _CopyPiece(&off, &dst, &n, noExts, sizeof(noExts));
+        _SSFTLSCPut24(len24, s->clientChainLens[i]);
+        _SSFTLSCCopyPiece(&off, &dst, &dstSize, len24, sizeof(len24));
+        _SSFTLSCCopyPiece(&off, &dst, &dstSize, s->clientChainDer[i], s->clientChainLens[i]);
+        _SSFTLSCCopyPiece(&off, &dst, &dstSize, noExts, sizeof(noExts));
     }
 }
 
-/* Sends handshake bytes as as many records as the send limit takes; resumable, s->certSendOff */
-/* counting what was sent. msg NULL: the client Certificate message, generated from the chain   */
-/* and added to the transcript as it is cut. Otherwise msg[0..total), already in the transcript */
-/* (CertificateVerify, Finished). Pieces are staged in hsBuf, idle here: the server's handshake */
-/* ended at a record boundary.                                                                   */
-static SSFTLSIOResult_t _SendHandshakeOnce(SSFTLSCSession_t *s, const uint8_t *msg, size_t total)
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: sends a handshake message in records of the send limit; msg NULL is the Certificate */
+/* --------------------------------------------------------------------------------------------- */
+static SSFTLSIOResult_t _SSFTLSCSendHandshakeOnce(SSFTLSCSession_t *s, const uint8_t *msg,
+                                                  size_t msgLen)
 {
-    size_t chunk = _SendRecordMax(s);
+    size_t chunk;
     SSFTLSIOResult_t r;
 
+    SSF_REQUIRE(s != NULL);
+
+    chunk = _SSFTLSCSendRecordMax(s);
     if (chunk > SSF_TLSC_HSBUF_SIZE) chunk = SSF_TLSC_HSBUF_SIZE;
     for (;;)
     {
         size_t n = 0;
 
+        /* Is a new record to be cut? */
         if (!s->ioCtx.sendPending)
         {
-            if (s->certSendOff >= total) return SSF_TLS_IO_SUCCESS;
-            n = total - s->certSendOff;
+            /* Yes, stage the next piece in hsBuf, idle as the server's handshake has ended */
+            if (s->certSendOff >= msgLen) return SSF_TLS_IO_SUCCESS;
+            n = msgLen - s->certSendOff;
             if (n > chunk) n = chunk;
             if (msg != NULL) memcpy(s->hsBuf, &msg[s->certSendOff], n);
             else
             {
-                _ClientCertMsgCopy(s, s->certSendOff, s->hsBuf, n);
+                /* The Certificate message is generated from the chain as it is cut */
+                _SSFTLSCClientCertMsgCopy(s, s->certSendOff, s->hsBuf, n);
                 SSFTLSTranscriptUpdate(&s->transcript, s->hsBuf, n);
             }
             s->certSendOff += (uint32_t)n;
         }
-        r = _SendEncRecordOnce(s, SSF_TLS_CT_HANDSHAKE, s->hsBuf, n);
-        /* The Finished is staged here: wipe the piece once it is encrypted (or failing) */
+        r = _SSFTLSCSendEncRecordOnce(s, SSF_TLS_CT_HANDSHAKE, s->hsBuf, n);
+        /* Is a staged Finished piece encrypted or failed, so it can be wiped? */
         if ((msg != NULL) && (r != SSF_TLS_IO_WANT_WRITE))
         {
             _SSF_TLSC_SCRUB_N("clientFlightPiece", s->hsBuf, chunk);
@@ -2246,26 +2327,33 @@ static SSFTLSIOResult_t _SendHandshakeOnce(SSFTLSCSession_t *s, const uint8_t *m
     }
 }
 
-/* Builds the client CertificateVerify message in out: scheme, then the key's signature over 64  */
-/* spaces, "TLS 1.3, client CertificateVerify", 0x00 and the transcript hash (4.4.3). The       */
-/* content is hashed with the scheme's own hash (Ed25519: none). Out of line so the content     */
-/* buffer stays out of the driver's frame.                                                       */
-static SSF_NOINLINE bool _SignClientCV(const SSFTLSCSession_t *s, uint16_t scheme,
-                                       const uint8_t *th, size_t thLen, uint8_t *out,
-                                       size_t outSize, size_t *outLen)
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: builds and signs the client CertificateVerify message in out (RFC 8446 4.4.3)       */
+/* --------------------------------------------------------------------------------------------- */
+static SSF_NOINLINE bool _SSFTLSCSignClientCV(const SSFTLSCSession_t *s, uint16_t scheme,
+                                              const uint8_t *th, size_t thLen, uint8_t *out,
+                                              size_t outSize, size_t *outLen)
 {
     static const char ctx[] = "TLS 1.3, client CertificateVerify";
     uint8_t content[64u + sizeof(ctx) + SSF_TLS_MAX_HASH_SIZE];
     uint8_t h[SSF_SHA2_384_BYTE_SIZE];
-    size_t contentLen = 64u + sizeof(ctx) + thLen;
-    const SSFPKey_t *k = s->clientKey;
-    uint8_t *sig = &out[8];
+    size_t contentLen;
+    const SSFPKey_t *k;
+    uint8_t *sig;
     size_t sigSize;
     size_t sigLen = 0;
     bool ok = false;
 
+    SSF_REQUIRE(s != NULL);
+    SSF_REQUIRE(th != NULL);
+    SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE(outLen != NULL);
+
+    k = s->clientKey;
+    contentLen = (64u + sizeof(ctx)) + thLen;
     if ((k == NULL) || (thLen > SSF_TLS_MAX_HASH_SIZE) || (outSize < 8u) ||
-        !_SchemeCanSign(scheme, _PKeyLeafType(k->type))) return false;
+        (!_SSFTLSCSchemeCanSign(scheme, _SSFTLSCPKeyLeafType(k->type)))) return false;
+    sig = &out[8];
     sigSize = outSize - 8u;
     memset(content, 0x20, 64);
     memcpy(&content[64], ctx, sizeof(ctx));                   /* Includes the 0x00 separator */
@@ -2309,119 +2397,163 @@ static SSF_NOINLINE bool _SignClientCV(const SSFTLSCSession_t *s, uint16_t schem
         break;
     }
 #endif /* _SSF_TLSC_PSS */
-    default:                            /* Unreachable: _SchemeCanSign admitted the scheme */
+    default:
         return false;
     }
-    if (!ok || (sigLen > 0xFFFFu)) return false;
+    if ((!ok) || (sigLen > 0xFFFFu)) return false;
     out[0] = SSF_TLS_HS_CERTIFICATE_VERIFY;
-    _Put24(&out[1], 4u + sigLen);
-    _Put16(&out[4], scheme);
-    _Put16(&out[6], (uint16_t)sigLen);
+    _SSFTLSCPut24(&out[1], 4u + sigLen);
+    _SSFTLSCPut16(&out[4], scheme);
+    _SSFTLSCPut16(&out[6], (uint16_t)sigLen);
     *outLen = 8u + sigLen;
     return true;
 }
 
-/* Returns the RSA modulus and exponent of a PKCS#1 RSAPublicKey (pub) or RSAPrivateKey (priv). */
-static bool _RsaNE(const uint8_t *der, size_t derLen, bool priv, const uint8_t **n,
-                   uint32_t *nLen, const uint8_t **e, uint32_t *eLen)
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: returns the modulus and exponent of a PKCS#1 RSA public or private key.             */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFTLSCRsaNE(const uint8_t *der, size_t derLen, bool priv, const uint8_t **n,
+                          uint32_t *nLen, const uint8_t **e, uint32_t *eLen)
 {
-    SSFASN1Cursor_t cur = { der, (uint32_t)derLen };
+    SSFASN1Cursor_t cur;
     SSFASN1Cursor_t seq;
     SSFASN1Cursor_t next;
     uint64_t version;
 
+    SSF_REQUIRE(der != NULL);
+    SSF_REQUIRE(n != NULL);
+    SSF_REQUIRE(nLen != NULL);
+    SSF_REQUIRE(e != NULL);
+    SSF_REQUIRE(eLen != NULL);
+
     if (derLen > 0xFFFFFFFFu) return false;
+    cur.buf = der;
+    cur.bufLen = (uint32_t)derLen;
     if (!SSFASN1DecOpenConstructed(&cur, SSF_ASN1_TAG_SEQUENCE, &seq, &next)) return false;
-    if (priv && !SSFASN1DecGetIntU64(&seq, &version, &seq)) return false;
-    return SSFASN1DecGetUInt(&seq, n, nLen, &seq) && SSFASN1DecGetUInt(&seq, e, eLen, &seq);
+    if (priv && (!SSFASN1DecGetIntU64(&seq, &version, &seq))) return false;
+    return (SSFASN1DecGetUInt(&seq, n, nLen, &seq) && SSFASN1DecGetUInt(&seq, e, eLen, &seq));
 }
 
-/* True if the leaf certificate's public key is key's. Out of line: the parsed certificate     */
-/* (about 1 KB) lives only during this call.                                                     */
-static SSF_NOINLINE bool _ClientCertMatchesKey(const uint8_t *der, uint32_t derLen,
-                                               const SSFPKey_t *key)
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: true if the leaf certificate's public key is key's; parsed certificate out of line  */
+/* --------------------------------------------------------------------------------------------- */
+static SSF_NOINLINE bool _SSFTLSCClientCertMatchesKey(const uint8_t *der, uint32_t derLen,
+                                                      const SSFPKey_t *key)
 {
     SSFX509Cert_t leaf;
 
+    SSF_REQUIRE(der != NULL);
+    SSF_REQUIRE(key != NULL);
+
     if (!SSFX509Parse(der, derLen, &leaf)) return false;
-    if ((_LeafKeyType(&leaf) != _PKeyLeafType(key->type)) || (leaf.pubKeyUnusedBits != 0u))
+    if ((_SSFTLSCLeafKeyType(&leaf) != _SSFTLSCPKeyLeafType(key->type)) ||
+        (leaf.pubKeyUnusedBits != 0u))
     {
         return false;
     }
+    /* Is it an RSA key, compared by modulus and exponent? */
     if (key->type == SSF_PKEY_TYPE_RSA)
     {
-        const uint8_t *n1, *e1, *n2, *e2;
-        uint32_t n1Len, e1Len, n2Len, e2Len;
+        /* Yes */
+        const uint8_t *n1;
+        const uint8_t *e1;
+        const uint8_t *n2;
+        const uint8_t *e2;
+        uint32_t n1Len;
+        uint32_t e1Len;
+        uint32_t n2Len;
+        uint32_t e2Len;
 
-        return _RsaNE(leaf.pubKey, leaf.pubKeyLen, false, &n1, &n1Len, &e1, &e1Len) &&
-               _RsaNE(key->rsaDer, key->rsaDerLen, true, &n2, &n2Len, &e2, &e2Len) &&
+        return _SSFTLSCRsaNE(leaf.pubKey, leaf.pubKeyLen, false, &n1, &n1Len, &e1, &e1Len) &&
+               _SSFTLSCRsaNE(key->rsaDer, key->rsaDerLen, true, &n2, &n2Len, &e2, &e2Len) &&
                (n1Len == n2Len) && (memcmp(n1, n2, n1Len) == 0) &&
                (e1Len == e2Len) && (memcmp(e1, e2, e1Len) == 0);
     }
+    /* No, compare the public key bytes */
     return (leaf.pubKeyLen == key->pubLen) && (memcmp(leaf.pubKey, key->pub, key->pubLen) == 0);
 }
 
-/* True if scheme is in the scheme list algs[0..algsLen). */
-static bool _SchemeInList(uint16_t scheme, const uint8_t *algs, size_t algsLen)
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: true if scheme is in the scheme list algs[0..algsLen).                              */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFTLSCSchemeInList(uint16_t scheme, const uint8_t *algs, size_t algsLen)
 {
     size_t k;
 
-    for (k = 0; (k + 1u) < algsLen; k += 2u) { if (_Get16(&algs[k]) == scheme) return true; }
+    SSF_REQUIRE((algs != NULL) || (algsLen == 0u));
+
+    for (k = 0; (k + 1u) < algsLen; k += 2u)
+    {
+        if (_SSFTLSCGet16(&algs[k]) == scheme) return true;
+    }
     return false;
 }
 
-/* True if cert's own signature (by its issuer) is one of the listed schemes. The ECDSA curve   */
-/* is the issuer's, not known here, so ecdsa-with-SHAx counts as the SHAx ECDSA scheme; RSA-PSS */
-/* as either rsae or pss with its hash (RFC 8446 4.2.3).                                          */
-static bool _CertSigInList(const SSFX509Cert_t *cert, const uint8_t *algs, size_t algsLen)
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: true if cert's own signature by its issuer is one of the listed schemes.            */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFTLSCCertSigInList(const SSFX509Cert_t *cert, const uint8_t *algs, size_t algsLen)
 {
+    SSF_REQUIRE(cert != NULL);
+
+    /* The ECDSA curve is the issuer's, unknown here; RSA-PSS is either rsae or pss (4.2.3) */
     if (SSFX509IsSigECDSASHA256(cert))
     {
-        return _SchemeInList(SSF_TLS_SIG_ECDSA_SECP256R1_SHA256, algs, algsLen);
+        return _SSFTLSCSchemeInList(SSF_TLS_SIG_ECDSA_SECP256R1_SHA256, algs, algsLen);
     }
     if (SSFX509IsSigECDSASHA384(cert))
     {
-        return _SchemeInList(SSF_TLS_SIG_ECDSA_SECP384R1_SHA384, algs, algsLen);
+        return _SSFTLSCSchemeInList(SSF_TLS_SIG_ECDSA_SECP384R1_SHA384, algs, algsLen);
     }
-    if (SSFX509IsSigEd25519(cert)) return _SchemeInList(SSF_TLS_SIG_ED25519, algs, algsLen);
-    if (SSFX509IsSigRSAPKCS1SHA256(cert)) return _SchemeInList(0x0401u, algs, algsLen);
-    if (SSFX509IsSigRSAPKCS1SHA384(cert)) return _SchemeInList(0x0501u, algs, algsLen);
-    if (SSFX509IsSigRSAPKCS1SHA512(cert)) return _SchemeInList(0x0601u, algs, algsLen);
+    if (SSFX509IsSigEd25519(cert))
+    {
+        return _SSFTLSCSchemeInList(SSF_TLS_SIG_ED25519, algs, algsLen);
+    }
+    if (SSFX509IsSigRSAPKCS1SHA256(cert)) return _SSFTLSCSchemeInList(0x0401u, algs, algsLen);
+    if (SSFX509IsSigRSAPKCS1SHA384(cert)) return _SSFTLSCSchemeInList(0x0501u, algs, algsLen);
+    if (SSFX509IsSigRSAPKCS1SHA512(cert)) return _SSFTLSCSchemeInList(0x0601u, algs, algsLen);
     if (SSFX509IsSigRSAPSSSHA256(cert))
     {
-        return _SchemeInList(SSF_TLS_SIG_RSA_PSS_RSAE_SHA256, algs, algsLen) ||
-               _SchemeInList(0x0809u, algs, algsLen);
+        return _SSFTLSCSchemeInList(SSF_TLS_SIG_RSA_PSS_RSAE_SHA256, algs, algsLen) ||
+               _SSFTLSCSchemeInList(0x0809u, algs, algsLen);
     }
     if (SSFX509IsSigRSAPSSSHA384(cert))
     {
-        return _SchemeInList(SSF_TLS_SIG_RSA_PSS_RSAE_SHA384, algs, algsLen) ||
-               _SchemeInList(0x080au, algs, algsLen);
+        return _SSFTLSCSchemeInList(SSF_TLS_SIG_RSA_PSS_RSAE_SHA384, algs, algsLen) ||
+               _SSFTLSCSchemeInList(0x080au, algs, algsLen);
     }
     return false;                                            /* Not a scheme the client knows */
 }
 
-/* True if every certificate of the client chain is signed with a scheme in algs (RFC 8446     */
-/* 4.4.2.3); a self-signed last certificate is exempt, as trust anchors are (4.4.2.2). Also     */
-/* traces, never enforces, what would make a server refuse the leaf: validity (when the time is */
-/* trusted), Key Usage without digitalSignature, EKU without clientAuth. Out of line: one       */
-/* parsed certificate (about 1 KB) at a time, only during this call.                             */
-static SSF_NOINLINE bool _ClientChainAcceptable(SSFTLSCSession_t *s, const uint8_t *algs,
-                                                size_t algsLen, bool nowValid, uint64_t now)
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: true if each client chain certificate is signed with a scheme in algs (4.4.2.3)     */
+/* --------------------------------------------------------------------------------------------- */
+static SSF_NOINLINE bool _SSFTLSCClientChainAcceptable(SSFTLSCSession_t *s, const uint8_t *algs,
+                                                       size_t algsLen, bool nowValid,
+                                                       uint64_t now)
 {
     SSFX509Cert_t cert;
     bool ok = true;
     uint8_t i;
 
+    SSF_REQUIRE(s != NULL);
+    SSF_REQUIRE((s->clientChainDer != NULL) || (s->clientChainCount == 0u));
+    SSF_REQUIRE((s->clientChainLens != NULL) || (s->clientChainCount == 0u));
+
     for (i = 0; i < s->clientChainCount; i++)
     {
+        /* Does the certificate fail to parse? */
         if (!SSFX509Parse(s->clientChainDer[i], s->clientChainLens[i], &cert))
         {
+            /* Yes, warn and carry on */
             _SSF_TLSC_CERT_WARN(&s->trace, "Client certificate %u does not parse", i);
             ok = false;
             continue;
         }
+        /* Is it the leaf, whose likely server refusals are traced but never enforced? */
         if (i == 0u)
         {
+            /* Yes */
             if (cert.hasKeyUsage && ((cert.keyUsageBits & SSF_X509_KU_DIGITAL_SIGNATURE) == 0u))
             {
                 _SSF_TLSC_CERT_WARN(&s->trace, "Client certificate Key Usage lacks "
@@ -2438,30 +2570,37 @@ static SSF_NOINLINE bool _ClientChainAcceptable(SSFTLSCSession_t *s, const uint8
                                     "current time: the server may refuse it");
             }
         }
-        /* A self-signed last certificate (a root) is not validated, so any signature will do */
+        /* Is it a self-signed last certificate, exempt as a trust anchor is (4.4.2.2)? */
         if (((i + 1u) == s->clientChainCount) && (cert.subject.rawLen == cert.issuer.rawLen) &&
             (memcmp(cert.subject.raw, cert.issuer.raw, cert.subject.rawLen) == 0)) continue;
-        if (!_CertSigInList(&cert, algs, algsLen)) ok = false;
+        if (!_SSFTLSCCertSigInList(&cert, algs, algsLen)) ok = false;
     }
     return ok;
 }
 
-/* Handles a CertificateRequest: validates it and chooses the client's scheme, 0 for an empty  */
-/* Certificate when no certificate is set, none of the server's schemes fits the key, or the   */
-/* chain is signed with algorithms the server does not accept.                                   */
-static bool _ChooseClientScheme(SSFTLSCSession_t *s, const uint8_t *body, size_t bodyLen,
-                                bool nowValid, uint64_t now, uint16_t *schemeOut,
-                                uint8_t *alertOut)
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: handles a CertificateRequest, choosing the client scheme, 0 for an empty one        */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFTLSCChooseClientScheme(SSFTLSCSession_t *s, const uint8_t *body, size_t bodyLen,
+                                       bool nowValid, uint64_t now, uint16_t *schemeOut,
+                                       uint8_t *alertOut)
 {
     const uint8_t *certAlgs;
     size_t certAlgsLen;
 
-    if (!_ParseCertificateRequest(body, bodyLen,
-                                  (s->clientChainCount != 0u) ? s->clientKey->type :
-                                  SSF_PKEY_TYPE_NONE, schemeOut, &certAlgs, &certAlgsLen,
-                                  alertOut)) return false;
+    SSF_REQUIRE(s != NULL);
+    SSF_REQUIRE(body != NULL);
+    SSF_REQUIRE(schemeOut != NULL);
+    SSF_REQUIRE(alertOut != NULL);
+
+    if (!_SSFTLSCParseCertificateRequest(body, bodyLen,
+                                         (s->clientChainCount != 0u) ? s->clientKey->type :
+                                         SSF_PKEY_TYPE_NONE, schemeOut, &certAlgs, &certAlgsLen,
+                                         alertOut)) return false;
+    /* Is the chain signed with algorithms the server does not accept? */
     if ((s->clientChainCount != 0u) &&
-        !_ClientChainAcceptable(s, certAlgs, certAlgsLen, nowValid, now) && (*schemeOut != 0u))
+        (!_SSFTLSCClientChainAcceptable(s, certAlgs, certAlgsLen, nowValid, now)) &&
+        (*schemeOut != 0u))
     {
         _SSF_TLSC_CERT_WARN(&s->trace, "Client certificate chain is signed with an algorithm "
                             "the server does not accept: sending an empty Certificate");
@@ -2478,8 +2617,8 @@ bool _SSFTLSCParseCertificateRequestForTest(const uint8_t *body, size_t bodyLen,
     const uint8_t *algs;
     size_t algsLen;
 
-    return _ParseCertificateRequest(body, bodyLen, SSF_PKEY_TYPE_NONE, &scheme, &algs, &algsLen,
-                                    alertOut);
+    return _SSFTLSCParseCertificateRequest(body, bodyLen, SSF_PKEY_TYPE_NONE, &scheme, &algs,
+                                           &algsLen, alertOut);
 }
 
 bool _SSFTLSCChooseClientSchemeForTest(const uint8_t *body, size_t bodyLen, SSFPKeyType_t keyType,
@@ -2488,67 +2627,72 @@ bool _SSFTLSCChooseClientSchemeForTest(const uint8_t *body, size_t bodyLen, SSFP
     const uint8_t *algs;
     size_t algsLen;
 
-    return _ParseCertificateRequest(body, bodyLen, keyType, schemeOut, &algs, &algsLen,
-                                    alertOut);
+    return _SSFTLSCParseCertificateRequest(body, bodyLen, keyType, schemeOut, &algs, &algsLen,
+                                           alertOut);
 }
 
 bool _SSFTLSCChooseClientSchemeChainForTest(SSFTLSCSession_t *session, const uint8_t *body,
                                             size_t bodyLen, bool nowValid, uint64_t nowUnixSec,
                                             uint16_t *schemeOut, uint8_t *alertOut)
 {
-    return _ChooseClientScheme(session, body, bodyLen, nowValid, nowUnixSec, schemeOut, alertOut);
+    return _SSFTLSCChooseClientScheme(session, body, bodyLen, nowValid, nowUnixSec, schemeOut,
+                                      alertOut);
 }
 
 size_t _SSFTLSCClientCertMsgLenForTest(const SSFTLSCSession_t *session)
 {
-    return _ClientCertMsgLen(session);
+    return _SSFTLSCClientCertMsgLen(session);
 }
 
 void _SSFTLSCClientCertMsgCopyForTest(const SSFTLSCSession_t *session, size_t off, uint8_t *dst,
-                                      size_t n)
+                                      size_t dstSize)
 {
-    _ClientCertMsgCopy(session, off, dst, n);
+    _SSFTLSCClientCertMsgCopy(session, off, dst, dstSize);
 }
 
 bool _SSFTLSCSignClientCVForTest(SSFTLSCSession_t *session, uint16_t scheme,
                                  const uint8_t *transcriptHash, size_t hashLen, uint8_t *msgOut,
                                  size_t msgSize, size_t *msgLenOut)
 {
-    return _SignClientCV(session, scheme, transcriptHash, hashLen, msgOut, msgSize, msgLenOut);
+    return _SSFTLSCSignClientCV(session, scheme, transcriptHash, hashLen, msgOut, msgSize,
+                                msgLenOut);
 }
 #endif /* SSF_CONFIG_TLSC_UNIT_TEST */
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: parses a server Certificate message body (RFC 8446 4.4.2). Returns true with up to */
-/* SSF_X509_CONFIG_MAX_CHAIN_DEPTH certificate pointers (into body) and lengths, and the number  */
-/* of entries sent (saturating at 255), else false.                                             */
+/* Internal: parses a server Certificate message body (RFC 8446 4.4.2)                           */
 /* --------------------------------------------------------------------------------------------- */
-static bool _ParseCertificate(const uint8_t *body, size_t bodyLen,
-                              const uint8_t **chainDerPtrs, uint32_t *chainDerLens,
-                              uint8_t *chainLenOut, uint8_t *seenOut, uint8_t *alertOut)
+static bool _SSFTLSCParseCertificate(const uint8_t *body, size_t bodyLen,
+                                     const uint8_t **chainDerPtrs, uint32_t *chainDerLens,
+                                     uint8_t *chainLenOut, uint8_t *seenOut, uint8_t *alertOut)
 {
     size_t pos;
     size_t listEnd;
     uint8_t count = 0;
     uint8_t seen = 0;
 
+    SSF_REQUIRE(body != NULL);
+    SSF_REQUIRE(chainDerPtrs != NULL);
+    SSF_REQUIRE(chainDerLens != NULL);
+    SSF_REQUIRE(chainLenOut != NULL);
+    SSF_REQUIRE(seenOut != NULL);
+    SSF_REQUIRE(alertOut != NULL);
+
     *chainLenOut = 0;
     *seenOut = 0;
-    *alertOut = SSF_TLS_ALERT_DECODE_ERROR;   /* Framing errors unless refined below */
+    *alertOut = SSF_TLS_ALERT_DECODE_ERROR;
 
-    /* certificate_request_context<0..2^8-1> is empty for server authentication (4.4.2). */
-    if (bodyLen < 1u + 3u) return false;
+    /* certificate_request_context is empty for server authentication (4.4.2) */
+    if (bodyLen < (1u + 3u)) return false;
     if (body[0] != 0u) { *alertOut = SSF_TLS_ALERT_ILLEGAL_PARAMETER; return false; }
     pos = 1;
 
-    /* certificate_list<0..2^24-1> fills the rest of the message exactly. An empty list is a  */
-    /* server that sent no certificate, which the client MUST reject (4.4.2.4).                */
-    listEnd = pos + 3u + (size_t)_Get24(&body[pos]);
+    /* certificate_list fills the message exactly; an empty one MUST be rejected (4.4.2.4) */
+    listEnd = (pos + 3u) + ((size_t)_SSFTLSCGet24(&body[pos]));
     pos += 3;
     if ((listEnd != bodyLen) || (pos == listEnd)) return false;
 
-    /* Every entry is validated; the first SSF_X509_CONFIG_MAX_CHAIN_DEPTH are kept. pos never */
-    /* passes listEnd, so the differences below cannot wrap.                                   */
+    /* Validate every entry, keep the first SSF_X509_CONFIG_MAX_CHAIN_DEPTH; no wrap below */
     while (pos < listEnd)
     {
         uint32_t certLen;
@@ -2556,9 +2700,10 @@ static bool _ParseCertificate(const uint8_t *body, size_t bodyLen,
 
         /* cert_data<1..2^24-1> */
         if ((listEnd - pos) < 3u) return false;
-        certLen = _Get24(&body[pos]);
+        certLen = _SSFTLSCGet24(&body[pos]);
         pos += 3;
         if ((certLen == 0u) || (certLen > (listEnd - pos))) return false;
+        /* Is there room to keep this certificate? */
         if (count < SSF_X509_CONFIG_MAX_CHAIN_DEPTH)
         {
             chainDerPtrs[count] = &body[pos];
@@ -2568,10 +2713,9 @@ static bool _ParseCertificate(const uint8_t *body, size_t bodyLen,
         if (seen < 0xffu) seen++;
         pos += certLen;
 
-        /* extensions<0..2^16-1>: each must answer one the ClientHello sent (4.4.2). None of  */
-        /* status_request or signed_certificate_timestamp is sent, so any is unsolicited.      */
+        /* extensions: none are solicited, as status_request and SCT are never sent (4.4.2) */
         if ((listEnd - pos) < 2u) return false;
-        extLen = _Get16(&body[pos]);
+        extLen = _SSFTLSCGet16(&body[pos]);
         pos += 2;
         if (extLen > (listEnd - pos)) return false;
         if (extLen != 0u) { *alertOut = SSF_TLS_ALERT_UNSUPPORTED_EXT; return false; }
@@ -2590,7 +2734,8 @@ bool _SSFTLSCParseCertificateForTest(const uint8_t *body, size_t bodyLen,
 {
     uint8_t alert;
     uint8_t seen;
-    return _ParseCertificate(body, bodyLen, ders, lens, countOut, &seen, &alert);
+
+    return _SSFTLSCParseCertificate(body, bodyLen, ders, lens, countOut, &seen, &alert);
 }
 
 bool _SSFTLSCParseCertificateSeenForTest(const uint8_t *body, size_t bodyLen,
@@ -2598,29 +2743,28 @@ bool _SSFTLSCParseCertificateSeenForTest(const uint8_t *body, size_t bodyLen,
                                          uint8_t *seenOut)
 {
     uint8_t alert;
-    return _ParseCertificate(body, bodyLen, ders, lens, countOut, seenOut, &alert);
+
+    return _SSFTLSCParseCertificate(body, bodyLen, ders, lens, countOut, seenOut, &alert);
 }
 #endif /* SSF_CONFIG_TLSC_UNIT_TEST */
 
-/* State RECV_EE_CERT: recv EE, recv Cert, parse chain, save leaf pubkey, dispatch chain verify. */
-/* Resumable — substates 0 (init), 1 (recv EE), 2 (recv Cert + parse + dispatch).    */
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: parses the leaf certificate and saves its public key and key type for the           */
-/* CertificateVerify step. Returns false (bad_certificate) if it does not parse or the key does  */
-/* not fit. Kept out of line: the parsed certificate (about 1.5 KB) then occupies the stack only */
-/* during this call, not under the chain verification that _SSFTLSCDrive runs later.             */
+/* Internal: saves the leaf certificate's public key and key type; parsed certificate out of line */
 /* --------------------------------------------------------------------------------------------- */
 SSF_NOINLINE
-static bool _SaveLeafKey(SSFTLSCSession_t *session, const uint8_t *der, uint32_t derLen)
+static bool _SSFTLSCSaveLeafKey(SSFTLSCSession_t *session, const uint8_t *der, uint32_t derLen)
 {
     SSFX509Cert_t leaf;
+
+    SSF_REQUIRE(session != NULL);
+    SSF_REQUIRE(der != NULL);
 
     if (!SSFX509Parse(der, derLen, &leaf))
     {
         SSF_TLS_TRACE_CERT_ERROR(&session->trace, "Failed to parse leaf certificate");
         return false;
     }
-    /* The key is the server's: one larger than any supported (RSA-8192, say) is refused here */
+    /* Is the server's key larger than any supported? */
     if (leaf.pubKeyLen > sizeof(session->hsScratch.leafPubKey))
     {
         SSF_TLS_TRACE_CERT_ERROR(&session->trace, "Leaf public key too large");
@@ -2628,29 +2772,34 @@ static bool _SaveLeafKey(SSFTLSCSession_t *session, const uint8_t *der, uint32_t
     }
     memcpy(session->hsScratch.leafPubKey, leaf.pubKey, leaf.pubKeyLen);
     session->hsScratchLen = leaf.pubKeyLen;
-    session->leafKeyType = _LeafKeyType(&leaf);
+    session->leafKeyType = _SSFTLSCLeafKeyType(&leaf);
     return true;
 }
 
-static SSFTLSIOResult_t _TlscHandleRecvEECert(SSFTLSCSession_t *session)
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: RECV_EE_CERT state; receives EncryptedExtensions and Certificate, resumable         */
+/* --------------------------------------------------------------------------------------------- */
+static SSFTLSIOResult_t _SSFTLSCHandleRecvEECert(SSFTLSCSession_t *session)
 {
-    const uint8_t *buf = NULL;                 /* Message in place in hsBuf */
+    const uint8_t *buf = NULL;
     size_t bodyLen;
     uint8_t hsType;
     SSFTLSIOResult_t r;
+
+    SSF_REQUIRE(session != NULL);
 
     switch (session->helperStep)
     {
     case 0:
         SSF_TLS_TRACE_CRYPTO_INFO(&session->trace, "Handshake keys derived");
-        /* Initialize handshake message buffer (servers may bundle multiple HS msgs per record). */
+        /* Servers may bundle several handshake messages per record */
         session->hsBufLen = 0;
         session->hsBufPos = 0;
         session->helperStep = 1;
         /* fall through */
     case 1:
-        /* === Receive EncryptedExtensions === */
-        r = _RecvHandshakeOnce(session, &buf, &bodyLen, &hsType, true);
+        /* Receive EncryptedExtensions */
+        r = _SSFTLSCRecvHandshakeOnce(session, &buf, &bodyLen, &hsType, true);
         if (r != SSF_TLS_IO_SUCCESS) return r;
         if (hsType != SSF_TLS_HS_ENCRYPTED_EXTENSIONS)
         { SSF_TLS_TRACE_HS_ERROR(&session->trace, "Expected EE, got type=%u", hsType);
@@ -2659,21 +2808,25 @@ static SSFTLSIOResult_t _TlscHandleRecvEECert(SSFTLSCSession_t *session)
         {
             uint8_t alert;
 
-            if (!_ParseEncryptedExtensions(&buf[4], bodyLen, &alert,
-                                           &session->peerRecordLimit, session->alpnProtos,
-                                           session->alpnCount, &session->alpnChosen))
+            if (!_SSFTLSCParseEncryptedExtensions(&buf[4], bodyLen, &alert,
+                                                  &session->peerRecordLimit, session->alpnProtos,
+                                                  session->alpnCount, &session->alpnChosen))
             {
                 SSF_TLS_TRACE_HS_ERROR(&session->trace, "EncryptedExtensions rejected");
                 _SSF_TLSC_ALERT(session, alert);
                 return SSF_TLS_IO_ERROR;
             }
+            /* Did the server accept the record_size_limit? */
             if (session->peerRecordLimit != 0u)
             {
+                /* Yes */
                 SSF_TLS_TRACE_HS_DEBUG(&session->trace, "record_size_limit: server accepts %u",
                                        session->peerRecordLimit);
             }
+            /* Was ALPN offered? */
             if (session->alpnCount != 0u)
             {
+                /* Yes, trace the server's choice */
                 SSF_TLS_TRACE_HS_DEBUG(&session->trace, "ALPN: %s",
                                        (session->alpnChosen != 0u) ?
                                        session->alpnProtos[session->alpnChosen - 1u] :
@@ -2683,32 +2836,30 @@ static SSFTLSIOResult_t _TlscHandleRecvEECert(SSFTLSCSession_t *session)
         session->helperStep = 2;
         /* fall through */
     case 2:
-        /* === Receive [CertificateRequest] Certificate + parse + dispatch chain verify === */
+        /* Receive any CertificateRequest, then the Certificate */
         for (;;)
         {
             uint8_t alert;
 
-            r = _RecvHandshakeOnce(session, &buf, &bodyLen, &hsType, true);
+            r = _SSFTLSCRecvHandshakeOnce(session, &buf, &bodyLen, &hsType, true);
             if (r != SSF_TLS_IO_SUCCESS) return r;
-            /* A CertificateRequest may sit between EncryptedExtensions and Certificate, once   */
-            /* (RFC 8446 4.3.2). It is answered after the server Finished with an empty         */
-            /* Certificate (4.4.2); a second one falls through to unexpected_message.          */
+            /* Is it other than a first CertificateRequest, answered after Finished (4.3.2)? */
             if ((hsType != SSF_TLS_HS_CERTIFICATE_REQUEST) || session->certRequested) break;
             {
                 SSFPortTick_t unixSys = 0;
                 uint64_t now = 0;
                 bool nowValid = false;
 
-                /* The time, for the client certificate's validity warning: only with trust     */
-                /* anchors, where SSFRTCInit() is required; the same floor as chain checking.  */
+                /* Are there a client chain and trust anchors, so the time is needed? */
                 if ((session->clientChainCount != 0u) && (session->trust.count > 0u))
                 {
+                    /* Yes, read it for the client certificate's validity warning */
                     nowValid = SSFRTCGetUnixNow(&unixSys);
                     now = (uint64_t)(unixSys / SSF_TICKS_PER_SEC);
                     if (now < SSF_TLSC_CONFIG_MIN_TRUSTED_UNIX_SEC) nowValid = false;
                 }
-                if (!_ChooseClientScheme(session, &buf[4], bodyLen, nowValid, now,
-                                         &session->clientScheme, &alert))
+                if (!_SSFTLSCChooseClientScheme(session, &buf[4], bodyLen, nowValid, now,
+                                                &session->clientScheme, &alert))
                 {
                     SSF_TLS_TRACE_HS_ERROR(&session->trace, "CertificateRequest rejected");
                     _SSF_TLSC_ALERT(session, alert);
@@ -2716,8 +2867,10 @@ static SSFTLSIOResult_t _TlscHandleRecvEECert(SSFTLSCSession_t *session)
                 }
             }
             session->certRequested = true;
+            /* Is a client certificate to be sent? */
             if (session->clientScheme != 0u)
             {
+                /* Yes */
                 SSF_TLS_TRACE_HS_INFO(&session->trace, "CertificateRequest received: sending the "
                                       "client certificate, scheme 0x%04x", session->clientScheme);
             }
@@ -2735,14 +2888,14 @@ static SSFTLSIOResult_t _TlscHandleRecvEECert(SSFTLSCSession_t *session)
           _SSF_TLSC_ALERT(session, SSF_TLS_ALERT_UNEXPECTED_MSG); return SSF_TLS_IO_ERROR; }
         SSF_TLS_TRACE_HS_INFO(&session->trace, "Certificate received (%zu bytes)", bodyLen);
 
-        /* Parse chain + save leaf + dispatch verify. All synchronous — no further I/O. */
+        /* Parse the chain, save the leaf key and set up chain verification; no further I/O */
         {
             SSFTLSCCryptoWork_t *w = &session->cryptoWork;
             uint8_t alert;
 
-            /* Parsed straight into the crypto step's chain: no copy, no chain array on the stack */
-            if (!_ParseCertificate(&buf[4], bodyLen, w->chainDerPtrs, w->chainDerLens,
-                                   &w->chainLen, &w->chainSeen, &alert))
+            /* Parse straight into the crypto step's chain */
+            if (!_SSFTLSCParseCertificate(&buf[4], bodyLen, w->chainDerPtrs, w->chainDerLens,
+                                          &w->chainLen, &w->chainSeen, &alert))
             {
                 SSF_TLS_TRACE_CERT_ERROR(&session->trace, "Certificate message malformed");
                 _SSF_TLSC_ALERT(session, alert);
@@ -2751,25 +2904,23 @@ static SSFTLSIOResult_t _TlscHandleRecvEECert(SSFTLSCSession_t *session)
             SSF_TLS_TRACE_CERT_INFO(&session->trace, "Certificate chain: %u of %u cert(s) kept",
                                     w->chainLen, w->chainSeen);
 
-            if (!_SaveLeafKey(session, w->chainDerPtrs[0], w->chainDerLens[0]))
+            if (!_SSFTLSCSaveLeafKey(session, w->chainDerPtrs[0], w->chainDerLens[0]))
             {
                 _SSF_TLSC_ALERT(session, SSF_TLS_ALERT_BAD_CERTIFICATE);
                 return SSF_TLS_IO_ERROR;
             }
 
+            /* Are there trust anchors to verify the chain against? */
             if (session->trust.count > 0)
             {
+                /* Yes, chain verification needs the time, valid only at or past the floor */
                 uint64_t now;
                 SSFPortTick_t unixSys = 0;
                 bool nowValid;
 
-                /* SSFRTCGetUnixNow() reports ticks, and false if the RTC could not be read. A  */
-                /* reading before the configured floor (an RTC that booted at 0) is no better.   */
-                /* The VERIFY_CHAIN step refuses to check validity without a trusted time.       */
                 nowValid = SSFRTCGetUnixNow(&unixSys);
                 now = (uint64_t)(unixSys / SSF_TICKS_PER_SEC);
                 if (now < SSF_TLSC_CONFIG_MIN_TRUSTED_UNIX_SEC) nowValid = false;
-
 
                 session->cryptoWork.session = session;
                 session->cryptoWork.hostname = session->hsHostname;
@@ -2778,7 +2929,8 @@ static SSFTLSIOResult_t _TlscHandleRecvEECert(SSFTLSCSession_t *session)
             }
             else
             {
-                session->cryptoWork.chainVerifyOk = false;  /* Not verified: opt-in only */
+                /* No, unauthenticated by opt-in only */
+                session->cryptoWork.chainVerifyOk = false;
             }
         }
         session->helperStep = 0;
@@ -2789,30 +2941,32 @@ static SSFTLSIOResult_t _TlscHandleRecvEECert(SSFTLSCSession_t *session)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: parses a CertificateVerify body (RFC 8446 4.4.3). Returns true with the signature  */
-/* scheme and length, else false.                                                                */
+/* Internal: parses a CertificateVerify body (RFC 8446 4.4.3)                                    */
 /* --------------------------------------------------------------------------------------------- */
-static bool _ParseCertificateVerify(const uint8_t *body, size_t bodyLen, uint16_t *schemeOut,
-                                    uint16_t *sigLenOut, uint8_t *alertOut)
+static bool _SSFTLSCParseCertificateVerify(const uint8_t *body, size_t bodyLen,
+                                           uint16_t *schemeOut, uint16_t *sigLenOut,
+                                           uint8_t *alertOut)
 {
     uint16_t scheme;
     uint16_t sigLen;
 
+    SSF_REQUIRE(body != NULL);
+    SSF_REQUIRE(schemeOut != NULL);
+    SSF_REQUIRE(sigLenOut != NULL);
+    SSF_REQUIRE(alertOut != NULL);
+
     *schemeOut = 0;
     *sigLenOut = 0;
 
-    /* struct { SignatureScheme algorithm; opaque signature<0..2^16-1>; }, exactly filling the */
-    /* message; an empty signature cannot verify and is rejected here.                         */
+    /* The scheme and a non-empty signature, exactly filling the message */
     *alertOut = SSF_TLS_ALERT_DECODE_ERROR;
     if (bodyLen < 4) return false;
-    scheme = _Get16(&body[0]);
-    sigLen = _Get16(&body[2]);
-    if ((sigLen == 0u) || ((4u + (size_t)sigLen) != bodyLen)) return false;
-    *alertOut = SSF_TLS_ALERT_ILLEGAL_PARAMETER;  /* Scheme not offered / not for handshakes */
+    scheme = _SSFTLSCGet16(&body[0]);
+    sigLen = _SSFTLSCGet16(&body[2]);
+    if ((sigLen == 0u) || ((4u + ((size_t)sigLen)) != bodyLen)) return false;
+    *alertOut = SSF_TLS_ALERT_ILLEGAL_PARAMETER;
 
-    /* The scheme MUST be one offered in signature_algorithms that is defined for handshake    */
-    /* signatures. rsa_pkcs1_* is offered only for certificate signatures and MUST NOT be used */
-    /* in CertificateVerify (4.2.3); certificate chains signed with it are still accepted.     */
+    /* Only offered handshake schemes; never rsa_pkcs1_* in CertificateVerify (4.2.3) */
     switch (scheme)
     {
     case SSF_TLS_SIG_ED25519:
@@ -2835,21 +2989,23 @@ bool _SSFTLSCParseCertificateVerifyForTest(const uint8_t *body, size_t bodyLen,
                                            uint16_t *schemeOut, uint16_t *sigLenOut)
 {
     uint8_t alert;
-    return _ParseCertificateVerify(body, bodyLen, schemeOut, sigLenOut, &alert);
+
+    return _SSFTLSCParseCertificateVerify(body, bodyLen, schemeOut, sigLenOut, &alert);
 }
 #endif /* SSF_CONFIG_TLSC_UNIT_TEST */
 
-/* Resumable — substates 0 (trace + advance), 1 (recv CV + parse + dispatch).                    */
-/* Transcript snapshot is taken inside the switch at the start of step 1 each call because       */
-/* the snapshot is idempotent while no new handshake bytes have been integrated (transcript is   */
-/* only updated when _RecvHandshakeOnce succeeds, which we check before using the snapshot).     */
-static SSFTLSIOResult_t _TlscHandleRecvCV(SSFTLSCSession_t *session)
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: RECV_CV state; receives the server CertificateVerify, resumable                     */
+/* --------------------------------------------------------------------------------------------- */
+static SSFTLSIOResult_t _SSFTLSCHandleRecvCV(SSFTLSCSession_t *session)
 {
-    const uint8_t *buf = NULL;                 /* Message in place in hsBuf */
+    const uint8_t *buf = NULL;
     size_t bodyLen;
     uint8_t hsType;
     uint8_t cvTranscriptHash[SSF_TLS_MAX_HASH_SIZE];
     SSFTLSIOResult_t r;
+
+    SSF_REQUIRE(session != NULL);
 
     switch (session->helperStep)
     {
@@ -2858,24 +3014,24 @@ static SSFTLSIOResult_t _TlscHandleRecvCV(SSFTLSCSession_t *session)
         session->helperStep = 1;
         /* fall through */
     case 1:
-        /* Snapshot transcript BEFORE receiving CV. Idempotent while transcript unchanged.        */
+        /* Snapshot the transcript before CertificateVerify; idempotent while it is unchanged */
         SSFTLSTranscriptHash(&session->transcript, cvTranscriptHash, sizeof(cvTranscriptHash));
         SSF_TLS_TRACE_CRYPTO_DEBUG(&session->trace, "CV transcript hash (len=%u)",
                                    session->hashLen);
 
-        r = _RecvHandshakeOnce(session, &buf, &bodyLen, &hsType, true);
+        r = _SSFTLSCRecvHandshakeOnce(session, &buf, &bodyLen, &hsType, true);
         if (r != SSF_TLS_IO_SUCCESS) return r;
         if (hsType != SSF_TLS_HS_CERTIFICATE_VERIFY)
         { SSF_TLS_TRACE_HS_ERROR(&session->trace, "Expected CertVerify, got type=%u", hsType);
           _SSF_TLSC_ALERT(session, SSF_TLS_ALERT_UNEXPECTED_MSG); return SSF_TLS_IO_ERROR; }
 
-        /* Parse + dispatch — synchronous, no further I/O. */
+        /* Parse and set up the VERIFY_SIG step; no further I/O */
         {
             const uint8_t *cvBody = &buf[4];
             uint16_t sigScheme;
             uint16_t sigDataLen;
             uint8_t signContent[64 + 33 + 1 + SSF_TLS_MAX_HASH_SIZE];
-            size_t signContentLen = 64u + 33u + 1u + session->hashLen;
+            size_t signContentLen = ((64u + 33u) + 1u) + session->hashLen;
             uint8_t contentHash[SSF_TLS_MAX_HASH_SIZE];
             const uint8_t *leafPubKey = session->hsScratch.leafPubKey;
             size_t leafPubKeyLen = session->hsScratchLen;
@@ -2884,10 +3040,11 @@ static SSFTLSIOResult_t _TlscHandleRecvCV(SSFTLSCSession_t *session)
 
             uint8_t alert;
 
-            if (!_ParseCertificateVerify(cvBody, bodyLen, &sigScheme, &sigDataLen, &alert))
+            if (!_SSFTLSCParseCertificateVerify(cvBody, bodyLen, &sigScheme, &sigDataLen,
+                                                &alert))
             { SSF_TLS_TRACE_CRYPTO_ERROR(&session->trace, "CertificateVerify rejected");
               _SSF_TLSC_ALERT(session, alert); return SSF_TLS_IO_ERROR; }
-            if (!_SchemeMatchesKey(sigScheme, session->leafKeyType))
+            if (!_SSFTLSCSchemeMatchesKey(sigScheme, session->leafKeyType))
             {
                 SSF_TLS_TRACE_CRYPTO_ERROR(&session->trace,
                                            "CertificateVerify scheme 0x%04x does not fit the "
@@ -2906,46 +3063,56 @@ static SSFTLSIOResult_t _TlscHandleRecvCV(SSFTLSCSession_t *session)
             memcpy(&signContent[98], cvTranscriptHash, session->hashLen);
 
             SSF_TLS_TRACE_CRYPTO_DEBUG(&session->trace, "CV verify: scheme=0x%04x pubKeyLen=%zu",
-                          sigScheme, leafPubKeyLen);
+                                       sigScheme, leafPubKeyLen);
 
-            /* The signed content embeds the transcript hash (the suite's hash, hashLen); the    */
-            /* signature then hashes that content with the scheme's own hash. They differ when   */
-            /* e.g. a SHA-384 signature runs under a SHA-256 suite, so track sigHashLen apart.   */
+            /* The content embeds the suite's transcript hash; the scheme's own hash then signs */
             isEd25519 = (sigScheme == SSF_TLS_SIG_ED25519);
+            /* Is the scheme Ed25519? */
             if (isEd25519)
             {
-                /* No pre-hash */
+                /* Yes, no pre-hash */
             }
-            else if (sigScheme == SSF_TLS_SIG_ECDSA_SECP256R1_SHA256 ||
-                     sigScheme == SSF_TLS_SIG_RSA_PSS_RSAE_SHA256)
+            else if ((sigScheme == SSF_TLS_SIG_ECDSA_SECP256R1_SHA256) ||
+                     (sigScheme == SSF_TLS_SIG_RSA_PSS_RSAE_SHA256))
             {
+                /* No, a SHA-256 scheme */
                 SSFSHA256(signContent, (uint32_t)signContentLen, contentHash, sizeof(contentHash));
                 sigHashLen = 32u;
             }
-            else if (sigScheme == SSF_TLS_SIG_ECDSA_SECP384R1_SHA384 ||
-                     sigScheme == SSF_TLS_SIG_RSA_PSS_RSAE_SHA384)
+            else if ((sigScheme == SSF_TLS_SIG_ECDSA_SECP384R1_SHA384) ||
+                     (sigScheme == SSF_TLS_SIG_RSA_PSS_RSAE_SHA384))
             {
+                /* No, a SHA-384 scheme */
                 SSFSHA384(signContent, (uint32_t)signContentLen, contentHash, sizeof(contentHash));
                 sigHashLen = 48u;
             }
             else
-            { SSF_TLS_TRACE_CRYPTO_ERROR(&session->trace,
-                                         "Unsupported CV signature scheme 0x%04x", sigScheme);
-              _SSF_TLSC_ALERT(session, SSF_TLS_ALERT_ILLEGAL_PARAMETER); return SSF_TLS_IO_ERROR; }
+            {
+                /* No, unsupported */
+                SSF_TLS_TRACE_CRYPTO_ERROR(&session->trace,
+                                           "Unsupported CV signature scheme 0x%04x", sigScheme);
+                _SSF_TLSC_ALERT(session, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+                return SSF_TLS_IO_ERROR;
+            }
 
-            /* sigData points into hsBuf, which holds the message until the VERIFY_SIG step. */
+            /* sigData points into hsBuf, which holds the message until the VERIFY_SIG step */
             {
                 session->cryptoWork.session = session;
                 session->cryptoWork.sigScheme = sigScheme;
+                /* Is the scheme Ed25519, verified over the raw content? */
                 if (isEd25519)
                 {
+                    /* Yes, store the content itself */
                     if (signContentLen > sizeof(session->cryptoWork.contentHash))
+                    {
                         return SSF_TLS_IO_ERROR;
+                    }
                     memcpy(session->cryptoWork.contentHash, signContent, signContentLen);
                     session->cryptoWork.contentHashLen = signContentLen;
                 }
                 else
                 {
+                    /* No, store the content's hash */
                     memcpy(session->cryptoWork.contentHash, contentHash, sigHashLen);
                     session->cryptoWork.contentHashLen = sigHashLen;
                 }
@@ -2962,38 +3129,43 @@ static SSFTLSIOResult_t _TlscHandleRecvCV(SSFTLSCSession_t *session)
     }
 }
 
-/* Internal: writes the client Finished (RFC 8446 4.4.4) over the transcript so far to out;      */
-/* returns its length, 4 + hashLen.                                                              */
 /* --------------------------------------------------------------------------------------------- */
-static size_t _BuildClientFinished(SSFTLSCSession_t *s, uint8_t *out)
+/* Internal: writes the client Finished over the transcript so far to out, returns its length    */
+/* --------------------------------------------------------------------------------------------- */
+static size_t _SSFTLSCBuildClientFinished(SSFTLSCSession_t *s, uint8_t *out)
 {
     uint8_t verifyData[SSF_TLS_MAX_HASH_SIZE];
     uint8_t thash[SSF_TLS_MAX_HASH_SIZE];
+
+    SSF_REQUIRE(s != NULL);
+    SSF_REQUIRE(out != NULL);
 
     SSFTLSTranscriptHash(&s->transcript, thash, sizeof(thash));
     SSFTLSComputeFinished(s->hash, s->clientHsTrafficSecret, s->hashLen,
                           thash, s->hashLen, verifyData, s->hashLen);
     out[0] = SSF_TLS_HS_FINISHED;
-    _Put24(&out[1], s->hashLen);
+    _SSFTLSCPut24(&out[1], s->hashLen);
     memcpy(&out[4], verifyData, s->hashLen);
     _SSF_TLSC_SCRUB(verifyData);
-    return 4u + (size_t)s->hashLen;
+    return (4u + ((size_t)s->hashLen));
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: after the client Finished is sent, switches sending to the client application      */
-/* traffic keys and wipes the spent handshake traffic secrets.                                    */
+/* Internal: switches sending to the client application traffic keys after the client Finished  */
 /* --------------------------------------------------------------------------------------------- */
-static void _EnterAppSendKeys(SSFTLSCSession_t *s)
+static void _SSFTLSCEnterAppSendKeys(SSFTLSCSession_t *s)
 {
-    uint8_t key[SSF_TLS_MAX_KEY_SIZE], iv[SSF_TLS_IV_SIZE];
+    uint8_t key[SSF_TLS_MAX_KEY_SIZE];
+    uint8_t iv[SSF_TLS_IV_SIZE];
+
+    SSF_REQUIRE(s != NULL);
 
     SSFTLSDeriveTrafficKeys(s->hash, s->clientAppTrafficSecret, s->hashLen,
                             key, s->keyLen, iv, SSF_TLS_IV_SIZE);
-    _RecordStateSet(s, &s->sendState, &s->sendStateInited, key, iv);
+    _SSFTLSCRecordStateSet(s, &s->sendState, &s->sendStateInited, key, iv);
     _SSF_TLSC_SCRUB(key);
     _SSF_TLSC_SCRUB(iv);
-    /* Handshake traffic secrets are spent; application secrets stay for KeyUpdate. */
+    /* Handshake traffic secrets are spent; application secrets stay for KeyUpdate */
     _SSF_TLSC_SCRUB_N("clientHsTrafficSecret", s->clientHsTrafficSecret,
                       sizeof(s->clientHsTrafficSecret));
     _SSF_TLSC_SCRUB_N("serverHsTrafficSecret", s->serverHsTrafficSecret,
@@ -3003,50 +3175,48 @@ static void _EnterAppSendKeys(SSFTLSCSession_t *s)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: the SIGN_CV crypto step. Signs the CertificateVerify over the transcript through   */
-/* the client Certificate, then appends the client Finished, which covers it. Both are built in */
-/* hsScratch.clientFlight, free by now (the server's key it held is used), and SEND_CV_FIN      */
-/* streams them in as many records as the send limit takes.                                    */
+/* Internal: SIGN_CV crypto step; signs the CertificateVerify and appends the client Finished    */
 /* --------------------------------------------------------------------------------------------- */
-static SSF_NOINLINE bool _TlscSignClientCV(SSFTLSCSession_t *s)
+static SSF_NOINLINE bool _SSFTLSCSignCVStep(SSFTLSCSession_t *s)
 {
     uint8_t thash[SSF_TLS_MAX_HASH_SIZE];
     size_t cvLen;
 
+    SSF_REQUIRE(s != NULL);
+
     SSFTLSTranscriptHash(&s->transcript, thash, sizeof(thash));
-    if (!_SignClientCV(s, s->clientScheme, thash, s->hashLen, s->hsScratch.clientFlight,
-                       sizeof(s->hsScratch.clientFlight) - (4u + SSF_TLS_MAX_HASH_SIZE), &cvLen))
+    if (!_SSFTLSCSignClientCV(s, s->clientScheme, thash, s->hashLen, s->hsScratch.clientFlight,
+                              sizeof(s->hsScratch.clientFlight) - (4u + SSF_TLS_MAX_HASH_SIZE),
+                              &cvLen))
     {
         SSF_TLS_TRACE_CRYPTO_ERROR(&s->trace, "Client CertificateVerify signing failed");
         return false;
     }
     SSFTLSTranscriptUpdate(&s->transcript, s->hsScratch.clientFlight, cvLen);
-    s->hsScratchLen = cvLen + _BuildClientFinished(s, &s->hsScratch.clientFlight[cvLen]);
+    s->hsScratchLen = cvLen + _SSFTLSCBuildClientFinished(s, &s->hsScratch.clientFlight[cvLen]);
     SSF_TLS_TRACE_CRYPTO_INFO(&s->trace, "Client CertificateVerify signed (scheme 0x%04x)",
                               s->clientScheme);
     return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* State RECV_FIN_SEND_FIN: receives and verifies the server Finished and derives the            */
-/* application keys. Without client authentication it also sends the client Finished (after an */
-/* empty Certificate when one was requested); with it, it returns there and the driver's        */
-/* SEND_CLIENT_CERT / SIGN_CV / SEND_CV_FIN states send the client flight. Resumable: substeps */
-/* 0 (trace), 1 (receive and verify the server Finished, derive), 2 (send the client Finished). */
+/* Internal: RECV_FIN_SEND_FIN state; verifies the server Finished, sends the client's; resumable */
 /* --------------------------------------------------------------------------------------------- */
-static SSFTLSIOResult_t _TlscHandleRecvFinSendFin(SSFTLSCSession_t *session)
+static SSFTLSIOResult_t _SSFTLSCHandleRecvFinSendFin(SSFTLSCSession_t *session)
 {
-    const uint8_t *buf = NULL;                 /* Message in place in hsBuf */
+    const uint8_t *buf = NULL;
     size_t bodyLen;
     uint8_t hsType;
     uint8_t handshakeSecret[SSF_TLS_MAX_HASH_SIZE];
-    /* [empty Certificate] Finished: the client's last flight, sent as one record */
+    /* [empty Certificate] Finished, the client's last flight sent as one record */
     uint8_t finishedMsg[SSF_TLSC_EMPTY_CERT_LEN + 4 + SSF_TLS_MAX_HASH_SIZE];
     size_t certLen;
     uint8_t finTranscriptHash[SSF_TLS_MAX_HASH_SIZE];
     uint8_t expectedVerifyData[SSF_TLS_MAX_HASH_SIZE];
     bool isFinishedOk;
     SSFTLSIOResult_t r;
+
+    SSF_REQUIRE(session != NULL);
 
     switch (session->helperStep)
     {
@@ -3055,31 +3225,29 @@ static SSFTLSIOResult_t _TlscHandleRecvFinSendFin(SSFTLSCSession_t *session)
         session->helperStep = 1;
         /* fall through */
     case 1:
-        /* === Receive server Finished === */
-        /* RFC 8446 4.4.4: verify_data covers the transcript up to, not including, Finished.   */
-        /* _RecvHandshakeOnce adds Finished on success, so snapshot first. Repeating it on a    */
-        /* WANT_READ retry is harmless: the transcript changes only when a message lands.       */
+        /* Receive the server Finished; verify_data excludes it, so snapshot first (4.4.4) */
         SSFTLSTranscriptHash(&session->transcript, finTranscriptHash, sizeof(finTranscriptHash));
-        r = _RecvHandshakeOnce(session, &buf, &bodyLen, &hsType, true);
+        r = _SSFTLSCRecvHandshakeOnce(session, &buf, &bodyLen, &hsType, true);
         if (r != SSF_TLS_IO_SUCCESS) return r;
         if (hsType != SSF_TLS_HS_FINISHED)
         { SSF_TLS_TRACE_HS_ERROR(&session->trace, "Expected Finished, got type=%u", hsType);
           _SSF_TLSC_ALERT(session, SSF_TLS_ALERT_UNEXPECTED_MSG); return SSF_TLS_IO_ERROR; }
-        /* Was silently discarded at connect: bytes after Finished would be under the wrong keys */
-        if (!_HandshakeAtRecordEnd(session, "Server Finished")) return SSF_TLS_IO_ERROR;
+        /* Bytes after Finished would be under the wrong keys */
+        if (!_SSFTLSCHandshakeAtRecordEnd(session, "Server Finished")) return SSF_TLS_IO_ERROR;
         SSF_TLS_TRACE_HS_DEBUG(&session->trace, "Server Finished received");
 #if SSF_CONFIG_TLSC_UNIT_TEST == 1
+        /* Is a corrupted server Finished being simulated? */
         if (_ssfTLSCUTCorruptServerFinished && (bodyLen > 0)) ((uint8_t *)buf)[4] ^= 0x01u;
 #endif
 
-        /* RFC 8446 4.4.4: verify_data = HMAC(finished_key(server hs secret), transcript).      */
-        /* Compare in constant time; any mismatch MUST terminate the connection.                */
+        /* Compare verify_data in constant time; any mismatch terminates (RFC 8446 4.4.4) */
         SSFTLSComputeFinished(session->hash, session->serverHsTrafficSecret, session->hashLen,
                               finTranscriptHash, session->hashLen,
                               expectedVerifyData, session->hashLen);
-        isFinishedOk = (bodyLen == (size_t)session->hashLen) &&
-                       SSFCryptCTMemEq(expectedVerifyData, &buf[4], session->hashLen);
+        isFinishedOk = ((bodyLen == (size_t)session->hashLen) &&
+                        SSFCryptCTMemEq(expectedVerifyData, &buf[4], session->hashLen));
         SSFCryptSecureZero(expectedVerifyData, sizeof(expectedVerifyData));
+        /* Is the server Finished wrong? */
         if (!isFinishedOk)
         {
             SSF_TLS_TRACE_HS_ERROR(&session->trace, "Server Finished verify_data mismatch");
@@ -3088,13 +3256,12 @@ static SSFTLSIOResult_t _TlscHandleRecvFinSendFin(SSFTLSCSession_t *session)
             return SSF_TLS_IO_ERROR;
         }
 
-        /* === Derive application traffic keys + set up client HS send keys + build client Fin. */
-        /* All synchronous; on completion advance to substep 2 which sends the client Finished. */
+        /* Derive the application traffic keys */
         memcpy(handshakeSecret, session->savedHandshakeSecret, session->hashLen);
 
         SSF_TLS_TRACE_CRYPTO_INFO(&session->trace, "Deriving application keys");
-        isFinishedOk = _DeriveAppKeys(session, handshakeSecret);
-        /* The handshake secret is spent once the master secret is derived. */
+        isFinishedOk = _SSFTLSCDeriveAppKeys(session, handshakeSecret);
+        /* The handshake secret is spent once the master secret is derived */
         _SSF_TLSC_SCRUB(handshakeSecret);
         _SSF_TLSC_SCRUB_N("savedHandshakeSecret", session->savedHandshakeSecret,
                           sizeof(session->savedHandshakeSecret));
@@ -3102,42 +3269,37 @@ static SSFTLSIOResult_t _TlscHandleRecvFinSendFin(SSFTLSCSession_t *session)
         { SSF_TLS_TRACE_CRYPTO_ERROR(&session->trace, "DeriveAppKeys failed");
           return SSF_TLS_IO_ERROR; }
 
-        /* Client authentication: the Certificate, CertificateVerify and Finished follow in the  */
-        /* driver's SEND_CLIENT_CERT / SIGN_CV / SEND_CV_FIN states.                            */
+        /* Is there client authentication, sent by the SEND_CLIENT_CERT..SEND_CV_FIN states? */
         if (session->clientScheme != 0u)
         {
+            /* Yes */
             session->helperStep = 0;
             return SSF_TLS_IO_SUCCESS;
         }
 
-        /* Asked for a certificate without one to send: an empty Certificate (empty request     */
-        /* context, empty certificate_list) precedes Finished, and Finished covers it (RFC 8446 */
-        /* 4.4.2, 4.4.4). The application secrets above end at the server Finished, as required.*/
+        /* No, an empty Certificate, covered by Finished, answers a request (4.4.2, 4.4.4) */
         certLen = session->certRequested ? SSF_TLSC_EMPTY_CERT_LEN : 0u;
+        /* Was a certificate requested? */
         if (certLen != 0u)
         {
+            /* Yes, build the empty Certificate */
             memset(finishedMsg, 0, SSF_TLSC_EMPTY_CERT_LEN);
             finishedMsg[0] = SSF_TLS_HS_CERTIFICATE;
-            _Put24(&finishedMsg[1], SSF_TLSC_EMPTY_CERT_LEN - 4u);
+            _SSFTLSCPut24(&finishedMsg[1], SSF_TLSC_EMPTY_CERT_LEN - 4u);
             SSFTLSTranscriptUpdate(&session->transcript, finishedMsg, SSF_TLSC_EMPTY_CERT_LEN);
         }
-        /* The client handshake send keys are already installed. */
-        (void)_BuildClientFinished(session, &finishedMsg[certLen]);
+        /* The client handshake send keys are already installed */
+        (void)_SSFTLSCBuildClientFinished(session, &finishedMsg[certLen]);
         session->helperStep = 2;
         /* fall through */
     case 2:
-        /* === Send client Finished === */
-        /* On first call here the finishedMsg buffer is built above and passed to              */
-        /* _SendEncRecordOnce, which encrypts into io->sendRecordBuf and sets sendPending.     */
-        /* On resume (WANT_WRITE), the same-call local finishedMsg value is ignored by         */
-        /* _SendEncRecordOnce (because sendPending==true) — the encrypted bytes in             */
-        /* io->sendRecordBuf are what keep flowing.                                             */
+        /* Send the client Finished; a resumed call sends the record already encrypted */
         certLen = session->certRequested ? SSF_TLSC_EMPTY_CERT_LEN : 0u;
-        r = _SendEncRecordOnce(session, SSF_TLS_CT_HANDSHAKE,
-                               finishedMsg, certLen + 4u + session->hashLen);
-        _SSF_TLSC_SCRUB(finishedMsg);             /* Now encrypted in ioCtx.sendRecordBuf */
+        r = _SSFTLSCSendEncRecordOnce(session, SSF_TLS_CT_HANDSHAKE,
+                                      finishedMsg, certLen + 4u + session->hashLen);
+        _SSF_TLSC_SCRUB(finishedMsg);
         if (r != SSF_TLS_IO_SUCCESS) return r;
-        _EnterAppSendKeys(session);
+        _SSFTLSCEnterAppSendKeys(session);
         session->helperStep = 0;
         return SSF_TLS_IO_SUCCESS;
     default:
@@ -3152,8 +3314,7 @@ static SSFTLSIOResult_t _TlscHandleRecvFinSendFin(SSFTLSCSession_t *session)
 #define SSF_TLSC_RECV_MAX_RECORDS    (4u)   /* Non-application records consumed per recv() call */
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns the session that owns transport t. t is the session's first member, so it converts    */
-/* back to the session (via void *, which -Wcast-align accepts).                                 */
+/* Internal: returns the session that owns transport t, its first member                         */
 /* --------------------------------------------------------------------------------------------- */
 typedef char _SSFTLSCTransportFirst_t[(offsetof(SSFTLSCSession_t, transport) == 0u) ? 1 : -1];
 
@@ -3168,24 +3329,38 @@ static SSFTLSCSession_t *_SSFTLSCSelf(SSFNetTransport_t *t)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Wipes all per-connection state, keys included, and returns the session to IDLE. The transport */
-/* table, inner transport, trust store, trace callback, client certificate, ALPN list and magic  */
-/* are kept.                                                                                     */
+/* Internal: wipes all per-connection state, keys included, and returns the session to IDLE      */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFTLSCReset(SSFTLSCSession_t *s)
 {
-    SSFNetTransport_t transport = s->transport;
-    SSFNetTransport_t *inner = s->inner;
-    SSFTLSCTrustStore_t trust = s->trust;
-    SSFTLSTraceCtx_t trace = s->trace;
-    bool allowUnauthenticated = s->allowUnauthenticated;
-    const uint8_t *const *clientChainDer = s->clientChainDer;
-    const uint32_t *clientChainLens = s->clientChainLens;
-    const SSFPKey_t *clientKey = s->clientKey;
-    uint8_t clientChainCount = s->clientChainCount;
-    const char *const *alpnProtos = s->alpnProtos;
-    uint8_t alpnCount = s->alpnCount;
-    uint32_t magic = s->magic;
+    SSFNetTransport_t transport;
+    SSFNetTransport_t *inner;
+    SSFTLSCTrustStore_t trust;
+    SSFTLSTraceCtx_t trace;
+    bool allowUnauthenticated;
+    const uint8_t *const *clientChainDer;
+    const uint32_t *clientChainLens;
+    const SSFPKey_t *clientKey;
+    uint8_t clientChainCount;
+    const char *const *alpnProtos;
+    uint8_t alpnCount;
+    uint32_t magic;
+
+    SSF_REQUIRE(s != NULL);
+
+    /* Keep the configuration across the wipe */
+    transport = s->transport;
+    inner = s->inner;
+    trust = s->trust;
+    trace = s->trace;
+    allowUnauthenticated = s->allowUnauthenticated;
+    clientChainDer = s->clientChainDer;
+    clientChainLens = s->clientChainLens;
+    clientKey = s->clientKey;
+    clientChainCount = s->clientChainCount;
+    alpnProtos = s->alpnProtos;
+    alpnCount = s->alpnCount;
+    magic = s->magic;
 
     if (s->sendStateInited) SSFTLSRecordStateDeInit(&s->sendState);
     if (s->recvStateInited) SSFTLSRecordStateDeInit(&s->recvState);
@@ -3207,11 +3382,12 @@ static void _SSFTLSCReset(SSFTLSCSession_t *s)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Wipes every secret and plaintext buffer of the connection and de-initializes the record      */
-/* states. The connection cannot carry data afterwards.                                         */
+/* Internal: wipes every secret and plaintext buffer and de-initializes the record states        */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFTLSCWipeKeys(SSFTLSCSession_t *s)
 {
+    SSF_REQUIRE(s != NULL);
+
     if (s->sendStateInited) SSFTLSRecordStateDeInit(&s->sendState);
     if (s->recvStateInited) SSFTLSRecordStateDeInit(&s->recvState);
     s->sendStateInited = false;
@@ -3237,40 +3413,58 @@ static void _SSFTLSCWipeKeys(SSFTLSCSession_t *s)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Best-effort single attempt to send an alert, protected if send keys are installed. Skipped   */
-/* when the transport has failed or a partly written record is still pending.                   */
+/* Internal: makes one best-effort attempt to send an alert, protected once send keys exist      */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFTLSCSendAlert(SSFTLSCSession_t *s, uint8_t level, uint8_t desc)
 {
     uint8_t alert[2];
 
+    SSF_REQUIRE(s != NULL);
+
+    /* Has the transport failed? */
     if ((s->innerOpen == false) || s->ioFailed) return;
-    if (_SendPending(s) != SSF_TLS_IO_SUCCESS) return;
+    /* Is a partly written record still pending? */
+    if (_SSFTLSCSendPending(s) != SSF_TLS_IO_SUCCESS) return;
     alert[0] = level;
     alert[1] = desc;
     SSF_TLS_TRACE_ALERT(&s->trace, "Sending alert level=%u desc=%u", level, desc);
-    if (s->sendEncrypted) (void)_SendEncRecordOnce(s, SSF_TLS_CT_ALERT, alert, sizeof(alert));
-    else (void)_SendPlainRecordOnce(s, SSF_TLS_CT_ALERT, alert, sizeof(alert));
+    /* Are send keys installed? */
+    if (s->sendEncrypted)
+    {
+        /* Yes, send it protected */
+        (void)_SSFTLSCSendEncRecordOnce(s, SSF_TLS_CT_ALERT, alert, sizeof(alert));
+    }
+    else
+    {
+        /* No, send it in plaintext */
+        (void)_SSFTLSCSendPlainRecordOnce(s, SSF_TLS_CT_ALERT, alert, sizeof(alert));
+    }
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Ends a failed connection: closes the inner transport and enters ERROR. Returns the result for */
-/* pollOpen(), send() or recv(): CLOSED if the peer closed, else ERROR.                          */
+/* Internal: ends a failed connection; returns CLOSED if the peer closed, else ERROR             */
 /* --------------------------------------------------------------------------------------------- */
 static SSFNetIOResult_t _SSFTLSCFail(SSFTLSCSession_t *s)
 {
-    /* RFC 8446 6: announce the abort with the first failure's fatal alert (internal_error if   */
-    /* none was recorded), answer close_notify with close_notify, and stay silent after a peer   */
-    /* alert or a transport failure, or once our own close_notify is out (RFC 8446 6.1: nothing  */
-    /* follows it). Sent before the wipe, while send keys still exist.                           */
+    SSF_REQUIRE(s != NULL);
+    SSF_REQUIRE(s->inner != NULL);
+
+    /* Has our own close_notify gone out, after which nothing follows (RFC 8446 6.1)? */
     if (s->closeNotifySent) { /* Silent */ }
-    else if (s->peerCloseNotify) _SSFTLSCSendAlert(s, 1u, SSF_TLS_ALERT_CLOSE_NOTIFY);
+    else if (s->peerCloseNotify)
+    {
+        /* No, answer close_notify with close_notify */
+        _SSFTLSCSendAlert(s, 1u, SSF_TLS_ALERT_CLOSE_NOTIFY);
+    }
     else if (s->peerAlerted == false)
     {
+        /* No, announce the abort with the first failure's fatal alert (RFC 8446 6) */
         _SSFTLSCSendAlert(s, 2u, (s->pendingAlert != 0u) ? s->pendingAlert :
                                                            SSF_TLS_ALERT_INTERNAL_ERROR);
     }
-    _SSFTLSCWipeKeys(s);                       /* At once, not at close(): the connection is dead */
+    else { /* Silent after a peer alert */ }
+    /* Wipe at once, not at close(): the connection is dead */
+    _SSFTLSCWipeKeys(s);
     if (s->innerOpen) s->inner->close(s->inner);
     s->innerOpen = false;
     s->connected = false;
@@ -3280,15 +3474,13 @@ static SSFNetIOResult_t _SSFTLSCFail(SSFTLSCSession_t *s)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Advances the handshake. Returns SUCCESS once complete, WANT_READ/WANT_WRITE while in progress, */
-/* else CLOSED or ERROR. A receive state that completes its message continues into its crypto   */
-/* step in the same call (ServerHello -> key exchange, Certificate -> chain verification,        */
-/* CertificateVerify -> its signature); the crypto step then ends the call with WANT_READ, so a  */
-/* call runs at most one public-key step.                                                        */
+/* Internal: advances the handshake, running at most one public-key step per call               */
 /* --------------------------------------------------------------------------------------------- */
 static SSFNetIOResult_t _SSFTLSCDrive(SSFTLSCSession_t *s)
 {
     SSFTLSIOResult_t r;
+
+    SSF_REQUIRE(s != NULL);
 
     for (;;)
     {
@@ -3302,7 +3494,7 @@ static SSFNetIOResult_t _SSFTLSCDrive(SSFTLSCSession_t *s)
 
         case SSF_TLSC_HS_SEND_CH:
         case SSF_TLSC_HS_RECV_SH:
-            r = _TlscHandleSendCH(s);
+            r = _SSFTLSCHandleSendCH(s);
             if (r == SSF_TLS_IO_WANT_READ) return SSF_NET_IO_WANT_READ;
             if (r == SSF_TLS_IO_WANT_WRITE) return SSF_NET_IO_WANT_WRITE;
             if (r != SSF_TLS_IO_SUCCESS) return _SSFTLSCFail(s);
@@ -3312,18 +3504,19 @@ static SSFNetIOResult_t _SSFTLSCDrive(SSFTLSCSession_t *s)
 
         case SSF_TLSC_HS_DERIVE_HS_KEYS:
             s->cryptoWork.session = s;
-            _TLSCDeriveHSKeysWork(&s->cryptoWork);
+            _SSFTLSCDeriveHSKeysWork(&s->cryptoWork);
+            /* Is the server's key share unusable? */
             if (!s->cryptoWork.keyExchangeOk)
             {
                 SSF_TLS_TRACE_CRYPTO_ERROR(&s->trace, "DeriveHandshakeKeys failed");
-                _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_ILLEGAL_PARAMETER);  /* Unusable key share */
+                _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
                 return _SSFTLSCFail(s);
             }
             s->hsState = SSF_TLSC_HS_RECV_EE_CERT;
             return SSF_NET_IO_WANT_READ;
 
         case SSF_TLSC_HS_RECV_EE_CERT:
-            r = _TlscHandleRecvEECert(s);
+            r = _SSFTLSCHandleRecvEECert(s);
             if (r == SSF_TLS_IO_WANT_READ) return SSF_NET_IO_WANT_READ;
             if (r == SSF_TLS_IO_WANT_WRITE) return SSF_NET_IO_WANT_WRITE;
             if (r != SSF_TLS_IO_SUCCESS) return _SSFTLSCFail(s);
@@ -3332,10 +3525,10 @@ static SSFNetIOResult_t _SSFTLSCDrive(SSFTLSCSession_t *s)
             break;
 
         case SSF_TLSC_HS_VERIFY_CHAIN:
+            /* Are there no trust anchors? */
             if (s->trust.count == 0u)
             {
-                /* open() refuses this case without the opt-in; check again so verification can */
-                /* never be skipped silently.                                                     */
+                /* Yes, open() refused this without the opt-in; check again, never skip silently */
 #if SSF_TLSC_CONFIG_ALLOW_UNAUTHENTICATED == 1
                 if (s->allowUnauthenticated == false) return _SSFTLSCFail(s);
                 SSF_TLS_TRACE_CERT_ERROR(&s->trace, "Server NOT authenticated: no trust anchors, "
@@ -3346,8 +3539,7 @@ static SSFNetIOResult_t _SSFTLSCDrive(SSFTLSCSession_t *s)
             }
             else if (s->cryptoWork.nowValid == false)
             {
-                /* Without a set time, validity periods cannot be checked: fail rather than    */
-                /* check at time 0 (which only ever fails, and for a misleading reason).       */
+                /* No, but without a trusted time validity cannot be checked */
                 SSF_TLS_TRACE_CERT_ERROR(&s->trace,
                                          "No trusted time (RTC unreadable or before "
                                          "SSF_TLSC_CONFIG_MIN_TRUSTED_UNIX_SEC): cannot "
@@ -3357,12 +3549,12 @@ static SSFNetIOResult_t _SSFTLSCDrive(SSFTLSCSession_t *s)
             }
             else
             {
-                _TLSCVerifyChainWork(&s->cryptoWork);
+                /* No, verify the chain */
+                _SSFTLSCVerifyChainWork(&s->cryptoWork);
+                /* Did verification fail? */
                 if (!s->cryptoWork.chainVerifyOk)
                 {
-                    /* The two refusals a self-made broker certificate most often meets get */
-                    /* an explanation: ssfx509 requires v3, and matches the host by          */
-                    /* subjectAltName only.                                                  */
+                    /* Yes, explain the refusals a self-made certificate most often meets */
                     SSF_TLS_TRACE_CERT_ERROR(&s->trace, "Certificate chain verification failed: "
                                              "code %d, cert[%u]%s",
                                              (int)s->cryptoWork.chainVerifyErr.code,
@@ -3375,13 +3567,16 @@ static SSFNetIOResult_t _SSFTLSCDrive(SSFTLSCSession_t *s)
                                               SSF_X509_VERIFY_ERR_HOSTNAME) ?
                                              " (no subjectAltName names the host; the Common "
                                              "Name is not used)" : "");
+                    /* Was the chain cut at the configured depth? */
                     if (s->cryptoWork.chainSeen > s->cryptoWork.chainLen)
                     {
-                        SSF_TLS_TRACE_CERT_ERROR(&s->trace, "Certificate chain truncated: %u of %u "
-                                                 "certs kept (SSF_X509_CONFIG_MAX_CHAIN_DEPTH)",
+                        /* Yes */
+                        SSF_TLS_TRACE_CERT_ERROR(&s->trace, "Certificate chain truncated: %u of "
+                                                 "%u certs kept "
+                                                 "(SSF_X509_CONFIG_MAX_CHAIN_DEPTH)",
                                                  s->cryptoWork.chainLen, s->cryptoWork.chainSeen);
                     }
-                    _SSF_TLSC_ALERT(s, _ChainAlert(s->cryptoWork.chainVerifyErr.code));
+                    _SSF_TLSC_ALERT(s, _SSFTLSCChainAlert(s->cryptoWork.chainVerifyErr.code));
                     return _SSFTLSCFail(s);
                 }
             }
@@ -3389,7 +3584,7 @@ static SSFNetIOResult_t _SSFTLSCDrive(SSFTLSCSession_t *s)
             return SSF_NET_IO_WANT_READ;
 
         case SSF_TLSC_HS_RECV_CV:
-            r = _TlscHandleRecvCV(s);
+            r = _SSFTLSCHandleRecvCV(s);
             if (r == SSF_TLS_IO_WANT_READ) return SSF_NET_IO_WANT_READ;
             if (r == SSF_TLS_IO_WANT_WRITE) return SSF_NET_IO_WANT_WRITE;
             if (r != SSF_TLS_IO_SUCCESS) return _SSFTLSCFail(s);
@@ -3398,43 +3593,47 @@ static SSFNetIOResult_t _SSFTLSCDrive(SSFTLSCSession_t *s)
             break;
 
         case SSF_TLSC_HS_VERIFY_SIG:
-            _TLSCVerifySigWork(&s->cryptoWork);
+            _SSFTLSCVerifySigWork(&s->cryptoWork);
+            /* Is the CertificateVerify signature invalid (4.4.3)? */
             if (!s->cryptoWork.sigVerifyOk)
             {
                 SSF_TLS_TRACE_CRYPTO_ERROR(&s->trace, "CertificateVerify signature INVALID");
-                _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_DECRYPT_ERROR);       /* 4.4.3 */
+                _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_DECRYPT_ERROR);
                 return _SSFTLSCFail(s);
             }
             s->hsState = SSF_TLSC_HS_RECV_FIN_SEND_FIN;
             return SSF_NET_IO_WANT_READ;
 
         case SSF_TLSC_HS_RECV_FIN_SEND_FIN:
-            r = _TlscHandleRecvFinSendFin(s);
+            r = _SSFTLSCHandleRecvFinSendFin(s);
             if (r == SSF_TLS_IO_WANT_READ) return SSF_NET_IO_WANT_READ;
             if (r == SSF_TLS_IO_WANT_WRITE) return SSF_NET_IO_WANT_WRITE;
             if (r != SSF_TLS_IO_SUCCESS) return _SSFTLSCFail(s);
             s->helperStep = 0;
+            /* Is there client authentication? */
             if (s->clientScheme != 0u)
             {
+                /* Yes, send the client flight */
                 s->certSendOff = 0;
                 s->hsState = SSF_TLSC_HS_SEND_CLIENT_CERT;
                 break;
             }
-            s->hsBufLen = 0;                   /* hsBuf now holds application data */
+            /* No, hsBuf now holds application data */
+            s->hsBufLen = 0;
             s->hsBufPos = 0;
             s->connected = true;
             s->hsState = SSF_TLSC_HS_COMPLETE;
             return SSF_NET_IO_SUCCESS;
 
         case SSF_TLSC_HS_SEND_CLIENT_CERT:
-            r = _SendHandshakeOnce(s, NULL, _ClientCertMsgLen(s));
+            r = _SSFTLSCSendHandshakeOnce(s, NULL, _SSFTLSCClientCertMsgLen(s));
             if (r == SSF_TLS_IO_WANT_WRITE) return SSF_NET_IO_WANT_WRITE;
             if (r != SSF_TLS_IO_SUCCESS) return _SSFTLSCFail(s);
             s->hsState = SSF_TLSC_HS_SIGN_CV;
             break;
 
         case SSF_TLSC_HS_SIGN_CV:
-            if (!_TlscSignClientCV(s))
+            if (!_SSFTLSCSignCVStep(s))
             {
                 _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_INTERNAL_ERROR);
                 return _SSFTLSCFail(s);
@@ -3444,73 +3643,76 @@ static SSFNetIOResult_t _SSFTLSCDrive(SSFTLSCSession_t *s)
             return SSF_NET_IO_WANT_WRITE;      /* The signature was this call's step */
 
         case SSF_TLSC_HS_SEND_CV_FIN:
-            r = _SendHandshakeOnce(s, s->hsScratch.clientFlight, s->hsScratchLen);
+            r = _SSFTLSCSendHandshakeOnce(s, s->hsScratch.clientFlight, s->hsScratchLen);
             if (r == SSF_TLS_IO_WANT_WRITE) return SSF_NET_IO_WANT_WRITE;
-            /* The Finished is encrypted in sendRecordBuf now, or the connection is failing */
+            /* The Finished is now encrypted in sendRecordBuf, or the connection is failing */
             _SSF_TLSC_SCRUB_N("clientFlight", s->hsScratch.clientFlight,
                               sizeof(s->hsScratch.clientFlight));
             if (r != SSF_TLS_IO_SUCCESS) return _SSFTLSCFail(s);
-            _EnterAppSendKeys(s);
-            s->hsBufLen = 0;                   /* hsBuf now holds application data */
+            _SSFTLSCEnterAppSendKeys(s);
+            s->hsBufLen = 0;
             s->hsBufPos = 0;
             s->connected = true;
             s->hsState = SSF_TLSC_HS_COMPLETE;
             return SSF_NET_IO_SUCCESS;
 
-        default:                               /* IDLE: not opened */
+        default:
+            /* IDLE: not opened */
             return SSF_NET_IO_ERROR;
         }
     }
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if the inner connection to host:port was started and the handshake armed.        */
+/* Internal: returns the largest content sent in one protected record (RFC 8449 4)               */
 /* --------------------------------------------------------------------------------------------- */
-/* --------------------------------------------------------------------------------------------- */
-/* Internal: largest content sent in one protected record: this build's send size, or less when */
-/* the server's record_size_limit (RFC 8449 4) leaves room for the content type byte only.      */
-/* --------------------------------------------------------------------------------------------- */
-static size_t _SendRecordMax(const SSFTLSCSession_t *s)
+static size_t _SSFTLSCSendRecordMax(const SSFTLSCSession_t *s)
 {
     size_t max = SSF_TLSC_CONFIG_MAX_SEND_RECORD;
 
-    if ((s->peerRecordLimit != 0u) && (((size_t)s->peerRecordLimit - 1u) < max))
-    { max = (size_t)s->peerRecordLimit - 1u; }
+    SSF_REQUIRE(s != NULL);
+
+    /* Does the server's record_size_limit leave less room, minus the content type byte? */
+    if ((s->peerRecordLimit != 0u) && ((((size_t)s->peerRecordLimit) - 1u) < max))
+    { max = ((size_t)s->peerRecordLimit) - 1u; }
     return max;
 }
 
 #if SSF_CONFIG_TLSC_UNIT_TEST == 1
 SSFTLSIOResult_t _SSFTLSCSendHandshakeForTest(SSFTLSCSession_t *session, const uint8_t *msg,
-                                              size_t total)
+                                              size_t msgLen)
 {
-    return _SendHandshakeOnce(session, msg, total);
+    return _SSFTLSCSendHandshakeOnce(session, msg, msgLen);
 }
 #endif /* SSF_CONFIG_TLSC_UNIT_TEST */
 
-static bool _SSFTLSCOpen(SSFNetTransport_t *t, SSFCStrIn_t host, size_t hostSize, uint16_t port)
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the inner connection to hostStr:port was started and the handshake armed.     */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFTLSCOpen(SSFNetTransport_t *t, SSFCStrIn_t hostStr, size_t hostSize,
+                         uint16_t port)
 {
     SSFTLSCSession_t *s;
     size_t hostLen;
 
-    SSF_REQUIRE(host != NULL);
+    SSF_REQUIRE(hostStr != NULL);
     SSF_REQUIRE(hostSize > 0);
     s = _SSFTLSCSelf(t);
     SSF_REQUIRE(s->hsState == SSF_TLSC_HS_IDLE);
 
-    if ((SSFStrLen(host, hostSize, &hostLen) == false) || (hostLen == 0)) return false;
+    if ((SSFStrLen(hostStr, hostSize, &hostLen) == false) || (hostLen == 0)) return false;
     if (hostLen >= SSF_TLSC_MAX_HOST_SIZE) return false;
     if (port == 0) return false;
-    /* IPv4 only (ssfnet.h), whatever the inner transport: an IPv6 literal could never be       */
-    /* verified (ssfx509 matches IPv4 iPAddress SANs only), so refuse it before connecting.      */
-    if (memchr(host, ':', hostLen) != NULL)
+    /* Is it an IPv6 literal, which could never be verified on IPv4-only SSF? */
+    if (memchr(hostStr, ':', hostLen) != NULL)
     {
-        SSF_TLS_TRACE_HS_ERROR(&s->trace, "IPv6 host '%s' refused: SSF is IPv4 only", host);
+        SSF_TLS_TRACE_HS_ERROR(&s->trace, "IPv6 host '%s' refused: SSF is IPv4 only", hostStr);
         return false;
     }
 
-    /* Fail closed: without trust anchors the server cannot be authenticated, so do not connect */
-    /* at all (a ClientHello would already disclose the host name) unless the caller opted in.  */
+    /* Fail closed: without trust anchors do not connect at all unless the caller opted in */
 #if SSF_TLSC_CONFIG_ALLOW_UNAUTHENTICATED == 1
+    /* Are there no trust anchors and no opt-in? */
     if ((s->trust.count == 0u) && (s->allowUnauthenticated == false))
     {
         SSF_TLS_TRACE_CERT_ERROR(&s->trace, "No trust anchors: refusing to connect "
@@ -3518,6 +3720,7 @@ static bool _SSFTLSCOpen(SSFNetTransport_t *t, SSFCStrIn_t host, size_t hostSize
         return false;
     }
 #else
+    /* Are there no trust anchors? */
     if (s->trust.count == 0u)
     {
         SSF_TLS_TRACE_CERT_ERROR(&s->trace, "No trust anchors: refusing to connect");
@@ -3526,7 +3729,8 @@ static bool _SSFTLSCOpen(SSFNetTransport_t *t, SSFCStrIn_t host, size_t hostSize
 #endif
 
     _SSFTLSCReset(s);
-    memcpy(s->host, host, hostLen + 1u);       /* SNI and certificate name; caller's copy may go */
+    /* SNI and certificate name; the caller's copy may go */
+    memcpy(s->host, hostStr, hostLen + 1u);
     s->hsHostname = s->host;
     s->hsPort = port;
 
@@ -3538,8 +3742,7 @@ static bool _SSFTLSCOpen(SSFNetTransport_t *t, SSFCStrIn_t host, size_t hostSize
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns SUCCESS once the handshake is complete, WANT_READ/WANT_WRITE while in progress, else  */
-/* CLOSED or ERROR.                                                                              */
+/* Returns SUCCESS once the handshake is complete, WANT_READ/WANT_WRITE while in progress.       */
 /* --------------------------------------------------------------------------------------------- */
 static SSFNetIOResult_t _SSFTLSCPollOpen(SSFNetTransport_t *t)
 {
@@ -3547,106 +3750,133 @@ static SSFNetIOResult_t _SSFTLSCPollOpen(SSFNetTransport_t *t)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: post-handshake handshake messages (RFC 8446 4.6). Feeds one record's plaintext to a */
-/* parser that keeps its place across records, so a message may span them. NewSessionTicket is  */
-/* skipped (no resumption); KeyUpdate is checked (4.6.3) and must end its record, as any key    */
-/* change must (5.1); anything else, post-handshake CertificateRequest included (never offered), */
-/* is unexpected_message. Returns false with the alert, else *kuOut is the KeyUpdate request   */
-/* (0 / 1) that ended the record, or 0xFF for none.                                             */
+/* Internal: post-handshake handshake messages (RFC 8446 4.6)                                    */
 /* --------------------------------------------------------------------------------------------- */
-/* NewSessionTicket body minimum: lifetime 4, age_add 4, nonce<0..255> 1, ticket<1..2^16-1>    */
-/* 2 + 1, extensions<0..2^16-2> 2. The ticket is not used (no resumption), so not parsed further. */
+/* NewSessionTicket body minimum; the ticket is never used, as there is no resumption */
 #define SSF_TLSC_NST_MIN_BODY (14u)
 #define SSF_TLSC_NO_KEY_UPDATE (0xFFu)
 
-static bool _PostHandshakeFeed(SSFTLSCSession_t *s, const uint8_t *rec, size_t len,
-                               uint8_t *alertOut, uint8_t *kuOut)
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: feeds one record's plaintext to the post-handshake parser; false with the alert     */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFTLSCPostHandshakeFeed(SSFTLSCSession_t *s, const uint8_t *rec, size_t recLen,
+                                      uint8_t *alertOut, uint8_t *kuOut)
 {
     size_t i = 0;
 
+    SSF_REQUIRE(s != NULL);
+    SSF_REQUIRE((rec != NULL) || (recLen == 0u));
+    SSF_REQUIRE(alertOut != NULL);
+    SSF_REQUIRE(kuOut != NULL);
+
     *alertOut = 0;
     *kuOut = SSF_TLSC_NO_KEY_UPDATE;
-    while (i < len)
+    while (i < recLen)
     {
         size_t n;
 
+        /* Is the message header still incomplete? */
         if (s->phHdrLen < sizeof(s->phHdr))
         {
+            /* Yes, take its next byte; only NewSessionTicket and KeyUpdate are allowed */
             s->phHdr[s->phHdrLen++] = rec[i++];
             if (s->phHdrLen < sizeof(s->phHdr)) continue;
             s->phType = s->phHdr[0];
-            s->phRemain = ((uint32_t)s->phHdr[1] << 16) | ((uint32_t)s->phHdr[2] << 8) |
-                          (uint32_t)s->phHdr[3];
+            s->phRemain = (((uint32_t)s->phHdr[1]) << 16) | (((uint32_t)s->phHdr[2]) << 8) |
+                          ((uint32_t)s->phHdr[3]);
+            /* Is it a NewSessionTicket? */
             if (s->phType == SSF_TLS_HS_NEW_SESSION_TICKET)
             {
+                /* Yes, checked only for its minimum length and skipped */
                 if (s->phRemain < SSF_TLSC_NST_MIN_BODY)
                 { *alertOut = SSF_TLS_ALERT_DECODE_ERROR; return false; }
             }
             else if (s->phType == SSF_TLS_HS_KEY_UPDATE)
             {
+                /* No, a KeyUpdate has a one-byte body */
                 if (s->phRemain != 1u) { *alertOut = SSF_TLS_ALERT_DECODE_ERROR; return false; }
             }
             else { *alertOut = SSF_TLS_ALERT_UNEXPECTED_MSG; return false; }
             continue;
         }
 
-        /* Body bytes. A KeyUpdate's one byte is its request, and the record must end with it. */
+        /* Is it a KeyUpdate, whose one byte is its request and must end the record? */
         if (s->phType == SSF_TLS_HS_KEY_UPDATE)
         {
             if (rec[i] > 1u) { *alertOut = SSF_TLS_ALERT_ILLEGAL_PARAMETER; return false; }
-            if ((i + 1u) != len) { *alertOut = SSF_TLS_ALERT_UNEXPECTED_MSG; return false; }
+            if ((i + 1u) != recLen) { *alertOut = SSF_TLS_ALERT_UNEXPECTED_MSG; return false; }
             *kuOut = rec[i];
         }
-        n = len - i;
+        n = recLen - i;
         if (n > s->phRemain) n = s->phRemain;
         i += n;
         s->phRemain -= (uint32_t)n;
-        if (s->phRemain == 0u) s->phHdrLen = 0;                    /* Message done */
+        if (s->phRemain == 0u) s->phHdrLen = 0;
     }
     return true;
 }
 
-/* Internal: true unless a handshake message is part-way through and the record is not a        */
-/* handshake record: no other record may come between its pieces (RFC 8446 5.1).               */
-static bool _RecordTypeAllowed(const SSFTLSCSession_t *s, uint8_t contentType)
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: false if a part-way handshake message is split by another record type (5.1)         */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFTLSCRecordTypeAllowed(const SSFTLSCSession_t *s, uint8_t contentType)
 {
+    SSF_REQUIRE(s != NULL);
+
     return (contentType == SSF_TLS_CT_HANDSHAKE) || (s->phHdrLen == 0u);
 }
 
-/* Internal: secret = HKDF-Expand-Label(secret, "traffic upd", "", Hash.length) (RFC 8446 7.2). */
-static void _NextTrafficSecret(const SSFTLSCSession_t *s, uint8_t *secret)
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: secret = HKDF-Expand-Label(secret, "traffic upd", "", Hash.length) (RFC 8446 7.2)   */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFTLSCNextTrafficSecret(const SSFTLSCSession_t *s, uint8_t *secret)
 {
     uint8_t next[SSF_TLS_MAX_HASH_SIZE];
+
+    SSF_REQUIRE(s != NULL);
+    SSF_REQUIRE(secret != NULL);
 
     SSFTLSHkdfExpandLabel(s->hash, secret, s->hashLen, "traffic upd", NULL, 0, next, s->hashLen);
     memcpy(secret, next, s->hashLen);
     _SSF_TLSC_SCRUB(next);
 }
 
-/* Internal: moves secret to its next generation and installs the keys derived from it in state; */
-/* the previous secret and keys are gone.                                                         */
-static void _UpdateTrafficKeys(SSFTLSCSession_t *s, uint8_t *secret, SSFTLSRecordState_t *state,
-                               bool *inited)
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: moves secret to its next generation and installs its keys in state                  */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFTLSCUpdateTrafficKeys(SSFTLSCSession_t *s, uint8_t *secret,
+                                      SSFTLSRecordState_t *state, bool *inited)
 {
-    uint8_t key[SSF_TLS_MAX_KEY_SIZE], iv[SSF_TLS_IV_SIZE];
+    uint8_t key[SSF_TLS_MAX_KEY_SIZE];
+    uint8_t iv[SSF_TLS_IV_SIZE];
 
-    _NextTrafficSecret(s, secret);
+    SSF_REQUIRE(s != NULL);
+    SSF_REQUIRE(secret != NULL);
+    SSF_REQUIRE(state != NULL);
+    SSF_REQUIRE(inited != NULL);
+
+    _SSFTLSCNextTrafficSecret(s, secret);
     SSFTLSDeriveTrafficKeys(s->hash, secret, s->hashLen, key, s->keyLen, iv, SSF_TLS_IV_SIZE);
-    _RecordStateSet(s, state, inited, key, iv);
+    _SSFTLSCRecordStateSet(s, state, inited, key, iv);
     _SSF_TLSC_SCRUB(key);
     _SSF_TLSC_SCRUB(iv);
 }
 
-/* Internal: sends a KeyUpdate (update_not_requested) under the current client key, then moves  */
-/* sending to the next key. Call with nothing pending. Once encrypted the record is the old    */
-/* key's last, so the switch happens even if it is still being written (WANT_WRITE).           */
-static SSFTLSIOResult_t _SendKeyUpdate(SSFTLSCSession_t *s)
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: sends a KeyUpdate under the current client key, then moves sending to the next key  */
+/* --------------------------------------------------------------------------------------------- */
+static SSFTLSIOResult_t _SSFTLSCSendKeyUpdate(SSFTLSCSession_t *s)
 {
     static const uint8_t ku[5] = { SSF_TLS_HS_KEY_UPDATE, 0u, 0u, 1u, 0u };
-    SSFTLSIOResult_t r = _SendEncRecordOnce(s, SSF_TLS_CT_HANDSHAKE, ku, sizeof(ku));
+    SSFTLSIOResult_t r;
+
+    SSF_REQUIRE(s != NULL);
+
+    /* Once encrypted the record is the old key's last, even while still being written */
+    r = _SSFTLSCSendEncRecordOnce(s, SSF_TLS_CT_HANDSHAKE, ku, sizeof(ku));
 
     if (r == SSF_TLS_IO_ERROR) return r;
-    _UpdateTrafficKeys(s, s->clientAppTrafficSecret, &s->sendState, &s->sendStateInited);
+    _SSFTLSCUpdateTrafficKeys(s, s->clientAppTrafficSecret, &s->sendState, &s->sendStateInited);
     SSF_TLS_TRACE_CRYPTO_INFO(&s->trace, "KeyUpdate sent (%s); client key updated",
                               s->keyUpdateOwed ? "requested by the server" : "record limit");
     s->keyUpdateOwed = false;
@@ -3655,29 +3885,27 @@ static SSFTLSIOResult_t _SendKeyUpdate(SSFTLSCSession_t *s)
 }
 
 #if SSF_CONFIG_TLSC_UNIT_TEST == 1
-bool _SSFTLSCPostHandshakeFeedForTest(SSFTLSCSession_t *session, const uint8_t *rec, size_t len,
-                                      uint8_t *alertOut, uint8_t *keyUpdateOut)
+bool _SSFTLSCPostHandshakeFeedForTest(SSFTLSCSession_t *session, const uint8_t *rec,
+                                      size_t recLen, uint8_t *alertOut, uint8_t *keyUpdateOut)
 {
-    return _PostHandshakeFeed(session, rec, len, alertOut, keyUpdateOut);
+    return _SSFTLSCPostHandshakeFeed(session, rec, recLen, alertOut, keyUpdateOut);
 }
 
 void _SSFTLSCNextTrafficSecretForTest(const SSFTLSCSession_t *session, uint8_t *secret)
 {
-    _NextTrafficSecret(session, secret);
+    _SSFTLSCNextTrafficSecret(session, secret);
 }
 
 bool _SSFTLSCRecordTypeAllowedForTest(const SSFTLSCSession_t *session, uint8_t contentType)
 {
-    return _RecordTypeAllowed(session, contentType);
+    return _SSFTLSCRecordTypeAllowed(session, contentType);
 }
 #endif /* SSF_CONFIG_TLSC_UNIT_TEST */
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns SUCCESS with up to one record's worth of bytes accepted, WANT_WRITE if the previous    */
-/* record is still being written, else CLOSED or ERROR. Accepted bytes are encrypted at once and  */
-/* written as far as the inner transport allows; the remainder goes out on later calls.          */
+/* Returns SUCCESS with up to one record's worth of bytes accepted, else WANT_WRITE/CLOSED/ERROR */
 /* --------------------------------------------------------------------------------------------- */
-static SSFNetIOResult_t _SSFTLSCSend(SSFNetTransport_t *t, const uint8_t *buf, size_t len,
+static SSFNetIOResult_t _SSFTLSCSend(SSFNetTransport_t *t, const uint8_t *buf, size_t bufLen,
                                      size_t *sentOut)
 {
     SSFTLSCSession_t *s;
@@ -3685,108 +3913,115 @@ static SSFNetIOResult_t _SSFTLSCSend(SSFNetTransport_t *t, const uint8_t *buf, s
     size_t chunk;
 
     SSF_REQUIRE(buf != NULL);
-    SSF_REQUIRE(len > 0);
+    SSF_REQUIRE(bufLen > 0);
     SSF_REQUIRE(sentOut != NULL);
     s = _SSFTLSCSelf(t);
 
     *sentOut = 0;
     if (s->connected == false) return SSF_NET_IO_ERROR;
-    if (s->closeNotifySent) return SSF_NET_IO_ERROR;   /* ssfnet.h: not valid after shutdown() */
+    if (s->closeNotifySent) return SSF_NET_IO_ERROR;
 
-    r = _SendPending(s);
+    r = _SSFTLSCSendPending(s);
     if (r == SSF_TLS_IO_WANT_WRITE) return SSF_NET_IO_WANT_WRITE;
     if (r != SSF_TLS_IO_SUCCESS) return _SSFTLSCFail(s);
 
-    /* A KeyUpdate goes first when the server asked for one (it must precede the next          */
-    /* application data, RFC 8446 4.6.3) or the current key has carried its share of records    */
-    /* (5.5). Its record may still be pending: the data follows on the next call.               */
+    /* Is a KeyUpdate owed, by server request (4.6.3) or the per-key record limit (5.5)? */
     if (s->keyUpdateOwed || (s->sendRecordsOnKey >= SSF_TLSC_CONFIG_KEY_UPDATE_RECORDS))
     {
-        r = _SendKeyUpdate(s);
+        /* Yes, it goes first; the data follows on the next call if its record is pending */
+        r = _SSFTLSCSendKeyUpdate(s);
         if (r == SSF_TLS_IO_ERROR) return _SSFTLSCFail(s);
         if (r == SSF_TLS_IO_WANT_WRITE) return SSF_NET_IO_WANT_WRITE;
     }
 
-    chunk = _SendRecordMax(s);
-    if (len < chunk) chunk = len;
-    r = _SendEncRecordOnce(s, SSF_TLS_CT_APPLICATION, buf, chunk);
+    chunk = _SSFTLSCSendRecordMax(s);
+    if (bufLen < chunk) chunk = bufLen;
+    r = _SSFTLSCSendEncRecordOnce(s, SSF_TLS_CT_APPLICATION, buf, chunk);
     if (r == SSF_TLS_IO_ERROR) return _SSFTLSCFail(s);
     s->sendRecordsOnKey++;
-    *sentOut = chunk;                          /* Encrypted; any unsent tail stays pending */
+    /* Encrypted; any unsent tail stays pending */
+    *sentOut = chunk;
     return SSF_NET_IO_SUCCESS;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns SUCCESS with application bytes, WANT_READ if none are available yet, CLOSED on        */
-/* close_notify or end of stream, else ERROR. A decrypted record larger than size is returned     */
-/* across several calls.                                                                         */
+/* Returns SUCCESS with application bytes, else WANT_READ/CLOSED/ERROR.                          */
 /* --------------------------------------------------------------------------------------------- */
-static SSFNetIOResult_t _SSFTLSCRecv(SSFNetTransport_t *t, uint8_t *buf, size_t size,
+static SSFNetIOResult_t _SSFTLSCRecv(SSFNetTransport_t *t, uint8_t *buf, size_t bufSize,
                                      size_t *gotOut)
 {
     SSFTLSCSession_t *s;
     uint32_t i;
 
     SSF_REQUIRE(buf != NULL);
-    SSF_REQUIRE(size > 0);
+    SSF_REQUIRE(bufSize > 0);
     SSF_REQUIRE(gotOut != NULL);
     s = _SSFTLSCSelf(t);
 
     *gotOut = 0;
     if (s->connected == false) return SSF_NET_IO_ERROR;
 
-    /* Keep a partly written record moving even when the caller is only reading. */
-    if (_SendPending(s) == SSF_TLS_IO_ERROR) return _SSFTLSCFail(s);
+    /* Keep a partly written record moving even when the caller is only reading */
+    if (_SSFTLSCSendPending(s) == SSF_TLS_IO_ERROR) return _SSFTLSCFail(s);
 
     for (i = 0; (s->hsBufPos >= s->hsBufLen) && (i < SSF_TLSC_RECV_MAX_RECORDS); i++)
     {
         uint8_t ct = 0;
         size_t ptLen = 0;
-        SSFTLSIOResult_t r = _RecvRecordOnce(s, s->hsBuf, SSF_TLSC_HSBUF_SIZE, &ptLen, &ct);
+        SSFTLSIOResult_t r = _SSFTLSCRecvRecordOnce(s, s->hsBuf, SSF_TLSC_HSBUF_SIZE, &ptLen,
+                                                    &ct);
 
         if (r == SSF_TLS_IO_WANT_READ) return SSF_NET_IO_WANT_READ;
         if (r != SSF_TLS_IO_SUCCESS) return _SSFTLSCFail(s);
 
+        /* Is it application data? */
         if (ct == SSF_TLS_CT_APPLICATION)
         {
-            if (!_RecordTypeAllowed(s, ct))
+            /* Yes, it must not split a post-handshake message */
+            if (!_SSFTLSCRecordTypeAllowed(s, ct))
             {
                 SSF_TLS_TRACE_HS_ERROR(&s->trace, "Application data inside a split "
                                        "post-handshake message");
                 _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_UNEXPECTED_MSG);
                 return _SSFTLSCFail(s);
             }
-            s->hsBufLen = ptLen;               /* An empty record yields nothing; read on */
+            /* An empty record yields nothing; read on */
+            s->hsBufLen = ptLen;
             s->hsBufPos = 0;
         }
         else if (ct == SSF_TLS_CT_ALERT)
         {
+            /* No, an alert ends the connection */
             if ((ptLen >= 2u) && (s->hsBuf[1] == SSF_TLS_ALERT_CLOSE_NOTIFY))
             { s->peerClosed = true; }
             return _SSFTLSCFail(s);
         }
         else if (ct == SSF_TLS_CT_HANDSHAKE)
         {
+            /* No, a post-handshake message */
             uint8_t alert;
             uint8_t ku;
 
-            if (!_PostHandshakeFeed(s, s->hsBuf, ptLen, &alert, &ku))
+            if (!_SSFTLSCPostHandshakeFeed(s, s->hsBuf, ptLen, &alert, &ku))
             {
                 SSF_TLS_TRACE_HS_ERROR(&s->trace, "Post-handshake message rejected");
                 _SSF_TLSC_ALERT(s, alert);
                 return _SSFTLSCFail(s);
             }
+            /* Did a KeyUpdate end the record? */
             if (ku != SSF_TLSC_NO_KEY_UPDATE)
             {
-                /* The server's next records use its next key (RFC 8446 4.6.3) */
-                _UpdateTrafficKeys(s, s->serverAppTrafficSecret, &s->recvState,
-                                   &s->recvStateInited);
-                if (ku == 1u) s->keyUpdateOwed = true;   /* One reply answers any number */
+                /* Yes, the server's next records use its next key (RFC 8446 4.6.3) */
+                _SSFTLSCUpdateTrafficKeys(s, s->serverAppTrafficSecret, &s->recvState,
+                                          &s->recvStateInited);
+                /* One reply answers any number of requests */
+                if (ku == 1u) s->keyUpdateOwed = true;
                 SSF_TLS_TRACE_CRYPTO_INFO(&s->trace, "KeyUpdate received (%s); server key "
                                           "updated", (ku == 1u) ? "update requested" :
                                           "update not requested");
             }
-            s->hsBufLen = 0;                   /* Nothing for the application */
+            /* Nothing for the application */
+            s->hsBufLen = 0;
             s->hsBufPos = 0;
         }
         else { _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_UNEXPECTED_MSG); return _SSFTLSCFail(s); }
@@ -3794,44 +4029,47 @@ static SSFNetIOResult_t _SSFTLSCRecv(SSFNetTransport_t *t, uint8_t *buf, size_t 
     if (s->hsBufPos >= s->hsBufLen) return SSF_NET_IO_WANT_READ;
 
     *gotOut = s->hsBufLen - s->hsBufPos;
-    if (*gotOut > size) *gotOut = size;
+    if (*gotOut > bufSize) *gotOut = bufSize;
     memcpy(buf, &s->hsBuf[s->hsBufPos], *gotOut);
     s->hsBufPos += *gotOut;
     return SSF_NET_IO_SUCCESS;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Finishes sending: writes out the record send() left partly written, then close_notify (RFC    */
-/* 8446 6.1), then the inner transport's shutdown(). SUCCESS once all of it is delivered,        */
-/* WANT_WRITE while bytes remain, CLOSED or ERROR if the connection fails. send() returns ERROR  */
-/* afterwards; recv() still works.                                                               */
+/* Finishes sending: the partly written record, close_notify, then the inner shutdown().         */
 /* --------------------------------------------------------------------------------------------- */
 static SSFNetIOResult_t _SSFTLSCShutdown(SSFNetTransport_t *t)
 {
-    SSFTLSCSession_t *s = _SSFTLSCSelf(t);
+    SSFTLSCSession_t *s;
     SSFTLSIOResult_t r;
 
+    s = _SSFTLSCSelf(t);
     if (s->connected == false) return SSF_NET_IO_ERROR;
 
-    r = _SendPending(s);                       /* Application data, or a close_notify resumed */
+    /* Application data, or a close_notify resumed (RFC 8446 6.1) */
+    r = _SSFTLSCSendPending(s);
     if (r == SSF_TLS_IO_WANT_WRITE) return SSF_NET_IO_WANT_WRITE;
     if (r != SSF_TLS_IO_SUCCESS) return _SSFTLSCFail(s);
 
+    /* Is close_notify still to be sent? */
     if (s->closeNotifySent == false)
     {
-        static const uint8_t alert[2] = { 1u, SSF_TLS_ALERT_CLOSE_NOTIFY }; /* warning */
+        /* Yes, a warning-level close_notify */
+        static const uint8_t alert[2] = { 1u, SSF_TLS_ALERT_CLOSE_NOTIFY };
 
         SSF_TLS_TRACE_ALERT(&s->trace, "Sending alert level=%u desc=%u", alert[0], alert[1]);
-        r = _SendEncRecordOnce(s, SSF_TLS_CT_ALERT, alert, sizeof(alert));
+        r = _SSFTLSCSendEncRecordOnce(s, SSF_TLS_CT_ALERT, alert, sizeof(alert));
         if (r == SSF_TLS_IO_ERROR) return _SSFTLSCFail(s);
-        s->closeNotifySent = true;             /* Encrypted; any unsent tail stays pending */
+        /* Encrypted; any unsent tail stays pending */
+        s->closeNotifySent = true;
         if (r == SSF_TLS_IO_WANT_WRITE) return SSF_NET_IO_WANT_WRITE;
     }
 
-    /* Everything is with the inner transport; it may buffer too. */
+    /* Everything is with the inner transport, which may buffer too */
     {
         SSFNetIOResult_t ir = s->inner->shutdown(s->inner);
 
+        /* Is the inner shutdown done or in progress? */
         if ((ir == SSF_NET_IO_SUCCESS) || (ir == SSF_NET_IO_WANT_WRITE) ||
             (ir == SSF_NET_IO_WANT_READ))
         { return ir; }
@@ -3842,32 +4080,37 @@ static SSFNetIOResult_t _SSFTLSCShutdown(SSFNetTransport_t *t)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Ends the connection: best-effort close_notify, closes the inner transport, wipes keys. Never   */
-/* blocks; a record or close_notify the inner transport cannot take at once is dropped, which    */
-/* shutdown() exists to prevent.                                                                 */
+/* Ends the connection without blocking: best-effort close_notify, inner close, key wipe.        */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFTLSCClose(SSFNetTransport_t *t)
 {
-    SSFTLSCSession_t *s = _SSFTLSCSelf(t);
-    bool isHandshaking = (s->hsState != SSF_TLSC_HS_IDLE) && (s->hsState != SSF_TLSC_HS_COMPLETE) &&
-                         (s->hsState != SSF_TLSC_HS_ERROR);
+    SSFTLSCSession_t *s;
+    bool isHandshaking;
 
+    s = _SSFTLSCSelf(t);
+    isHandshaking = ((s->hsState != SSF_TLSC_HS_IDLE) && (s->hsState != SSF_TLSC_HS_COMPLETE) &&
+                     (s->hsState != SSF_TLSC_HS_ERROR));
+
+    /* Was shutdown() started but not finished? */
     if (s->closeNotifySent)
     {
-        (void)_SendPending(s);                 /* shutdown() unfinished: one last push */
+        /* Yes, one last push */
+        (void)_SSFTLSCSendPending(s);
     }
-    else if (s->connected && s->sendEncrypted && (_SendPending(s) == SSF_TLS_IO_SUCCESS))
+    else if (s->connected && s->sendEncrypted && (_SSFTLSCSendPending(s) == SSF_TLS_IO_SUCCESS))
     {
-        uint8_t alert[2] = { 1u, SSF_TLS_ALERT_CLOSE_NOTIFY }; /* warning, close_notify */
-        (void)_SendEncRecordOnce(s, SSF_TLS_CT_ALERT, alert, sizeof(alert));
+        /* No, connected: send a warning-level close_notify */
+        uint8_t alert[2] = { 1u, SSF_TLS_ALERT_CLOSE_NOTIFY };
+
+        (void)_SSFTLSCSendEncRecordOnce(s, SSF_TLS_CT_ALERT, alert, sizeof(alert));
     }
     else if (isHandshaking && s->clientHelloSent)
     {
-        /* RFC 8446 6.1: abandoning a handshake the peer has seen is user_canceled followed by */
-        /* close_notify. Protected once handshake send keys exist, plaintext before.            */
+        /* No, abandoning a handshake the peer has seen: user_canceled, close_notify (6.1) */
         _SSFTLSCSendAlert(s, 1u, SSF_TLS_ALERT_USER_CANCELED);
         _SSFTLSCSendAlert(s, 1u, SSF_TLS_ALERT_CLOSE_NOTIFY);
     }
+    else { /* Nothing to announce */ }
     if (s->innerOpen) s->inner->close(s->inner);
     s->innerOpen = false;
     _SSFTLSCReset(s);
@@ -3930,10 +4173,11 @@ void SSFTLSCSetUnauthenticated(SSFTLSCSession_t *session, bool allow)
 #endif /* SSF_TLSC_CONFIG_ALLOW_UNAUTHENTICATED */
 
 /* --------------------------------------------------------------------------------------------- */
-/* Sets, or clears, the client certificate and key; see ssftlsc.h.                               */
+/* Sets, or clears, the client certificate and key; see _net/README.md.                          */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFTLSCSetClientCert(SSFTLSCSession_t *session, const uint8_t *const *chainDer,
-                          const uint32_t *chainLens, uint8_t chainCount, const SSFPKey_t *key)
+bool SSFTLSCSetClientCert(SSFTLSCSession_t *session, const uint8_t *const *chainDerOpt,
+                          const uint32_t *chainLensOpt, uint8_t chainCount,
+                          const SSFPKey_t *keyOpt)
 {
     size_t total = 4u;
     uint8_t i;
@@ -3946,59 +4190,65 @@ bool SSFTLSCSetClientCert(SSFTLSCSession_t *session, const uint8_t *const *chain
     session->clientChainLens = NULL;
     session->clientKey = NULL;
     session->clientChainCount = 0;
-    if ((chainDer == NULL) && (chainLens == NULL) && (chainCount == 0u) && (key == NULL))
+    /* Is the request to clear? */
+    if ((chainDerOpt == NULL) && (chainLensOpt == NULL) && (chainCount == 0u) && (keyOpt == NULL))
     {
-        return true;                                            /* Cleared */
+        /* Yes */
+        return true;
     }
-    if ((chainDer == NULL) || (chainLens == NULL) || (chainCount == 0u) || (key == NULL) ||
-        (key->type == SSF_PKEY_TYPE_NONE)) return false;
+    if ((chainDerOpt == NULL) || (chainLensOpt == NULL) || (chainCount == 0u) ||
+        (keyOpt == NULL) ||
+        (keyOpt->type == SSF_PKEY_TYPE_NONE)) return false;
 
     /* Every entry fits CertificateEntry, and the list fits certificate_list<0..2^24-1> */
     for (i = 0; i < chainCount; i++)
     {
-        if ((chainDer[i] == NULL) || (chainLens[i] == 0u) || (chainLens[i] > 0xFFFFFFu))
+        if ((chainDerOpt[i] == NULL) || (chainLensOpt[i] == 0u) || (chainLensOpt[i] > 0xFFFFFFu))
         {
             return false;
         }
-        total += 3u + (size_t)chainLens[i] + 2u;
+        total += ((3u + ((size_t)chainLensOpt[i])) + 2u);
         if (total > 0xFFFFFFu) return false;
     }
-    if (!_ClientCertMatchesKey(chainDer[0], chainLens[0], key))
+    /* Does the leaf's public key differ from the key? */
+    if (!_SSFTLSCClientCertMatchesKey(chainDerOpt[0], chainLensOpt[0], keyOpt))
     {
         SSF_TLS_TRACE_CERT_ERROR(&session->trace, "Client certificate does not match its key");
         return false;
     }
-    session->clientChainDer = chainDer;
-    session->clientChainLens = chainLens;
-    session->clientKey = key;
+    session->clientChainDer = chainDerOpt;
+    session->clientChainLens = chainLensOpt;
+    session->clientKey = keyOpt;
     session->clientChainCount = chainCount;
     return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: true if der[0..len) is exactly one X.509 certificate. Out of line: the parsed       */
-/* certificate (about 1 KB) lives only during this call.                                         */
+/* Internal: true if der[0..derLen) is exactly one X.509 certificate; parsed out of line         */
 /* --------------------------------------------------------------------------------------------- */
-static SSF_NOINLINE bool _IsOneCert(const uint8_t *der, size_t len)
+static SSF_NOINLINE bool _SSFTLSCIsOneCert(const uint8_t *der, size_t derLen)
 {
     SSFX509Cert_t cert;
 
-    return (len <= 0xFFFFFFFFu) && SSFX509Parse(der, (uint32_t)len, &cert);
+    SSF_REQUIRE(der != NULL);
+
+    return (derLen <= 0xFFFFFFFFu) && SSFX509Parse(der, (uint32_t)derLen, &cert);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: counts "-----BEGIN" and "-----END" markers in p[0..len). Base64 holds no '-', so a  */
-/* PEM block has exactly two; text between blocks has none.                                      */
+/* Internal: counts "-----BEGIN" and "-----END" markers in pem[0..pemLen)                        */
 /* --------------------------------------------------------------------------------------------- */
-static size_t _PemMarkers(const char *p, size_t len)
+static size_t _SSFTLSCPemMarkers(const char *pem, size_t pemLen)
 {
     size_t n = 0;
     size_t i;
 
-    for (i = 0; (i + 8u) <= len; i++)
+    SSF_REQUIRE(pem != NULL);
+
+    for (i = 0; (i + 8u) <= pemLen; i++)
     {
-        if ((memcmp(&p[i], "-----END", 8u) == 0) ||
-            (((i + 10u) <= len) && (memcmp(&p[i], "-----BEGIN", 10u) == 0)))
+        if ((memcmp(&pem[i], "-----END", 8u) == 0) ||
+            (((i + 10u) <= pemLen) && (memcmp(&pem[i], "-----BEGIN", 10u) == 0)))
         {
             n++;
         }
@@ -4007,15 +4257,16 @@ static size_t _PemMarkers(const char *p, size_t len)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Builds a trust store from a PEM certificate or bundle; see ssftlsc.h.                         */
+/* Builds a trust store from a PEM certificate or bundle; see _net/README.md.                    */
 /* --------------------------------------------------------------------------------------------- */
 SSFTLSCTrustResult_t SSFTLSCTrustFromPEM(const char *pem, size_t pemLen, uint8_t *poolOpt,
-                                         size_t poolSize, const uint8_t **ders, uint32_t *lens,
-                                         uint8_t maxCount, SSFTLSCTrustStore_t *storeOpt,
-                                         size_t *poolUsedOut, uint8_t *countOut)
+                                         size_t poolSize, const uint8_t **dersOpt,
+                                         uint32_t *lensOpt, uint8_t maxCount,
+                                         SSFTLSCTrustStore_t *storeOpt, size_t *poolUsedOut,
+                                         uint8_t *countOut)
 {
     SSFTLSCTrustResult_t r = SSF_TLSC_TRUST_OK;
-    uint8_t limit = (uint8_t)((poolOpt == NULL) ? 255u : maxCount);  /* count is a uint8_t */
+    uint8_t limit = (uint8_t)((poolOpt == NULL) ? 255u : maxCount);
     size_t pos = 0;
     size_t used = 0;
     uint8_t count = 0;
@@ -4023,10 +4274,10 @@ SSFTLSCTrustResult_t SSFTLSCTrustFromPEM(const char *pem, size_t pemLen, uint8_t
     SSF_REQUIRE(pem != NULL);
     SSF_REQUIRE(poolUsedOut != NULL);
     SSF_REQUIRE(countOut != NULL);
-    SSF_REQUIRE((poolOpt == NULL) || ((ders != NULL) && (lens != NULL) && (storeOpt != NULL)));
-    /* ssfpem decodes into poolOpt while reading pem: the two must not overlap */
-    SSF_REQUIRE((poolOpt == NULL) || ((uintptr_t)&poolOpt[poolSize] <= (uintptr_t)pem) ||
-                ((uintptr_t)&pem[pemLen] <= (uintptr_t)poolOpt));
+    SSF_REQUIRE((poolOpt == NULL) ||
+                ((dersOpt != NULL) && (lensOpt != NULL) && (storeOpt != NULL)));
+    SSF_REQUIRE((poolOpt == NULL) || (((uintptr_t)&poolOpt[poolSize]) <= ((uintptr_t)pem)) ||
+                (((uintptr_t)&pem[pemLen]) <= ((uintptr_t)poolOpt)));
 
     for (;;)
     {
@@ -4036,53 +4287,68 @@ SSFTLSCTrustResult_t SSFTLSCTrustFromPEM(const char *pem, size_t pemLen, uint8_t
         size_t start = pos;
         SSFPEMResult_t pr;
 
-        /* Measuring decodes nowhere: ssfpem ignores derSize without a buffer */
+        /* Measuring decodes nowhere, as ssfpem ignores derSize without a buffer */
         pr = SSFPEMDecodeNext(pem, pemLen, &pos, &label, &labelLen,
                               (poolOpt != NULL) ? &poolOpt[used] : NULL,
                               (poolOpt != NULL) ? (poolSize - used) : 0u, &derLen);
-        /* A block with a damaged BEGIN line is text to ssfpem; its markers left in the text   */
-        /* before the next block, or after the last, reject the input instead of dropping it.  */
+        /* Is it the end, with no marker of a damaged block left in the trailing text? */
         if (pr == SSF_PEM_END)
         {
-            if (_PemMarkers(&pem[start], pemLen - start) != 0u) r = SSF_TLSC_TRUST_ERR_PEM;
+            /* Yes, a stray marker rejects the input instead of being dropped */
+            if (_SSFTLSCPemMarkers(&pem[start], pemLen - start) != 0u)
+            {
+                r = SSF_TLSC_TRUST_ERR_PEM;
+            }
             break;
         }
         if (pr == SSF_PEM_ERR_SIZE) { r = SSF_TLSC_TRUST_ERR_SIZE; break; }
-        if ((pr != SSF_PEM_BLOCK) || (_PemMarkers(&pem[start], pos - start) != 2u))
+        if ((pr != SSF_PEM_BLOCK) || (_SSFTLSCPemMarkers(&pem[start], pos - start) != 2u))
         {
             r = SSF_TLSC_TRUST_ERR_PEM;
             break;
         }
-        if (!SSFPEMLabelIs(label, labelLen, "CERTIFICATE")) { r = SSF_TLSC_TRUST_ERR_LABEL; break; }
+        if (!SSFPEMLabelIs(label, labelLen, "CERTIFICATE"))
+        {
+            r = SSF_TLSC_TRUST_ERR_LABEL;
+            break;
+        }
         if (count == limit) { r = SSF_TLSC_TRUST_ERR_COUNT; break; }
+        /* Is the certificate decoded into the pool, not just measured? */
         if (poolOpt != NULL)
         {
-            if (!_IsOneCert(&poolOpt[used], derLen)) { r = SSF_TLSC_TRUST_ERR_CERT; break; }
-            ders[count] = &poolOpt[used];
-            lens[count] = (uint32_t)derLen;
+            /* Yes, it must be exactly one X.509 certificate */
+            if (!_SSFTLSCIsOneCert(&poolOpt[used], derLen))
+            {
+                r = SSF_TLSC_TRUST_ERR_CERT;
+                break;
+            }
+            dersOpt[count] = &poolOpt[used];
+            lensOpt[count] = (uint32_t)derLen;
         }
         used += derLen;
         count++;
     }
     if ((r == SSF_TLSC_TRUST_OK) && (count == 0u)) r = SSF_TLSC_TRUST_ERR_EMPTY;
 
-    /* Fail closed: an error leaves an empty store; count is then the block at fault */
+    /* Fail closed: an error leaves an empty store, with count the block at fault */
     if (r != SSF_TLSC_TRUST_OK) used = 0;
     *poolUsedOut = used;
     *countOut = count;
+    /* Was a store built, not just measured? */
     if (poolOpt != NULL)
     {
-        storeOpt->caDer = (r == SSF_TLSC_TRUST_OK) ? ders : NULL;
-        storeOpt->caDerLen = (r == SSF_TLSC_TRUST_OK) ? lens : NULL;
+        /* Yes */
+        storeOpt->caDer = (r == SSF_TLSC_TRUST_OK) ? dersOpt : NULL;
+        storeOpt->caDerLen = (r == SSF_TLSC_TRUST_OK) ? lensOpt : NULL;
         storeOpt->count = (uint8_t)((r == SSF_TLSC_TRUST_OK) ? count : 0u);
     }
     return r;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Sets, or clears, the ALPN protocol list; see ssftlsc.h.                                       */
+/* Sets, or clears, the ALPN protocol list; see _net/README.md.                                  */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFTLSCSetALPN(SSFTLSCSession_t *session, const char *const *protos, uint8_t count)
+bool SSFTLSCSetALPN(SSFTLSCSession_t *session, const char *const *protosOpt, uint8_t count)
 {
     size_t total = 0;
     uint8_t i;
@@ -4094,31 +4360,34 @@ bool SSFTLSCSetALPN(SSFTLSCSession_t *session, const char *const *protos, uint8_
     session->alpnProtos = NULL;
     session->alpnCount = 0;
     session->alpnChosen = 0;
-    if ((protos == NULL) && (count == 0u)) return true;                 /* Cleared */
-    if ((protos == NULL) || (count == 0u)) return false;
+    if ((protosOpt == NULL) && (count == 0u)) return true;
+    if ((protosOpt == NULL) || (count == 0u)) return false;
 
     /* ProtocolName<1..2^8-1> (RFC 7301 3.1), the list within SSF_TLS_CONFIG_MAX_ALPN_LEN */
     for (i = 0; i < count; i++)
     {
-        size_t n = _AlpnLen(protos[i]);
+        size_t n;
+
+        n = _SSFTLSCAlpnLen(protosOpt[i]);
 
         if (n == 0u) return false;
         total += 1u + n;
         if (total > SSF_TLS_CONFIG_MAX_ALPN_LEN) return false;
     }
-    session->alpnProtos = protos;
+    session->alpnProtos = protosOpt;
     session->alpnCount = count;
     return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns the protocol the server chose with ALPN, or NULL; see ssftlsc.h.                      */
+/* Returns the protocol the server chose with ALPN, or NULL; see _net/README.md.                 */
 /* --------------------------------------------------------------------------------------------- */
 const char *SSFTLSCGetALPN(const SSFTLSCSession_t *session)
 {
     SSF_REQUIRE(session != NULL);
     SSF_REQUIRE(session->magic == SSF_TLSC_MAGIC);
-    /* EncryptedExtensions precedes server authentication: report nothing until it is done */
+
+    /* Is the handshake incomplete, as the choice precedes server authentication, or none made? */
     if ((session->hsState != SSF_TLSC_HS_COMPLETE) || (session->alpnChosen == 0u)) return NULL;
     return session->alpnProtos[session->alpnChosen - 1u];
 }
@@ -4130,5 +4399,6 @@ SSFTLSCHandshakeState_t SSFTLSCGetHandshakeState(const SSFTLSCSession_t *session
 {
     SSF_REQUIRE(session != NULL);
     SSF_REQUIRE(session->magic == SSF_TLSC_MAGIC);
+
     return session->hsState;
 }

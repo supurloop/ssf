@@ -32,14 +32,16 @@ extern "C" {
 #define SSF_SM_THREAD_WAKE_POST() { ReleaseSemaphore(gssfsmWakeSem, 1, NULL); }
 #define SSF_SM_THREAD_WAKE_WAIT(timeout) { \
     DWORD waitResult; \
-    waitResult = WaitForSingleObject(gssfsmWakeSem, timeout); \
+    waitResult = WaitForSingleObject(gssfsmWakeSem, (timeout)); \
     SSF_ASSERT((waitResult == WAIT_OBJECT_0) || (waitResult == WAIT_TIMEOUT)); \
 }
 extern HANDLE gssfsmWakeSem;
 #else /* WIN32 */
 #include <pthread.h>
 #define SSF_SM_THREAD_WAKE_DECLARATION \
-    bool gssfsmIsWakeSignalled; pthread_cond_t gssfsmWakeCond; pthread_mutex_t gssfsmWakeMutex
+    bool gssfsmIsWakeSignalled; \
+    pthread_cond_t gssfsmWakeCond; \
+    pthread_mutex_t gssfsmWakeMutex
 extern bool gssfsmIsWakeSignalled;
 extern pthread_cond_t gssfsmWakeCond;
 extern pthread_mutex_t gssfsmWakeMutex;
@@ -78,7 +80,7 @@ extern pthread_mutex_t gssfsmWakeMutex;
         struct timespec ts; \
         int rc; \
         SSF_ASSERT(clock_gettime(SSF_SM_THREAD_PTHREAD_CLOCK, &ts) == 0); \
-        ns = ((uint64_t) ts.tv_nsec) + (((timeout * 1000ul) / SSF_TICKS_PER_SEC) * 1000000ul); \
+        ns = ((uint64_t) ts.tv_nsec) + ((((timeout) * 1000ul) / SSF_TICKS_PER_SEC) * 1000000ul); \
         while (ns >= 1000000000l) { \
             ns -= 1000000000l; \
             ts.tv_sec++; } \
@@ -91,16 +93,13 @@ extern pthread_mutex_t gssfsmWakeMutex;
 #endif /* WIN32 */
 #endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
 
-/* Maximum number of simultaneously queued events for all state machines. The ssfmqttc client   */
-/* alone can have about eight outstanding (API, pump and decoded packet events; see its design   */
-/* notes); the rest is margin for other machines sharing the pool.                               */
+/* Maximum number of simultaneously queued events for all state machines. */
 #define SSF_SM_MAX_ACTIVE_EVENTS (16u)
 
-/* Maximum number of simultaneously running timers for all state machines. The ssfmqttc client  */
-/* runs up to three at once during a session; the rest is margin for other machines.             */
+/* Maximum number of simultaneously running timers for all state machines. */
 #define SSF_SM_MAX_ACTIVE_TIMERS (8u)
 
-/* Defines the state machine identifers. */
+/* Defines the state machine identifiers. */
 typedef enum
 {
     SSF_SM_MIN = -1,
@@ -124,10 +123,6 @@ typedef enum
     SSF_SM_EVENT_ENTRY,  /* Signalled on entry to state handler */
     SSF_SM_EVENT_EXIT,   /* Signalled on exit of state handler */
     SSF_SM_EVENT_SUPER,  /* Signalled to determine parent of current state handler */
-                         /* Usually handled in default case with SSF_SM_SUPER() */
-                         /* macro. If no parent then SSF_SM_SUPER() is not */
-                         /* required or must be called with NULL */
-                         /* Super states may not have a parent super state */
     /* User defined events */
 #if SSF_CONFIG_SM_UNIT_TEST == 1
     SSF_SM_EVENT_UT1_1,
@@ -143,23 +138,23 @@ typedef enum
 #endif /* SSF_CONFIG_SM_UNIT_TEST */
 
     /* _net/ssfmqttc MQTT client (SSF_SM_MQTTC) */
-    SSF_SM_EVENT_MQTTC_START,              /* API: SSFMQTTCStart()                           */
-    SSF_SM_EVENT_MQTTC_STOP,               /* API: SSFMQTTCStop()                            */
-    SSF_SM_EVENT_MQTTC_TRANSPORT_OPEN,     /* Pump: transport connected                      */
-    SSF_SM_EVENT_MQTTC_LINK_FAIL,          /* Pump: transport closed on fatal error; reason  */
-    SSF_SM_EVENT_MQTTC_RX_CONNACK,         /* Pump: decoded CONNACK; SSFMQTTCEvConnAck_t     */
-    SSF_SM_EVENT_MQTTC_RX_SUBACK,          /* Pump: decoded SUBACK; SSFMQTTCEvSubAck_t       */
-    SSF_SM_EVENT_MQTTC_RX_PUBACK,          /* Pump: decoded PUBACK; SSFMQTTCEvPubAck_t       */
-    SSF_SM_EVENT_MQTTC_RX_PINGRESP,        /* Pump: PINGRESP received                        */
-    SSF_SM_EVENT_MQTTC_TX_DRAINED,         /* Pump: tx queue emptied while STOPPING          */
-    SSF_SM_EVENT_MQTTC_TO_CONNECT,         /* Timer: transport open + CONNACK                */
-    SSF_SM_EVENT_MQTTC_TO_SUBSCRIBE,       /* Timer: SUBACK                                  */
-    SSF_SM_EVENT_MQTTC_TO_KEEPALIVE,       /* Timer: send PINGREQ                            */
-    SSF_SM_EVENT_MQTTC_TO_PINGRESP,        /* Timer: PINGRESP                                */
-    SSF_SM_EVENT_MQTTC_TO_TX_PUBLISH,      /* Timer: txPublish deadline check                */
-    SSF_SM_EVENT_MQTTC_TO_RECONNECT,       /* Timer: reconnect backoff                       */
-    SSF_SM_EVENT_MQTTC_TO_STOP,            /* Timer: STOPPING flush limit                    */
-    SSF_SM_EVENT_MQTTC_TO_SUB_RETRY,       /* Timer: re-subscribe refused filters            */
+    SSF_SM_EVENT_MQTTC_START,              /* API: SSFMQTTCStart() */
+    SSF_SM_EVENT_MQTTC_STOP,               /* API: SSFMQTTCStop() */
+    SSF_SM_EVENT_MQTTC_TRANSPORT_OPEN,     /* Pump: transport connected */
+    SSF_SM_EVENT_MQTTC_LINK_FAIL,          /* Pump: transport closed on fatal error; reason */
+    SSF_SM_EVENT_MQTTC_RX_CONNACK,         /* Pump: decoded CONNACK; SSFMQTTCEvConnAck_t */
+    SSF_SM_EVENT_MQTTC_RX_SUBACK,          /* Pump: decoded SUBACK; SSFMQTTCEvSubAck_t */
+    SSF_SM_EVENT_MQTTC_RX_PUBACK,          /* Pump: decoded PUBACK; SSFMQTTCEvPubAck_t */
+    SSF_SM_EVENT_MQTTC_RX_PINGRESP,        /* Pump: PINGRESP received */
+    SSF_SM_EVENT_MQTTC_TX_DRAINED,         /* Pump: tx queue emptied while STOPPING */
+    SSF_SM_EVENT_MQTTC_TO_CONNECT,         /* Timer: transport open + CONNACK */
+    SSF_SM_EVENT_MQTTC_TO_SUBSCRIBE,       /* Timer: SUBACK */
+    SSF_SM_EVENT_MQTTC_TO_KEEPALIVE,       /* Timer: send PINGREQ */
+    SSF_SM_EVENT_MQTTC_TO_PINGRESP,        /* Timer: PINGRESP */
+    SSF_SM_EVENT_MQTTC_TO_TX_PUBLISH,      /* Timer: txPublish deadline check */
+    SSF_SM_EVENT_MQTTC_TO_RECONNECT,       /* Timer: reconnect backoff */
+    SSF_SM_EVENT_MQTTC_TO_STOP,            /* Timer: STOPPING flush limit */
+    SSF_SM_EVENT_MQTTC_TO_SUB_RETRY,       /* Timer: re-subscribe refused filters */
     SSF_SM_EVENT_MAX
 } SSFSMEventList_t;
 

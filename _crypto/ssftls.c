@@ -107,7 +107,10 @@ void SSFTLSDeriveSecret(SSFHMACHash_t hash, const uint8_t *secret, size_t secret
                         const char *labelStr, const uint8_t *transcriptHash,
                         size_t transcriptHashLen, uint8_t *out, size_t outLen)
 {
+    SSF_REQUIRE(secret != NULL);
+    SSF_REQUIRE(labelStr != NULL);
     SSF_REQUIRE(transcriptHash != NULL);
+    SSF_REQUIRE(out != NULL);
 
     SSFTLSHkdfExpandLabel(hash, secret, secretLen, labelStr,
                           transcriptHash, transcriptHashLen, out, outLen);
@@ -140,7 +143,6 @@ void SSFTLSComputeFinished(SSFHMACHash_t hash, const uint8_t *baseKey, size_t ba
     SSF_REQUIRE(baseKey != NULL);
     SSF_REQUIRE(transcriptHash != NULL);
     SSF_REQUIRE(verifyData != NULL);
-    /* verify_data is the hash output length (32 or 48), which finishedKey is sized for. */
     SSF_REQUIRE(verifyDataLen <= SSF_TLS_MAX_HASH_SIZE);
 
     /* finished_key = HKDF-Expand-Label(BaseKey, "finished", "", Hash.length) */
@@ -191,7 +193,7 @@ void SSFTLSTranscriptInit(SSFTLSTranscript_t *t, SSFHMACHash_t hash)
 void SSFTLSTranscriptUpdate(SSFTLSTranscript_t *t, const uint8_t *data, size_t dataLen)
 {
     SSF_REQUIRE(t != NULL);
-    SSF_REQUIRE((data != NULL) || (dataLen == 0));
+    SSF_REQUIRE((data != NULL) || (dataLen == 0u));
 #if SIZE_MAX > UINT32_MAX
     SSF_REQUIRE(dataLen <= (size_t)UINT32_MAX);
 #endif
@@ -299,7 +301,7 @@ void SSFTLSRecordStateDeInit(SSFTLSRecordState_t *state)
 /* --------------------------------------------------------------------------------------------- */
 /* Record layer: build per-record nonce = IV XOR pad64(sequence_number)                          */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFTLSBuildNonce(const SSFTLSRecordState_t *state, uint8_t nonce[12])
+static void _SSFTLSBuildNonce(const SSFTLSRecordState_t *state, uint8_t nonce[SSF_TLS_IV_SIZE])
 {
     uint8_t i;
 
@@ -358,10 +360,10 @@ bool SSFTLSRecordEncrypt(SSFTLSRecordState_t *state, uint8_t contentType, const 
                 ((((uintptr_t)pt) + ptLen) <= ((uintptr_t)record)) ||
                 (((uintptr_t)pt) >= (((uintptr_t)record) + recordSize)));
 
-    /* RFC 8446 Sec. 5.5: refuse at the seqNum wrap boundary (nonce reuse otherwise). */
+    /* Is the sequence number at the RFC 8446 Sec. 5.5 wrap boundary where nonces would repeat? */
     if (state->seqNum == UINT64_MAX) return false;
 
-    /* Per-suite AEAD tag size; an unsupported suite is rejected up front. */
+    /* Is the cipher suite without a supported AEAD tag size? */
     tagLen = _SSFTLSAeadTagSize(state->cipherSuite);
     if (tagLen == 0u) return false;
 
@@ -377,10 +379,11 @@ bool SSFTLSRecordEncrypt(SSFTLSRecordState_t *state, uint8_t contentType, const 
     cipherLen = innerLen + tagLen;
     totalLen = SSF_TLS_RECORD_HEADER_SIZE + cipherLen;
 
+    /* Is the record buffer too small, or the ciphertext over the RFC 8446 Sec. 5.2 limit? */
     if (recordSize < totalLen) return false;
-    if (cipherLen > (0x4000u + 256u)) return false; /* RFC 8446 Sec. 5.2 record limit */
+    if (cipherLen > (0x4000u + 256u)) return false;
 
-    /* Build record header (used as AAD). cipherLen now correctly reflects the tag size. */
+    /* Build the record header, which is the AEAD additional data */
     record[0] = SSF_TLS_CT_APPLICATION; /* Outer type is always application_data */
     record[1] = 0x03u;
     record[2] = 0x03u; /* Legacy version 0x0303 */
@@ -461,24 +464,24 @@ bool SSFTLSRecordDecrypt(SSFTLSRecordState_t *state, const uint8_t *hdr, const u
     SSF_REQUIRE(pt != NULL);
     SSF_REQUIRE(ptLen != NULL);
     SSF_REQUIRE(contentType != NULL);
-    /* In place, or apart from the fragment; never over the header (the AEAD additional data) */
     SSF_REQUIRE((pt == frag) || ((((uintptr_t)pt) + ptSize) <= ((uintptr_t)frag)) ||
                 (((uintptr_t)pt) >= (((uintptr_t)frag) + fragLen)));
     SSF_REQUIRE(((((uintptr_t)pt) + ptSize) <= ((uintptr_t)hdr)) ||
                 (((uintptr_t)pt) >= (((uintptr_t)hdr) + SSF_TLS_RECORD_HEADER_SIZE)));
 
-    /* RFC 8446 Sec. 5.5: refuse at the seqNum wrap boundary so replays cannot be re-accepted. */
+    /* Is the sequence number at the RFC 8446 Sec. 5.5 wrap boundary where replays could pass? */
     if (state->seqNum == UINT64_MAX) return false;
 
-    /* Per-suite AEAD tag size -- must match what the encrypting peer emitted. */
+    /* Is the cipher suite without a supported AEAD tag size? */
     tagLen = _SSFTLSAeadTagSize(state->cipherSuite);
     if (tagLen == 0u) return false;
 
-    /* Parse record header: the type, and a length that is the fragment's */
+    /* Is the header type wrong, or its length not the fragment's length? */
     if (hdr[0] != SSF_TLS_CT_APPLICATION) return false;
-    if ((((size_t)hdr[3] << 8) | (size_t)hdr[4]) != fragLen) return false;
+    if (((((size_t)hdr[3]) << 8) | ((size_t)hdr[4])) != fragLen) return false;
+
+    /* Is the fragment too short for a tag, or over the RFC 8446 Sec. 5.2 limit of 2^14 + 256? */
     if (fragLen < (tagLen + 1u)) return false;
-    /* RFC 8446 Sec. 5.2: receivers MUST reject records whose ciphertext exceeds 2^14 + 256. */
     if (fragLen > (0x4000u + 256u)) return false;
 
     innerLen = fragLen - tagLen;
@@ -527,6 +530,7 @@ bool SSFTLSRecordDecrypt(SSFTLSRecordState_t *state, const uint8_t *hdr, const u
             /* Unreachable: _SSFTLSAeadTagSize rejected this above. */
             return false;
         }
+        /* Did authentication fail? */
         if (!ok) return false;
     }
 
@@ -535,12 +539,14 @@ bool SSFTLSRecordDecrypt(SSFTLSRecordState_t *state, const uint8_t *hdr, const u
     /* Strip inner content type (last byte of plaintext). Skip zero-padding. */
     {
         size_t i = innerLen;
+
         /* Is the last remaining byte zero padding? */
         while ((i > 0u) && (pt[i - 1u] == 0u))
         {
             /* Yes, skip it */
             i--;
         }
+        /* Is the plaintext all padding with no content type? */
         if (i == 0u) return false;
         i--;
         *contentType = pt[i];

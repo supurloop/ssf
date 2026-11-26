@@ -67,11 +67,13 @@
 #pragma warning(push)
 #pragma warning(disable:6262)
 #endif
+/* Fills a probe-sized stack frame with v. */
 SSF_NOINLINE
 static void _SSFRSAUTPolluteStack(uint8_t v)
 {
     volatile uint8_t buf[_SSFRSA_UT_HYGIENE_PROBE_BYTES];
     size_t i;
+
     for (i = 0u; i < sizeof(buf); i++) buf[i] = v;
 }
 #ifdef _WIN32
@@ -91,6 +93,7 @@ static void _SSFRSAUTPolluteStack(uint8_t v)
 #pragma warning(disable: 6001)
 #pragma warning(disable: 6262)
 #endif
+/* Returns the number of times needle occurs in the residue of a probe-sized stack frame. */
 SSF_NOINLINE
 static int _SSFRSAUTScanStack(const uint8_t *needle, size_t needleLen)
 {
@@ -98,6 +101,10 @@ static int _SSFRSAUTScanStack(const uint8_t *needle, size_t needleLen)
     int found = 0;
     size_t i;
     size_t j;
+
+    SSF_REQUIRE(needle != NULL);
+    SSF_REQUIRE(needleLen > 0u);
+    SSF_REQUIRE(needleLen <= _SSFRSA_UT_HYGIENE_PROBE_BYTES);
 
     /* Read residue without writing first -- buf was just allocated atop the freed callee frame. */
     for (i = 0u; (i + needleLen) <= sizeof(buf); i++)
@@ -127,13 +134,32 @@ static const uint8_t *_SSFRSAUTLocatePMag(const uint8_t *priv, size_t privLen)
     size_t dHeader;
     size_t dMag;
 
+    SSF_REQUIRE(priv != NULL);
+
     if (privLen < 268u) return NULL;
     cur = priv + 273u; /* d INTEGER tag */
     if (cur[0] != 0x02u) return NULL;
-    if (cur[1] == 0x82u)      { dHeader = 4u; dMag = ((size_t)cur[2] << 8) | cur[3]; }
-    else if (cur[1] == 0x81u) { dHeader = 3u; dMag = cur[2]; }
-    else                      { dHeader = 2u; dMag = cur[1]; }
-    cur += dHeader + dMag; /* now at p INTEGER */
+    /* Is d's length in two-byte long form? */
+    if (cur[1] == 0x82u)
+    {
+        /* Yes, the next two bytes are the length */
+        dHeader = 4u;
+        dMag = (((size_t)cur[2]) << 8) | cur[3];
+    }
+    /* Is d's length in one-byte long form? */
+    else if (cur[1] == 0x81u)
+    {
+        /* Yes, the next byte is the length */
+        dHeader = 3u;
+        dMag = cur[2];
+    }
+    else
+    {
+        /* No, the byte is the length */
+        dHeader = 2u;
+        dMag = cur[1];
+    }
+    cur += (dHeader + dMag); /* now at p INTEGER */
     if (cur[0] != 0x02u) return NULL;
     if (cur[1] == 0x81u) cur += 3u;
     else                 cur += 2u;
@@ -150,8 +176,12 @@ static const uint8_t *_SSFRSAUTLocatePMag(const uint8_t *priv, size_t privLen)
 static EVP_PKEY *_OSSLLoadPrivKey(const uint8_t *der, size_t derLen)
 {
     const uint8_t *p = der;
-    RSA *rsa = d2i_RSAPrivateKey(NULL, &p, (long)derLen);
+    RSA *rsa;
     EVP_PKEY *pkey = NULL;
+
+    SSF_REQUIRE(der != NULL);
+
+    rsa = d2i_RSAPrivateKey(NULL, &p, (long)derLen);
     if (rsa == NULL) return NULL;
     pkey = EVP_PKEY_new();
     if (pkey == NULL) { RSA_free(rsa); return NULL; }
@@ -165,16 +195,32 @@ static EVP_PKEY *_OSSLLoadPrivKey(const uint8_t *der, size_t derLen)
     return pkey;
 }
 
-/* BN-07: d of an SSF-generated key is exactly 65537^(-1) mod lambda(n) = lcm(p - 1, q - 1), */
-/* computed independently with OpenSSL's BN (loading the key does not check d is minimal).   */
+/* BN-07: asserts d is exactly 65537^(-1) mod lcm(p - 1, q - 1), checked with OpenSSL's BN. */
 static void _OSSLCheckDIsInvModLambda(const uint8_t *der, size_t derLen)
 {
     const uint8_t *p = der;
-    RSA *rsa = d2i_RSAPrivateKey(NULL, &p, (long)derLen);
-    const BIGNUM *n = NULL, *e = NULL, *d = NULL, *bp = NULL, *bq = NULL;
-    BN_CTX *ctx = BN_CTX_new();
-    BIGNUM *pm1 = BN_new(), *qm1 = BN_new(), *g = BN_new(), *lam = BN_new(), *want = BN_new();
+    RSA *rsa;
+    const BIGNUM *n = NULL;
+    const BIGNUM *e = NULL;
+    const BIGNUM *d = NULL;
+    const BIGNUM *bp = NULL;
+    const BIGNUM *bq = NULL;
+    BN_CTX *ctx;
+    BIGNUM *pm1;
+    BIGNUM *qm1;
+    BIGNUM *g;
+    BIGNUM *lam;
+    BIGNUM *want;
 
+    SSF_REQUIRE(der != NULL);
+
+    rsa = d2i_RSAPrivateKey(NULL, &p, (long)derLen);
+    ctx = BN_CTX_new();
+    pm1 = BN_new();
+    qm1 = BN_new();
+    g = BN_new();
+    lam = BN_new();
+    want = BN_new();
     SSF_ASSERT((rsa != NULL) && (ctx != NULL) && (pm1 != NULL) && (qm1 != NULL) && (g != NULL) &&
                (lam != NULL) && (want != NULL));
     RSA_get0_key(rsa, &n, &e, &d);
@@ -186,16 +232,25 @@ static void _OSSLCheckDIsInvModLambda(const uint8_t *der, size_t derLen)
     SSF_ASSERT(BN_div(lam, NULL, lam, g, ctx) == 1);
     SSF_ASSERT(BN_mod_inverse(want, e, lam, ctx) != NULL);
     SSF_ASSERT(BN_cmp(d, want) == 0);
-    BN_free(want); BN_free(lam); BN_free(g); BN_free(qm1); BN_free(pm1);
+    BN_free(want);
+    BN_free(lam);
+    BN_free(g);
+    BN_free(qm1);
+    BN_free(pm1);
     BN_CTX_free(ctx);
     RSA_free(rsa);
 }
 
+/* Decode a PKCS#1 RSAPublicKey DER into an EVP_PKEY suitable for OpenSSL ops. */
 static EVP_PKEY *_OSSLLoadPubKey(const uint8_t *der, size_t derLen)
 {
     const uint8_t *p = der;
-    RSA *rsa = d2i_RSAPublicKey(NULL, &p, (long)derLen);
+    RSA *rsa;
     EVP_PKEY *pkey = NULL;
+
+    SSF_REQUIRE(der != NULL);
+
+    rsa = d2i_RSAPublicKey(NULL, &p, (long)derLen);
     if (rsa == NULL) return NULL;
     pkey = EVP_PKEY_new();
     if (pkey == NULL) { RSA_free(rsa); return NULL; }
@@ -208,12 +263,20 @@ static EVP_PKEY *_OSSLLoadPubKey(const uint8_t *der, size_t derLen)
     return pkey;
 }
 
+/* Returns true if OpenSSL verifies the PKCS#1 v1.5 signature sig over msg, else false. */
 static bool _OSSLVerifyPKCS1(EVP_PKEY *pkey, const EVP_MD *md,
                              const uint8_t *msg, size_t msgLen,
                              const uint8_t *sig, size_t sigLen)
 {
-    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+    EVP_MD_CTX *ctx;
     bool ok = false;
+
+    SSF_REQUIRE(pkey != NULL);
+    SSF_REQUIRE(md != NULL);
+    SSF_REQUIRE(msg != NULL);
+    SSF_REQUIRE(sig != NULL);
+
+    ctx = EVP_MD_CTX_new();
     if (ctx == NULL) return false;
     if (EVP_DigestVerifyInit(ctx, NULL, md, NULL, pkey) == 1)
     {
@@ -223,12 +286,21 @@ static bool _OSSLVerifyPKCS1(EVP_PKEY *pkey, const EVP_MD *md,
     return ok;
 }
 
+/* Returns true if OpenSSL makes a PKCS#1 v1.5 signature of msg into sig, else false. */
 static bool _OSSLSignPKCS1(EVP_PKEY *pkey, const EVP_MD *md,
                            const uint8_t *msg, size_t msgLen,
                            uint8_t *sig, size_t *sigLen)
 {
-    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+    EVP_MD_CTX *ctx;
     bool ok = false;
+
+    SSF_REQUIRE(pkey != NULL);
+    SSF_REQUIRE(md != NULL);
+    SSF_REQUIRE(msg != NULL);
+    SSF_REQUIRE(sig != NULL);
+    SSF_REQUIRE(sigLen != NULL);
+
+    ctx = EVP_MD_CTX_new();
     if (ctx == NULL) return false;
     if (EVP_DigestSignInit(ctx, NULL, md, NULL, pkey) == 1)
     {
@@ -238,13 +310,22 @@ static bool _OSSLSignPKCS1(EVP_PKEY *pkey, const EVP_MD *md,
     return ok;
 }
 
+/* Returns true if OpenSSL verifies the PSS signature sig over msg, else false. */
 static bool _OSSLVerifyPSS(EVP_PKEY *pkey, const EVP_MD *md, int saltLen,
                            const uint8_t *msg, size_t msgLen,
                            const uint8_t *sig, size_t sigLen)
 {
-    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+    EVP_MD_CTX *ctx;
     EVP_PKEY_CTX *pctx = NULL;
     bool ok = false;
+
+    SSF_REQUIRE(pkey != NULL);
+    SSF_REQUIRE(md != NULL);
+    SSF_REQUIRE(saltLen >= 0);
+    SSF_REQUIRE(msg != NULL);
+    SSF_REQUIRE(sig != NULL);
+
+    ctx = EVP_MD_CTX_new();
     if (ctx == NULL) return false;
     /* Is the PSS verify context set up? */
     if ((EVP_DigestVerifyInit(ctx, &pctx, md, NULL, pkey) == 1) &&
@@ -259,13 +340,23 @@ static bool _OSSLVerifyPSS(EVP_PKEY *pkey, const EVP_MD *md, int saltLen,
     return ok;
 }
 
+/* Returns true if OpenSSL makes a PSS signature of msg into sig, else false. */
 static bool _OSSLSignPSS(EVP_PKEY *pkey, const EVP_MD *md, int saltLen,
                          const uint8_t *msg, size_t msgLen,
                          uint8_t *sig, size_t *sigLen)
 {
-    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+    EVP_MD_CTX *ctx;
     EVP_PKEY_CTX *pctx = NULL;
     bool ok = false;
+
+    SSF_REQUIRE(pkey != NULL);
+    SSF_REQUIRE(md != NULL);
+    SSF_REQUIRE(saltLen >= 0);
+    SSF_REQUIRE(msg != NULL);
+    SSF_REQUIRE(sig != NULL);
+    SSF_REQUIRE(sigLen != NULL);
+
+    ctx = EVP_MD_CTX_new();
     if (ctx == NULL) return false;
     /* Is the PSS sign context set up? */
     if ((EVP_DigestSignInit(ctx, &pctx, md, NULL, pkey) == 1) &&
@@ -294,7 +385,13 @@ static void _SSFRSAVerifyHashAtKey(const uint8_t *priv, size_t privLen,
     size_t sigSSFLen;
     size_t sigOSSLLen;
 
-    SSF_ASSERT(hLen <= sizeof(hashVal));
+    SSF_REQUIRE(priv != NULL);
+    SSF_REQUIRE(pub != NULL);
+    SSF_REQUIRE(pkey != NULL);
+    SSF_REQUIRE(pkeyPub != NULL);
+    SSF_REQUIRE(md != NULL);
+    SSF_REQUIRE(msg != NULL);
+    SSF_REQUIRE(hLen <= sizeof(hashVal));
 
     /* Compute the message hash with SSF -- fed to SSFRSA's hashed-input API. */
     switch (ssfHash)
@@ -356,6 +453,11 @@ static void _SSFRSACrossCheckAtSize(uint16_t bits,
     EVP_PKEY *pkeyPub = NULL;
     size_t i;
 
+    SSF_REQUIRE(hashes != NULL);
+    SSF_REQUIRE(hLens != NULL);
+    SSF_REQUIRE(mdFns != NULL);
+    SSF_REQUIRE(nHashes > 0u);
+
     /* Generate with SSF; OpenSSL loading the DER checks strict DER and the n=p*q / CRT values. */
     SSF_ASSERT(SSFRSAKeyGen(bits, priv, sizeof(priv), &privLen,
                              pub, sizeof(pub), &pubLen) == true);
@@ -391,12 +493,17 @@ static void _SSFRSACrossCheckForeignPSS(const uint8_t *foreignPriv, size_t forei
                                         const uint8_t *foreignPub,  size_t foreignPubLen)
 {
     static const uint8_t msg[] = "PSS interop on foreign key";
-    EVP_PKEY *pkey    = _OSSLLoadPrivKey(foreignPriv, foreignPrivLen);
-    EVP_PKEY *pkeyPub = _OSSLLoadPubKey(foreignPub,  foreignPubLen);
+    EVP_PKEY *pkey;
+    EVP_PKEY *pkeyPub;
     uint8_t hashVal[32];
     uint8_t sigOSSL[SSF_RSA_MAX_SIG_SIZE];
     size_t sigOSSLLen = sizeof(sigOSSL);
 
+    SSF_REQUIRE(foreignPriv != NULL);
+    SSF_REQUIRE(foreignPub != NULL);
+
+    pkey = _OSSLLoadPrivKey(foreignPriv, foreignPrivLen);
+    pkeyPub = _OSSLLoadPubKey(foreignPub, foreignPubLen);
     SSF_ASSERT(pkey != NULL);
     SSF_ASSERT(pkeyPub != NULL);
 
@@ -419,6 +526,7 @@ static const EVP_MD *_OSSLSha256(void) { return EVP_sha256(); }
 static const EVP_MD *_OSSLSha384(void) { return EVP_sha384(); }
 static const EVP_MD *_OSSLSha512(void) { return EVP_sha512(); }
 
+/* Runs the OpenSSL cross-checks: foreign-key PSS interop and keygen at every enabled size. */
 static void _SSFRSAVerifyAgainstOpenSSL(const uint8_t *foreignPriv, size_t foreignPrivLen,
                                         const uint8_t *foreignPub,  size_t foreignPubLen)
 {
@@ -441,6 +549,9 @@ static void _SSFRSAVerifyAgainstOpenSSL(const uint8_t *foreignPriv, size_t forei
     static const size_t       l4096[] = { 32u, 48u, 64u };
     static const EVP_MD *(*const m4096[])(void) = { _OSSLSha256, _OSSLSha384, _OSSLSha512 };
 #endif
+
+    SSF_REQUIRE(foreignPriv != NULL);
+    SSF_REQUIRE(foreignPub != NULL);
 
     SSF_UT_PRINTF("\n--- ssfrsa OpenSSL cross-check ---\n");
 
@@ -499,12 +610,22 @@ typedef struct
     bool expBlindsNZ; /* both exponent blinds non-zero */
 } _SSFRSABlindAudit_t;
 
+/* Blinding hook: records in ctx whether the private op's blinds are well formed. */
 static void _SSFRSABlindHook(void *ctx, const SSFBN_t *r, const SSFBN_t *rInv,
                              const SSFBN_t *expBlindP, const SSFBN_t *expBlindQ,
                              const SSFBN_t *cIn, const SSFBN_t *cBlind, const SSFBN_t *n)
 {
     _SSFRSABlindAudit_t *a = (_SSFRSABlindAudit_t *)ctx;
     SSFBN_DEFINE(chk, SSF_BN_MAX_LIMBS);
+
+    SSF_REQUIRE(ctx != NULL);
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(rInv != NULL);
+    SSF_REQUIRE(expBlindP != NULL);
+    SSF_REQUIRE(expBlindQ != NULL);
+    SSF_REQUIRE(cIn != NULL);
+    SSF_REQUIRE(cBlind != NULL);
+    SSF_REQUIRE(n != NULL);
 
     a->fired = true;
     a->rInRange = (SSFBNIsZero(r) == false) && (SSFBNCmp(r, n) < 0);
@@ -783,14 +904,15 @@ static void _SSFRSAUTPutMidIntTLV(uint8_t *der, uint32_t *pos, uint32_t mag, uin
 /* --------------------------------------------------------------------------------------------- */
 static uint32_t _scrubCalls;
 static uint32_t _scrubDirty;
-static void _ScrubCheck(const void *buf, size_t len)
+static void _ScrubCheck(const void *buf, size_t bufSize)
 {
     const uint8_t *b = (const uint8_t *)buf;
     size_t i;
 
-    SSF_ASSERT(buf != NULL);
+    SSF_REQUIRE(buf != NULL);
+
     _scrubCalls++;
-    for (i = 0; i < len; i++)
+    for (i = 0; i < bufSize; i++)
     {
         if (b[i] != 0u)
         {
@@ -807,16 +929,22 @@ static uint32_t _stackScrubCalls;
 static size_t _stackScrubLen;
 static uint32_t _stackScrubSizes;
 static uint32_t _stackScrubDirty;
-static void _StackScrubCheck(const void *buf, size_t len)
+static void _StackScrubCheck(const void *buf, size_t bufSize)
 {
     const uint8_t *b = (const uint8_t *)buf;
     size_t i;
 
-    SSF_ASSERT(buf != NULL);
-    if ((_stackScrubCalls == 0u) || (len != _stackScrubLen)) _stackScrubSizes++;
+    SSF_REQUIRE(buf != NULL);
+
+    /* First call, or a size different from the last call? */
+    if ((_stackScrubCalls == 0u) || (bufSize != _stackScrubLen))
+    {
+        /* Yes, count a distinct size */
+        _stackScrubSizes++;
+    }
     _stackScrubCalls++;
-    _stackScrubLen = len;
-    for (i = 0; i < len; i++)
+    _stackScrubLen = bufSize;
+    for (i = 0; i < bufSize; i++)
     {
         if (b[i] != 0u)
         {
@@ -826,8 +954,7 @@ static void _StackScrubCheck(const void *buf, size_t len)
     }
 }
 
-/* Fills the stack below the caller with a non-zero pattern, deeper than any scrub reaches, so */
-/* a scrub that leaves part of its buffer unwritten shows up as a dirty buffer.                 */
+/* Paints the stack below the caller, deeper than any scrub reaches, with a non-zero pattern. */
 SSF_NOINLINE
 static void _StackScrubPaint(void)
 {
@@ -837,6 +964,7 @@ static void _StackScrubPaint(void)
     for (i = 0; i < sizeof(paint); i++) paint[i] = 0xA5u;
 }
 
+/* Clears the stack-scrub hook counters. */
 static void _StackScrubReset(void)
 {
     _stackScrubCalls = 0u;
@@ -855,8 +983,7 @@ void SSFRSAUnitTest(void)
 #else
 
     /* ---- SAFE-05: stack-scrub sizes, measured (Cortex-M4 GCC -Os) for k = 4, no margin ---- */
-    /* The depth the ssfbn calls below a sign / keygen entry point reach, from the static call  */
-    /* graph at each RSA cap; the derived sizes must match it (re-measure if a frame changes).  */
+    /* Derived sizes match the static call-graph depth per RSA cap; re-measure if a frame changes */
 #if (SSF_BN_MODEXP_WIN_K == 4u) && (SSF_RSA_CONFIG_STACK_SCRUB_MARGIN == 0u)
 #if SSF_BN_MAX_MOD_LIMBS == 128u
     SSF_ASSERT(SSF_RSA_SIGN_STACK_SCRUB_BYTES == 14792u);
@@ -932,7 +1059,7 @@ void SSFRSAUnitTest(void)
         SSF_ASSERT(SSFRSAPubKeyIsValid(der, (size_t)p) == false);
     }
 
-    /* ---- BN-07: keygen's d = 65537^(-1) mod lambda equals SSFBNModInvExt, rare carries too ---- */
+    /* ---- BN-07: keygen's d = 65537^(-1) mod lambda equals SSFBNModInvExt, rare carries ---- */
 #if SSF_RSA_CONFIG_ENABLE_KEYGEN == 1
     {
         SSFBN_DEFINE(lam, SSF_BN_MAX_LIMBS);
@@ -948,12 +1075,13 @@ void SSFRSAUnitTest(void)
 
         for (it = 0u; it < 600u; it++)
         {
-            /* Widths 2..8 and the largest modulus; shapes: random, tiny top limb (the exact  */
-            /* division then borrows often), and lambda == -1 mod 65537 (Fermat meets 2^32)  */
+            /* Widths 2..8 and max; random, tiny top limb (borrows), lambda == -1 mod 65537 */
             n = (uint16_t)((it < 540u) ? (2u + (it % 7u)) : SSF_BN_MAX_MOD_LIMBS);
             for (k = 0u; k < n; k++)
             {
-                x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+                x ^= (x << 13);
+                x ^= (x >> 17);
+                x ^= (x << 5);
                 lam.limbs[k] = x;
             }
             lam.len = n;
@@ -961,10 +1089,11 @@ void SSFRSAUnitTest(void)
             if ((it % 3u) == 1u) lam.limbs[n - 1u] = 1u + (x & 3u);
             if (lam.limbs[n - 1u] == 0u) lam.limbs[n - 1u] = 1u;
             r = SSFBNModUint32(&lam, 65537u);
+            /* Is this the lambda == -1 mod 65537 shape? */
             if ((it % 3u) == 2u)
             {
-                /* Raise lambda to the next value == 65536 mod 65537, keeping it even */
-                (void)SSFBNAddUint32(&lam, &lam, (65536u + 65537u - r) % 65537u);
+                /* Yes, raise lambda to the next value == 65536 mod 65537, keeping it even */
+                (void)SSFBNAddUint32(&lam, &lam, ((65536u + 65537u) - r) % 65537u);
                 if ((lam.limbs[0] & 1u) != 0u) (void)SSFBNAddUint32(&lam, &lam, 65537u);
                 SSF_ASSERT(SSFBNModUint32(&lam, 65537u) == 65536u);
             }
@@ -975,8 +1104,7 @@ void SSFRSAUnitTest(void)
             SSF_ASSERT((d.len == n) && (SSFBNCmp(&d, &dRef) == 0));
         }
 
-        /* lambda = d * 65537 - 1 for d whose exact division by 65537 borrows below the top limb */
-        /* (about 1 in 50,000 random lambdas); lambda == -1 mod 65537, so k = 1                 */
+        /* lambda = (d * 65537) - 1 where dividing by 65537 borrows below the top limb, so k = 1 */
         {
             static const uint32_t borrowLam[4][5] = {
                 { 0x96CD407Au, 0x00003DB8u, 0x19CF53C1u, 0xF2797383u, 0x24F48292u },
@@ -1060,8 +1188,7 @@ void SSFRSAUnitTest(void)
 #endif /* SSF_RSA_CONFIG_ENABLE_2048 */
 
     /* ---- COV-1: PrivKeyIsValid refuses d = 0, d = 1 and q = 1 (each odd/width-legal) ---- */
-    /* p = 1 cannot reach the check: the decoder pins p to half the modulus width, and        */
-    /* _SSFRSAValidatePubFields then rejects any modulus narrow enough for a one-limb p.      */
+    /* p = 1 is unreachable: p is pinned to half the modulus width, which is range-checked */
 #if SSF_RSA_CONFIG_ENABLE_2048 == 1
     {
         static uint8_t der[1400u];
@@ -1075,19 +1202,33 @@ void SSFRSAUnitTest(void)
             der[p++] = 0x02u; der[p++] = 0x01u; der[p++] = 0x00u;  /* version 0 */
             _SSFRSAUTPutIntTLV(der, &p, 256u, 0xC5u, 0x01u);       /* n: 2048 bits, odd */
             _SSFRSAUTPutShortIntTLV(der, &p, 3u, 0x01u, 0x01u);    /* e = 0x01FF01 */
+            /* Is this a bad d case? */
             if (which < 2u)
             {
-                /* d = 0 or d = 1 */
-                der[p++] = 0x02u; der[p++] = 0x01u; der[p++] = which;
+                /* Yes, d = 0 or d = 1 */
+                der[p++] = 0x02u;
+                der[p++] = 0x01u;
+                der[p++] = which;
             }
-            else { _SSFRSAUTPutIntTLV(der, &p, 256u, 0x41u, 0x01u); } /* d: wide, odd */
+            else
+            {
+                /* No, d is wide and odd */
+                _SSFRSAUTPutIntTLV(der, &p, 256u, 0x41u, 0x01u);
+            }
             _SSFRSAUTPutMidIntTLV(der, &p, 128u, 0x45u, 0x01u);    /* p: half width, odd */
+            /* Is this the bad q case? */
             if (which == 2u)
             {
-                /* q = 1 */
-                der[p++] = 0x02u; der[p++] = 0x01u; der[p++] = 0x01u;
+                /* Yes, q = 1 */
+                der[p++] = 0x02u;
+                der[p++] = 0x01u;
+                der[p++] = 0x01u;
             }
-            else { _SSFRSAUTPutMidIntTLV(der, &p, 128u, 0x43u, 0x01u); } /* q: half, odd */
+            else
+            {
+                /* No, q is half width and odd */
+                _SSFRSAUTPutMidIntTLV(der, &p, 128u, 0x43u, 0x01u);
+            }
             for (i = 0; i < 3u; i++) { _SSFRSAUTPutMidIntTLV(der, &p, 128u, 0x41u, 0x03u); }
             _SSFRSAUTCloseSeq(der, p);
             SSF_ASSERT((size_t)p <= sizeof(der));
@@ -1190,7 +1331,7 @@ void SSFRSAUnitTest(void)
 #endif /* SSF_RSA_CONFIG_ENABLE_PSS && SSF_RSA_MAX_KEY_BYTES >= 257 */
 
     /* ---- COV-7: PSS sign when bitLen(n) = 1 mod 8 (emLen = keyBytes - 1, EM left-padded) ---- */
-    /* 2049-bit key (p 1025 bits, q 1024 bits) built offline, checked with openssl rsa -check.    */
+    /* 2049-bit key (p 1025 bits, q 1024 bits) built offline, checked with openssl rsa -check */
 #if (SSF_RSA_CONFIG_ENABLE_PSS == 1) && (SSF_RSA_MAX_KEY_BYTES >= 257u)
     {
         static const uint8_t rsa2049Priv[1192] = {
@@ -1895,8 +2036,7 @@ void SSFRSAUnitTest(void)
                    SSF_RSA_HASH_SHA256, hashVal, sizeof(hashVal),
                    foreignSig, sizeof(foreignSig)) == true);
 
-        /* Sign with the foreign private key: deterministic, so it must match openssl's sig. */
-        /* SAFE-05: a successful sign scrubs once, at the sign size.                          */
+        /* Deterministic sign matches openssl's sig; SAFE-05: it scrubs once, at the sign size */
         _StackScrubReset();
         _SSFRSAStackScrubTestHook = _StackScrubCheck;
         SSF_ASSERT(SSFRSASignPKCS1(foreignPriv, sizeof(foreignPriv),
@@ -1931,8 +2071,10 @@ void SSFRSAUnitTest(void)
             /* Cases: 0 = p + 1 (even), 1 = q + 1 (even), 2 = p and q + 1, 3 = q = 0 */
             for (c = 0u; c < 4u; c++)
             {
+                /* Is this an even p or q case? */
                 if (c < 3u)
                 {
+                    /* Yes, bump p and/or q by one */
                     memcpy(bad, foreignPriv, sizeof(bad));
                     badLen = sizeof(bad);
                     if (c != 1u) _SSFRSAUTBumpInt(bad, badLen, 4u);
@@ -1940,6 +2082,7 @@ void SSFRSAUnitTest(void)
                 }
                 else
                 {
+                    /* No, rebuild the DER with q = 0 */
                     badLen = _SSFRSAUTZeroInt(foreignPriv, sizeof(foreignPriv), 5u, bad,
                                               sizeof(bad));
                     SSF_ASSERT(badLen < sizeof(foreignPriv));
@@ -2286,7 +2429,7 @@ void SSFRSAUnitTest(void)
 
     /* ---- Design-by-Contract: precondition violations must trigger SSFPortAssert ---- */
     {
-        /* Reusable valid SSFBN. Length 64 limbs (2048 bits) is a representative working width.*/
+        /* Reusable valid SSFBN. Length 64 limbs (2048 bits) is a representative working width. */
         SSFBN_DEFINE(bn, SSF_BN_MAX_LIMBS);
         SSFBNSetUint32(&bn, 5u, 64u);
 
@@ -2355,7 +2498,7 @@ void SSFRSAUnitTest(void)
                                      dbcPubBuf, sizeof(dbcPubBuf), &dbcLenB));
         SSF_ASSERT_TEST(SSFRSAKeyGen(5120u, dbcDerBuf, sizeof(dbcDerBuf), &dbcLenA,
                                      dbcPubBuf, sizeof(dbcPubBuf), &dbcLenB));
-        /* Output-buffer size is documented as >= SSF_RSA_MAX_*_DER_SIZE; must be a precondition.*/
+        /* Output-buffer size is documented as >= SSF_RSA_MAX_*_DER_SIZE; must be a precondition. */
         SSF_ASSERT_TEST(SSFRSAKeyGen(_SSFRSA_UT_DBC_BITS, dbcDerBuf,
                                      SSF_RSA_MAX_PRIV_KEY_DER_SIZE - 1u,
                                      &dbcLenA, dbcPubBuf, sizeof(dbcPubBuf), &dbcLenB));

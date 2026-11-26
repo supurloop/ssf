@@ -42,15 +42,33 @@
 #pragma warning(push)
 #pragma warning(disable:6262)
 #endif
-/* Zeroization audit hook: sets *ctx true iff the finished_key buffer is fully zeroed. */
+/* --------------------------------------------------------------------------------------------- */
+/* Sets *ctx true iff the finished_key buffer is fully zeroed.                                   */
+/* --------------------------------------------------------------------------------------------- */
 static void _SSFTLSFinishedScrubHook(void *ctx, const uint8_t *finishedKey, size_t len)
 {
     bool allZero = true;
     size_t i;
-    for (i = 0; i < len; i++) { if (finishedKey[i] != 0u) { allZero = false; break; } }
+
+    SSF_REQUIRE(ctx != NULL);
+    SSF_REQUIRE(finishedKey != NULL);
+
+    for (i = 0; i < len; i++)
+    {
+        /* Is this byte of the finished_key nonzero? */
+        if (finishedKey[i] != 0u)
+        {
+            /* Yes, the buffer was not wiped */
+            allZero = false;
+            break;
+        }
+    }
     *(bool *)ctx = allZero;
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Performs unit test on ssftls's external interface.                                            */
+/* --------------------------------------------------------------------------------------------- */
 void SSFTLSUnitTest(void)
 {
     /* ---- (Hardening) RecordStateDeInit securely wipes the traffic key / IV ---- */
@@ -398,7 +416,7 @@ void SSFTLSUnitTest(void)
                    plaintext, ptLen, record, sizeof(record), &recordLen) == true);
 
         /* Record should be larger than plaintext */
-        SSF_ASSERT(recordLen == SSF_TLS_RECORD_HEADER_SIZE + ptLen + 1u + SSF_TLS_AEAD_TAG_SIZE);
+        SSF_ASSERT(recordLen == (SSF_TLS_RECORD_HEADER_SIZE + ptLen + 1u + SSF_TLS_AEAD_TAG_SIZE));
 
         /* Outer content type should be application_data (23) */
         SSF_ASSERT(record[0] == SSF_TLS_CT_APPLICATION);
@@ -445,13 +463,19 @@ void SSFTLSUnitTest(void)
         for (k = 0; k < 4u; k++)
         {
             memset(inner, 0, sizeof(inner));
+            /* Is this a padded record carrying a content type? */
             if (k < 3u)
             {
+                /* Yes, content || type || zero padding */
                 memcpy(inner, content, sizeof(content));
                 inner[sizeof(content)] = SSF_TLS_CT_APPLICATION;
                 innerLen = sizeof(content) + 1u + pads[k];
             }
-            else { innerLen = 8u; }
+            else
+            {
+                /* No, all zero with no content type */
+                innerLen = 8u;
+            }
 
             hdr[0] = SSF_TLS_CT_APPLICATION;
             hdr[1] = 0x03u;
@@ -465,8 +489,10 @@ void SSFTLSUnitTest(void)
             memset(&decState, 0, sizeof(decState));
             SSFTLSRecordStateInit(&decState, SSF_TLS_CS_AES_128_GCM_SHA256,
                                   key, sizeof(key), iv, sizeof(iv));
+            /* Is this a padded record carrying a content type? */
             if (k < 3u)
             {
+                /* Yes, padding is stripped and the content recovered */
                 SSF_ASSERT(SSFTLSRecordDecrypt(&decState, hdr, frag,
                                                innerLen + SSF_TLS_AEAD_TAG_SIZE, decrypted,
                                                sizeof(decrypted), &decLen, &ct) == true);
@@ -476,6 +502,7 @@ void SSFTLSUnitTest(void)
             }
             else
             {
+                /* No, a record with no content type is rejected */
                 SSF_ASSERT(SSFTLSRecordDecrypt(&decState, hdr, frag,
                                                innerLen + SSF_TLS_AEAD_TAG_SIZE, decrypted,
                                                sizeof(decrypted), &decLen, &ct) == false);
@@ -562,7 +589,7 @@ void SSFTLSUnitTest(void)
         uint8_t i;
 
         for (i = 0; i < 16u; i++) key[i] = (uint8_t)(i + 0xA0u);
-        for (i = 0; i < 12u; i++) iv[i]  = (uint8_t)(i + 0xB0u);
+        for (i = 0; i < 12u; i++) iv[i] = (uint8_t)(i + 0xB0u);
 
         SSFTLSRecordStateInit(&encState, SSF_TLS_CS_AES_128_CCM_SHA256,
                               key, sizeof(key), iv, sizeof(iv));
@@ -596,7 +623,7 @@ void SSFTLSUnitTest(void)
         uint16_t hdrCipherLen;
 
         for (i = 0; i < 16u; i++) key[i] = (uint8_t)(i + 0xC0u);
-        for (i = 0; i < 12u; i++) iv[i]  = (uint8_t)(i + 0xD0u);
+        for (i = 0; i < 12u; i++) iv[i] = (uint8_t)(i + 0xD0u);
 
         SSFTLSRecordStateInit(&encState, SSF_TLS_CS_AES_128_CCM_8_SHA256,
                               key, sizeof(key), iv, sizeof(iv));
@@ -608,7 +635,7 @@ void SSFTLSUnitTest(void)
         /* 5 header + 17 inner + 8 tag = 30 bytes on the wire. */
         SSF_ASSERT(recordLen == 30u);
         /* The header's advertised cipherLen must match innerLen + tagLen = 25. */
-        hdrCipherLen = ((uint16_t)record[3] << 8) | (uint16_t)record[4];
+        hdrCipherLen = (uint16_t)((((uint16_t)record[3]) << 8) | ((uint16_t)record[4]));
         SSF_ASSERT(hdrCipherLen == 25u);
 
         SSF_ASSERT(SSFTLSRecordDecrypt(&decState, record, &record[5], recordLen - 5u,
@@ -632,7 +659,7 @@ void SSFTLSUnitTest(void)
         uint8_t i;
 
         for (i = 0; i < 32u; i++) key[i] = (uint8_t)(i + 0xE0u);
-        for (i = 0; i < 12u; i++) iv[i]  = (uint8_t)(i + 0xF0u);
+        for (i = 0; i < 12u; i++) iv[i] = (uint8_t)(i + 0xF0u);
 
         SSFTLSRecordStateInit(&encState, SSF_TLS_CS_CHACHA20_POLY1305_SHA256,
                               key, sizeof(key), iv, sizeof(iv));
@@ -683,7 +710,7 @@ void SSFTLSUnitTest(void)
         record[1] = 0x03u;
         record[2] = 0x03u;
         record[3] = 0x00u;
-        record[4] = 0x21u;   /* fragLen = 33 = innerLen(17) + tagLen(16) */
+        record[4] = 0x21u; /* fragLen = 33 = innerLen(17) + tagLen(16) */
         SSF_ASSERT(SSFTLSRecordDecrypt(&decState, record, &record[5], 0x21u,
                                        decBuf, sizeof(decBuf),
                                        &decLen, &innerCt) == false);
@@ -720,11 +747,11 @@ void SSFTLSUnitTest(void)
         uint8_t scratchSecret[32] = {0};
         uint8_t scratchCtx[100];
         uint8_t scratchOut[32];
-        char    longLabel[251];
+        char longLabel[251];
 
         memset(scratchCtx, 0xA5u, sizeof(scratchCtx));
         memset(longLabel, 'X', sizeof(longLabel));
-        longLabel[sizeof(longLabel) - 1u] = '\0';   /* 250-char label, one past the RFC cap */
+        longLabel[sizeof(longLabel) - 1u] = '\0'; /* 250-char label, one past the RFC cap */
 
         /* secret NULL */
         SSF_ASSERT_TEST(SSFTLSHkdfExpandLabel(SSF_HMAC_HASH_SHA256, NULL, 32u, "key",
@@ -965,10 +992,7 @@ void SSFTLSUnitTest(void)
         SSFTLSRecordStateDeInit(&state);
     }
 
-    /* SSFTLSRecordDecrypt with the header apart from the fragment, decrypting in place, for   */
-    /* every suite: a good record gives the plaintext; a bad tag fails and leaves no plaintext  */
-    /* behind (the fragment is still ciphertext, or zeroed); a header whose length is not the  */
-    /* fragment's fails.                                                                        */
+    /* SSFTLSRecordDecrypt in place with header apart, every suite: good, bad tag, bad length */
     {
         static const uint16_t suites[] = { SSF_TLS_CS_AES_128_GCM_SHA256,
                                            SSF_TLS_CS_AES_256_GCM_SHA384,
@@ -1021,19 +1045,18 @@ void SSFTLSUnitTest(void)
             SSF_ASSERT(!SSFTLSRecordDecrypt(&dec, hdr, frag, fragLen, frag, sizeof(frag),
                                             &outLen, &ct));
             zero = true;
-            for (j = 0; j < sizeof(msg); j++) zero = zero && (frag[j] == 0u);
+            for (j = 0; j < sizeof(msg); j++) zero = (zero && (frag[j] == 0u));
             SSF_ASSERT(zero || (memcmp(frag, &record[5], fragLen) == 0));
             SSF_ASSERT(memcmp(frag, msg, sizeof(msg)) != 0);
 
-            /* A bad ciphertext byte (the body, not the tag), same record: refused, no        */
-            /* plaintext either. AES-CCM decrypts before it can check: its wipe matters here.  */
-            record[recordLen - 1u] ^= 0x01u;                            /* The tag good again */
+            /* Bad ciphertext body byte with a good tag: refused; the fragment holds no plaintext */
+            record[recordLen - 1u] ^= 0x01u;
             memcpy(frag, &record[5], fragLen);
             frag[7] ^= 0x01u;
             SSF_ASSERT(!SSFTLSRecordDecrypt(&dec, hdr, frag, fragLen, frag, sizeof(frag),
                                             &outLen, &ct));
             zero = true;
-            for (j = 0; j < sizeof(msg); j++) zero = zero && (frag[j] == 0u);
+            for (j = 0; j < sizeof(msg); j++) zero = (zero && (frag[j] == 0u));
             SSF_ASSERT(zero || ((memcmp(frag, &record[5], 7u) == 0) &&
                                 (frag[7] == (uint8_t)(record[5u + 7u] ^ 0x01u)) &&
                                 (memcmp(&frag[8], &record[5u + 8u], fragLen - 8u) == 0)));
@@ -1060,7 +1083,7 @@ void SSFTLSUnitTest(void)
         SSFTLSRecordState_t decState = {0};
         uint8_t key[16] = {0};
         uint8_t iv[12] = {0};
-        uint8_t oversizedRecord[0x4106];   /* HEADER + 0x4101 */
+        uint8_t oversizedRecord[0x4106]; /* HEADER + 0x4101 */
         uint8_t scratchPt[0x4101];
         size_t scratchPtLen;
         uint8_t scratchCt;
@@ -1071,7 +1094,7 @@ void SSFTLSUnitTest(void)
         oversizedRecord[0] = SSF_TLS_CT_APPLICATION;
         oversizedRecord[1] = 0x03u;
         oversizedRecord[2] = 0x03u;
-        oversizedRecord[3] = 0x41u;        /* fragLen = 0x4101 = 16641, just over the limit */
+        oversizedRecord[3] = 0x41u; /* fragLen = 0x4101 = 16641, just over the limit */
         oversizedRecord[4] = 0x01u;
 
         SSF_ASSERT(SSFTLSRecordDecrypt(&decState, oversizedRecord, &oversizedRecord[5],

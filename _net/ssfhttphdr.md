@@ -63,14 +63,14 @@ will be a separate set of pure functions in this module.
 
 | | Function | Description |
 |---|---|---|
-| [e.g.](#ex-build) | [`bool SSFHTTPHdrReqBegin(buf, size, lenOut, method, target, host, portOpt)`](#ssfhttphdrreqbegin) | Write the request line and `Host` |
-| [e.g.](#ex-build) | [`bool SSFHTTPHdrReqAddField(buf, size, lenInOut, name, value)`](#ssfhttphdrreqaddfield) | Append one field line |
-| [e.g.](#ex-build) | [`bool SSFHTTPHdrReqEnd(buf, size, lenInOut)`](#ssfhttphdrreqend) | Append the empty line |
-| [e.g.](#ex-parse) | [`SSFHTTPHdrParse_t SSFHTTPHdrParseResponse(buf, len, respOut)`](#ssfhttphdrparseresponse) | Parse a response head |
-| [e.g.](#ex-parse) | [`bool SSFHTTPHdrFindField(buf, resp, name, indexInOut, valueOut, valueLenOut)`](#ssfhttphdrfindfield) | Find the next field with a name |
-| | [`uint16_t SSFHTTPHdrFieldCount(buf, resp, name)`](#ssfhttphdrfieldcount) | Count fields with a name |
-| [e.g.](#ex-parse) | [`bool SSFHTTPHdrFieldIsOnly(buf, resp, name, value, isCaseInsensitive)`](#ssfhttphdrfieldisonly) | Exactly one field, with this value |
-| [e.g.](#ex-parse) | [`bool SSFHTTPHdrFieldHasToken(buf, resp, name, token)`](#ssfhttphdrfieldhastoken) | A list element equals a token |
+| [e.g.](#ex-build) | [`bool SSFHTTPHdrReqBegin(buf, bufSize, lenOut, methodStr, targetStr, hostStr, portOpt)`](#ssfhttphdrreqbegin) | Write the request line and `Host` |
+| [e.g.](#ex-build) | [`bool SSFHTTPHdrReqAddField(buf, bufSize, lenInOut, nameStr, valueStr)`](#ssfhttphdrreqaddfield) | Append one field line |
+| [e.g.](#ex-build) | [`bool SSFHTTPHdrReqEnd(buf, bufSize, lenInOut)`](#ssfhttphdrreqend) | Append the empty line |
+| [e.g.](#ex-parse) | [`SSFHTTPHdrParse_t SSFHTTPHdrParseResponse(buf, bufLen, respOut)`](#ssfhttphdrparseresponse) | Parse a response head |
+| [e.g.](#ex-parse) | [`bool SSFHTTPHdrFindField(buf, resp, nameStr, indexInOut, valueOut, valueLenOut)`](#ssfhttphdrfindfield) | Find the next field with a name |
+| | [`uint16_t SSFHTTPHdrFieldCount(buf, resp, nameStr)`](#ssfhttphdrfieldcount) | Count fields with a name |
+| [e.g.](#ex-parse) | [`bool SSFHTTPHdrFieldIsOnly(buf, resp, nameStr, valueStr, isCaseInsensitive)`](#ssfhttphdrfieldisonly) | Exactly one field, with this value |
+| [e.g.](#ex-parse) | [`bool SSFHTTPHdrFieldHasToken(buf, resp, nameStr, tokenStr)`](#ssfhttphdrfieldhastoken) | A list element equals a token |
 
 <a id="function-reference"></a>
 
@@ -81,45 +81,45 @@ will be a separate set of pure functions in this module.
 ### [↑](#functions) [`bool SSFHTTPHdrReqBegin()`](#functions)
 
 ```c
-bool SSFHTTPHdrReqBegin(uint8_t *buf, size_t size, size_t *lenOut, SSFCStrIn_t method,
-                        SSFCStrIn_t target, SSFCStrIn_t host, uint16_t portOpt);
+bool SSFHTTPHdrReqBegin(uint8_t *buf, size_t bufSize, size_t *lenOut, SSFCStrIn_t methodStr,
+                        SSFCStrIn_t targetStr, SSFCStrIn_t hostStr, uint16_t portOpt);
 ```
 
 Writes `method SP target SP HTTP/1.1 CRLF` and `Host: host[:port] CRLF` at `buf[0]`; `portOpt`
 0 omits the port.
 
-- `method` is a token (RFC 9110 5.6.2).
-- `target` is made of URI characters (RFC 3986 unreserved, gen-delims except `#`, sub-delims),
+- `methodStr` is a token (RFC 9110 5.6.2).
+- `targetStr` is made of URI characters (RFC 3986 unreserved, gen-delims except `#`, sub-delims),
   with well-formed `%XX` escapes. That covers origin form (`/a?b`), `*`, authority form
   (`host:443`) and absolute form.
-- `host` is a DNS name or IPv4 address: letters, digits, `-`, `.`, `_`, `~`. IPv6 is not
+- `hostStr` is a DNS name or IPv4 address: letters, digits, `-`, `.`, `_`, `~`. IPv6 is not
   supported (SSF is IPv4 only).
 
 **Returns:** `true` with `*lenOut` set; `false`, with `*lenOut` 0, if any string is invalid or
-the text does not fit in `size` bytes. Asserts on a NULL pointer.
+the text does not fit in `bufSize` bytes. Asserts on a NULL pointer.
 
 <a id="ssfhttphdrreqaddfield"></a>
 
 ### [↑](#functions) [`bool SSFHTTPHdrReqAddField()`](#functions)
 
 ```c
-bool SSFHTTPHdrReqAddField(uint8_t *buf, size_t size, size_t *lenInOut, SSFCStrIn_t name,
-                           SSFCStrIn_t value);
+bool SSFHTTPHdrReqAddField(uint8_t *buf, size_t bufSize, size_t *lenInOut, SSFCStrIn_t nameStr,
+                           SSFCStrIn_t valueStr);
 ```
 
-Appends `name: value CRLF` at `buf[*lenInOut]`. `name` is a token other than `Host`. `value` is
-made of visible characters, `obs-text` (0x80..0xFF), spaces and tabs, and may be empty, but may
-not start or end with a space or tab.
+Appends `name: value CRLF` at `buf[*lenInOut]`. `nameStr` is a token other than `Host`.
+`valueStr` is made of visible characters, `obs-text` (0x80..0xFF), spaces and tabs, and may be
+empty, but may not start or end with a space or tab.
 
 **Returns:** `true` with `*lenInOut` advanced; `false` with it unchanged. Asserts on a NULL
-pointer or `*lenInOut > size`.
+pointer or `*lenInOut > bufSize`.
 
 <a id="ssfhttphdrreqend"></a>
 
 ### [↑](#functions) [`bool SSFHTTPHdrReqEnd()`](#functions)
 
 ```c
-bool SSFHTTPHdrReqEnd(uint8_t *buf, size_t size, size_t *lenInOut);
+bool SSFHTTPHdrReqEnd(uint8_t *buf, size_t bufSize, size_t *lenInOut);
 ```
 
 Appends the empty line that ends the head.
@@ -149,14 +149,14 @@ ok = ok && SSFHTTPHdrReqEnd(req, sizeof(req), &len);
 ### [↑](#functions) [`SSFHTTPHdrParse_t SSFHTTPHdrParseResponse()`](#functions)
 
 ```c
-SSFHTTPHdrParse_t SSFHTTPHdrParseResponse(const uint8_t *buf, size_t len,
+SSFHTTPHdrParse_t SSFHTTPHdrParseResponse(const uint8_t *buf, size_t bufLen,
                                           SSFHTTPHdrResponse_t *respOut);
 ```
 
 Parses the response head at the start of `buf[0..len)`. The status line must be
 `HTTP/x.y SP 3DIGIT`, optionally followed by `SP` and a reason phrase, with a status from 100 to
 599. Only the first `SSF_HTTP_HDR_MAX_HEAD_SIZE` bytes are looked at. `buf` may be NULL only when
-`len` is 0.
+`bufLen` is 0.
 
 **Returns:** `SSF_HTTP_HDR_COMPLETE` with `*respOut` filled (status, version, reason, fields,
 `headLen`); `SSF_HTTP_HDR_INCOMPLETE` if no error so far and more bytes are needed;
@@ -168,11 +168,11 @@ unusable. `*respOut` is valid only on `COMPLETE`.
 ### [↑](#functions) [`bool SSFHTTPHdrFindField()`](#functions)
 
 ```c
-bool SSFHTTPHdrFindField(const uint8_t *buf, const SSFHTTPHdrResponse_t *resp, SSFCStrIn_t name,
+bool SSFHTTPHdrFindField(const uint8_t *buf, const SSFHTTPHdrResponse_t *resp, SSFCStrIn_t nameStr,
                          uint16_t *indexInOut, const uint8_t **valueOut, size_t *valueLenOut);
 ```
 
-Finds the first field named `name` (case-insensitively) at or after index `*indexInOut`. `buf`
+Finds the first field named `nameStr` (case-insensitively) at or after index `*indexInOut`. `buf`
 is the buffer that was parsed.
 
 **Returns:** `true` with the value (not NUL terminated) and `*indexInOut` set to the index after
@@ -184,10 +184,10 @@ it, so repeated calls walk duplicates; `false` if there is no further match.
 
 ```c
 uint16_t SSFHTTPHdrFieldCount(const uint8_t *buf, const SSFHTTPHdrResponse_t *resp,
-                              SSFCStrIn_t name);
+                              SSFCStrIn_t nameStr);
 ```
 
-**Returns:** The number of fields named `name`.
+**Returns:** The number of fields named `nameStr`.
 
 <a id="ssfhttphdrfieldisonly"></a>
 
@@ -195,10 +195,10 @@ uint16_t SSFHTTPHdrFieldCount(const uint8_t *buf, const SSFHTTPHdrResponse_t *re
 
 ```c
 bool SSFHTTPHdrFieldIsOnly(const uint8_t *buf, const SSFHTTPHdrResponse_t *resp,
-                           SSFCStrIn_t name, SSFCStrIn_t value, bool isCaseInsensitive);
+                           SSFCStrIn_t nameStr, SSFCStrIn_t valueStr, bool isCaseInsensitive);
 ```
 
-**Returns:** `true` if exactly one field is named `name` and its whole value equals `value`,
+**Returns:** `true` if exactly one field is named `nameStr` and its whole value equals `valueStr`,
 ASCII case-insensitively when `isCaseInsensitive`, else byte for byte. A duplicate field makes it
 `false`, which is how a caller refuses an ambiguous response.
 
@@ -208,13 +208,13 @@ ASCII case-insensitively when `isCaseInsensitive`, else byte for byte. A duplica
 
 ```c
 bool SSFHTTPHdrFieldHasToken(const uint8_t *buf, const SSFHTTPHdrResponse_t *resp,
-                             SSFCStrIn_t name, SSFCStrIn_t token);
+                             SSFCStrIn_t nameStr, SSFCStrIn_t tokenStr);
 ```
 
-Searches the comma-separated lists (RFC 9110 5.6.1) in every field named `name`. Elements are
+Searches the comma-separated lists (RFC 9110 5.6.1) in every field named `nameStr`. Elements are
 trimmed of surrounding whitespace, and empty elements are skipped.
 
-**Returns:** `true` if any element equals `token` case-insensitively; `false` for an empty token.
+**Returns:** `true` if any element equals `tokenStr` case-insensitively; `false` for an empty token.
 
 <a id="ex-parse"></a>
 

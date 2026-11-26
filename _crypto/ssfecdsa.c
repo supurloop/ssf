@@ -40,7 +40,7 @@
 #include "ssfsha1.h"
 #include "ssfsha2.h"
 #if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
-#include "ssfasn1.h" /* Sign's _SSFECDSASigEncode is the only consumer; verify is byte-level. */
+#include "ssfasn1.h"
 #endif
 #include "ssfprng.h"
 #include "ssfcrypt.h"
@@ -87,6 +87,7 @@ static void _SSFECDSAScalarMulBase(SSFECPoint_t *r, const SSFBN_t *k, SSFECCurve
 {
     SSF_REQUIRE(r != NULL);
     SSF_REQUIRE(k != NULL);
+    SSF_REQUIRE((curve > SSF_EC_CURVE_MIN) && (curve < SSF_EC_CURVE_MAX));
 
 #if SSF_EC_CONFIG_FIXED_BASE_P256 == 1
     if (curve == SSF_EC_CURVE_P256) { SSFECScalarMulBaseP256(r, k); return; }
@@ -109,6 +110,8 @@ static void _SSFECDSAScalarMulBase(SSFECPoint_t *r, const SSFBN_t *k, SSFECCurve
 /* --------------------------------------------------------------------------------------------- */
 static SSFHMACHash_t _SSFECDSAGetHMACHash(SSFECCurve_t curve)
 {
+    SSF_REQUIRE((curve > SSF_EC_CURVE_MIN) && (curve < SSF_EC_CURVE_MAX));
+
     switch (curve)
     {
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
@@ -126,6 +129,8 @@ static SSFHMACHash_t _SSFECDSAGetHMACHash(SSFECCurve_t curve)
 /* --------------------------------------------------------------------------------------------- */
 static size_t _SSFECDSAGetHashSize(SSFECCurve_t curve)
 {
+    SSF_REQUIRE((curve > SSF_EC_CURVE_MIN) && (curve < SSF_EC_CURVE_MAX));
+
     switch (curve)
     {
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
@@ -187,7 +192,7 @@ static void _SSFECDSABits2Int(SSFBN_t *out, const uint8_t *hash, size_t hashLen,
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: bits2octets per RFC 6979 2.3.4 (hash to integer mod n, then BE bytes coordBytes).   */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFECDSABits2Octets(uint8_t *out, size_t outLen, const uint8_t *hash, size_t hashLen,
+static void _SSFECDSABits2Octets(uint8_t *out, size_t outSize, const uint8_t *hash, size_t hashLen,
                                  const SSFECCurveParams_t *c)
 {
     SSFBN_DEFINE(z, SSF_EC_MAX_LIMBS);
@@ -198,13 +203,14 @@ static void _SSFECDSABits2Octets(uint8_t *out, size_t outLen, const uint8_t *has
 
     _SSFECDSABits2Int(&z, hash, hashLen, c);
 
-    /* Reduce mod n if z >= n */
+    /* Is z >= n? */
     if (SSFBNCmp(&z, &c->n) >= 0)
     {
+        /* Yes, reduce it mod n. */
         SSFBNSub(&z, &z, &c->n);
     }
 
-    SSFBNToBytes(&z, out, outLen);
+    SSFBNToBytes(&z, out, outSize);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -224,6 +230,7 @@ static bool _SSFECDSAGenK(SSFECCurve_t curve, const uint8_t *privKey, size_t pri
     uint8_t T[SSF_EC_MAX_COORD_BYTES];
     uint16_t attempts;
 
+    SSF_REQUIRE((curve > SSF_EC_CURVE_MIN) && (curve < SSF_EC_CURVE_MAX));
     SSF_REQUIRE(privKey != NULL);
     SSF_REQUIRE(hash != NULL);
     SSF_REQUIRE(c != NULL);
@@ -279,7 +286,7 @@ static bool _SSFECDSAGenK(SSFECCurve_t curve, const uint8_t *privKey, size_t pri
             /* T = T || V */
             {
                 size_t copyLen = c->bytes - tLen;
-                if (copyLen > hlen) copyLen = hlen;
+                if (copyLen > hlen) { copyLen = hlen; }
                 memcpy(&T[tLen], V, copyLen);
                 tLen += copyLen;
             }
@@ -289,7 +296,7 @@ static bool _SSFECDSAGenK(SSFECCurve_t curve, const uint8_t *privKey, size_t pri
         _SSFECDSABits2Int(k, T, c->bytes, c);
 
         /* Is k in [1, n-1]? */
-        if (!SSFBNIsZero(k) && (SSFBNCmp(k, &c->n) < 0))
+        if ((!SSFBNIsZero(k)) && (SSFBNCmp(k, &c->n) < 0))
         {
             /* Yes. Is it the candidate the caller asked for? */
             if (skip == 0u)
@@ -322,7 +329,7 @@ static bool _SSFECDSAGenK(SSFECCurve_t curve, const uint8_t *privKey, size_t pri
     SSFCryptSecureZero(K, sizeof(K));
     SSFCryptSecureZero(h1Octets, sizeof(h1Octets));
     SSFCryptSecureZero(T, sizeof(T));
-    /* Wipe k (rejected candidates leak HMAC-DRBG output if the caller skips the cleanup path). */
+    /* Wipe k so no rejected HMAC-DRBG candidate is left behind. */
     SSFBNZeroize(k);
     return false; /* Should never reach here for valid inputs */
 }
@@ -437,7 +444,7 @@ static bool _SSFECDSASigEncode(const SSFBN_t *r, const SSFBN_t *s, const SSFECCu
     return true;
 }
 
-#endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN -- end of DER-encode helpers */
+#endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: strict byte-level DER parse of the signature; outputs r, s INTEGER content spans.   */
@@ -453,24 +460,28 @@ static bool _SSFECDSASigParseStrictDER(const uint8_t *sig, size_t sigLen, uint16
     uint16_t i;
 
     SSF_REQUIRE(sig != NULL);
+    SSF_REQUIRE(coordBytes > 0u);
     SSF_REQUIRE(rOff != NULL);
     SSF_REQUIRE(rLen != NULL);
     SSF_REQUIRE(sOff != NULL);
     SSF_REQUIRE(sLen != NULL);
 
-    /* Smallest valid sig: 30 06 02 01 rr 02 01 ss = 8 bytes (1-byte r and s). Use 8 as floor. */
+    /* Smallest valid sig is 30 06 02 01 rr 02 01 ss = 8 bytes. */
     if (sigLen < 8u) return false;
 
     /* Outer SEQUENCE tag. */
     if (sig[pos++] != 0x30u) return false;
 
-    /* SEQUENCE length: short form or canonical 0x81 XX; reject 0x82+ (sigs < 256 bytes). */
+    /* Is the SEQUENCE length in short form? */
     if (sig[pos] < 0x80u)
     {
+        /* Yes, take it directly. */
         seqLen = sig[pos++];
     }
+    /* No, is it in the canonical 0x81 XX long form? */
     else if (sig[pos] == 0x81u)
     {
+        /* Yes, take the single length byte. */
         pos++;
         if (pos >= sigLen) return false;
         seqLen = sig[pos++];
@@ -478,6 +489,7 @@ static bool _SSFECDSASigParseStrictDER(const uint8_t *sig, size_t sigLen, uint16
     }
     else
     {
+        /* No, reject 0x82+ since signatures are < 256 bytes. */
         return false;
     }
 
@@ -496,12 +508,13 @@ static bool _SSFECDSASigParseStrictDER(const uint8_t *sig, size_t sigLen, uint16
         if ((pos + intLen) > sigLen) return false;
         if (intLen > ((size_t)coordBytes + 1u)) return false; /* exceeds maximum for the curve */
 
+        /* Is the INTEGER longer than one byte? */
         if (intLen > 1u)
         {
-            /* Is there a 0x00 prefix not followed by an MSB-set byte (non-canonical)? */
+            /* Yes, is there a 0x00 prefix not followed by an MSB-set byte (non-canonical)? */
             if ((sig[pos] == 0x00u) && (sig[pos + 1u] < 0x80u))
             {
-                /* Yes, reject the extra leading zero. */
+                /* Yes, reject the non-canonical leading zero. */
                 return false;
             }
         }
@@ -516,8 +529,10 @@ static bool _SSFECDSASigParseStrictDER(const uint8_t *sig, size_t sigLen, uint16
     /* No trailing data after second INTEGER. */
     if (pos != sigLen) return false;
 
-    *rOff = outOff[0]; *rLen = outLen[0];
-    *sOff = outOff[1]; *sLen = outLen[1];
+    *rOff = outOff[0];
+    *rLen = outLen[0];
+    *sOff = outOff[1];
+    *sLen = outLen[1];
     return true;
 }
 
@@ -662,7 +677,7 @@ bool SSFECDSAKeyGen(SSFECCurve_t curve, uint8_t *privKey, size_t privKeySize, ui
     ok = true;
 
 cleanup:
-    /* Wipe d and the HMAC-DRBG seed (leaving the seed on the stack is equivalent to leaking d). */
+    /* Wipe d, the PRNG state and its entropy seed. */
     SSFBNZeroize(&d);
     if (prngInited) SSFPRNGDeInitContext(&prng);
     SSFCryptSecureZero(entropy, sizeof(entropy));
@@ -839,7 +854,7 @@ bool SSFECDSASign(SSFECCurve_t curve, const uint8_t *privKey, size_t privKeyLen,
     ok = _SSFECDSASigEncode(&r, &s, c, sig, sigSize, sigLen);
 
 cleanup:
-    /* Wipe r and s too: a faulty (r, s) next to a correct one reveals d. */
+    /* Wipe r and s. */
     SSFBNZeroize(&r);
     SSFBNZeroize(&s);
     /* Wipe every secret-derived limb (d, k, kInv, tmp, R/Rx/Ry; e wiped for uniformity). */
@@ -889,13 +904,13 @@ static bool _SSFECDSAVerifyInit(const SSFECCurveParams_t *c, SSFECCurve_t curve,
     if (!_SSFECDSASigDecode(sig, sigLen, c, rOut, &s)) return false;
 
     /* Is r outside [1, n-1]? */
-    if (SSFBNIsZero(rOut) || (SSFBNCmp(rOut, &c->n) >= 0))
+    if ((SSFBNIsZero(rOut)) || (SSFBNCmp(rOut, &c->n) >= 0))
     {
         /* Yes, invalid signature. */
         return false;
     }
     /* Is s outside [1, n-1]? */
-    if (SSFBNIsZero(&s) || (SSFBNCmp(&s, &c->n) >= 0))
+    if ((SSFBNIsZero(&s)) || (SSFBNCmp(&s, &c->n) >= 0))
     {
         /* Yes, invalid signature. */
         return false;
@@ -919,6 +934,7 @@ static bool _SSFECDSAVerifyGetR(const SSFECCurveParams_t *c, SSFECCurve_t curve,
                                 const SSFBN_t *u2, const SSFECPoint_t *Q, SSFECPoint_t *Rout)
 {
     SSF_REQUIRE(c != NULL);
+    SSF_REQUIRE((curve > SSF_EC_CURVE_MIN) && (curve < SSF_EC_CURVE_MAX));
     SSF_REQUIRE(u1 != NULL);
     SSF_REQUIRE(u2 != NULL);
     SSF_REQUIRE(Q != NULL);
@@ -961,10 +977,12 @@ static bool _SSFECDSAVerifyCheckR(const SSFECCurveParams_t *c, SSFECCurve_t curv
     SSFBNModMulNISTPrime(&t, r, &z2, &c->p);
     if (SSFBNCmp(&t, &R->x) == 0) return true;
 
-    /* Case B: only if r < p - n (wraparound; r + n is then < p without further reduction). */
     SSFBNSub(&pMinusN, &c->p, &c->n);
+
+    /* Is r < p - n, so that r + n < p is a possible wrapped x? */
     if (SSFBNCmp(r, &pMinusN) < 0)
     {
+        /* Yes, case B: t = (r + n) * z2 mod p; accept if t == R.x */
         (void)SSFBNAdd(&rPlusN, r, &c->n);
         SSFBNModMulNISTPrime(&t, &rPlusN, &z2, &c->p);
         if (SSFBNCmp(&t, &R->x) == 0) return true;
@@ -1036,6 +1054,10 @@ cleanup:
 bool _SSFECDSAVerifyCheckRForTest(SSFECCurve_t curve, const SSFECPoint_t *R, const SSFBN_t *r)
 {
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
+
+    SSF_REQUIRE(R != NULL);
+    SSF_REQUIRE(r != NULL);
+
     if (c == NULL) return false;
     return _SSFECDSAVerifyCheckR(c, curve, R, r);
 }
@@ -1046,6 +1068,10 @@ bool _SSFECDSAVerifyCheckRForTest(SSFECCurve_t curve, const SSFECPoint_t *R, con
 void _SSFECDSABits2IntForTest(const SSFECCurveParams_t *c, const uint8_t *hash, size_t hashLen)
 {
     SSFBN_DEFINE(out, SSF_EC_MAX_LIMBS);
+
+    SSF_REQUIRE(c != NULL);
+    SSF_REQUIRE(hash != NULL);
+
     _SSFECDSABits2Int(&out, hash, hashLen, c);
     SSFBNZeroize(&out);
 }
@@ -1071,7 +1097,10 @@ bool SSFECDSAVerify(SSFECCurve_t curve, const uint8_t *pubKey, size_t pubKeyLen,
     SSF_REQUIRE((hashLen > 0u) && (hashLen <= SSF_SHA2_512_BYTE_SIZE));
 
     if (!_SSFECDSAVerifyInit(c, curve, pubKey, pubKeyLen, hash, hashLen, sig, sigLen,
-                             &r, &u1, &u2, &Q)) return false;
+                             &r, &u1, &u2, &Q))
+    {
+        return false;
+    }
     if (!_SSFECDSAVerifyGetR(c, curve, &u1, &u2, &Q, &R)) return false;
     return _SSFECDSAVerifyCheckR(c, curve, &R, &r);
 }
@@ -1135,4 +1164,3 @@ cleanup:
 #endif
     return ok;
 }
-

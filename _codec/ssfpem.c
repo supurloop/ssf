@@ -51,11 +51,11 @@ void (*_ssfPEMUTScrubHook)(const char *quad, size_t quadSize, const uint8_t *tri
 #endif
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if pem[i..i+n) is inside pemLen and equals s.                                    */
+/* Returns true if pem[i..i+cmpLen) is inside pemLen and equals cmp.                            */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFPEMAt(const char *pem, size_t pemLen, size_t i, const char *s, size_t n)
+static bool _SSFPEMAt(const char *pem, size_t pemLen, size_t i, const char *cmp, size_t cmpLen)
 {
-    return ((pemLen - i) >= n) && (memcmp(&pem[i], s, n) == 0);
+    return (((pemLen - i) >= cmpLen) && (memcmp(&pem[i], cmp, cmpLen) == 0));
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -63,24 +63,29 @@ static bool _SSFPEMAt(const char *pem, size_t pemLen, size_t i, const char *s, s
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFPEMIsEol(char ch)
 {
-    return (ch == '\n') || (ch == '\r');
+    return ((ch == '\n') || (ch == '\r'));
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Skips spaces and tabs from i, then requires a line end (CR, LF or CRLF) or, if endOk, the end */
-/* of input. Returns the offset past the line end, or 0 if something else follows.               */
+/* Returns offset past trailing blanks and a line end (or input end if endOk), else 0.          */
 /* --------------------------------------------------------------------------------------------- */
 static size_t _SSFPEMLineEnd(const char *pem, size_t pemLen, size_t i, bool endOk)
 {
+    SSF_REQUIRE(pem != NULL);
+    SSF_REQUIRE(i <= pemLen);
+
     while ((i < pemLen) && ((pem[i] == ' ') || (pem[i] == '\t'))) i++;
-    if (i == pemLen) return endOk ? i : 0;
+    /* Is the end of input reached? */
+    if (i == pemLen) return (endOk ? i : 0);
+    /* Is the line end a CR, optionally followed by LF? */
     if (pem[i] == '\r')
     {
+        /* Yes, consume the CR and any LF */
         i++;
         if ((i < pemLen) && (pem[i] == '\n')) i++;
         return i;
     }
-    if (pem[i] == '\n') return i + 1u;
+    if (pem[i] == '\n') return (i + 1u);
     return 0;
 }
 
@@ -112,21 +117,23 @@ SSFPEMResult_t SSFPEMDecodeNext(const char *pem, size_t pemLen, size_t *pos,
     /* Find the next BEGIN line: "-----BEGIN " at the start of a line */
     for (i = *pos; i < pemLen; i++)
     {
-        if (((i == 0u) || _SSFPEMIsEol(pem[i - 1u])) &&
+        if (((i == 0u) || (_SSFPEMIsEol(pem[i - 1u]))) &&
             _SSFPEMAt(pem, pemLen, i, SSF_PEM_BEGIN, SSF_PEM_BEGIN_LEN)) break;
     }
+    /* Is there no BEGIN line? */
     if (i == pemLen) { result = SSF_PEM_END; goto out; }
 
     /* Label: printable characters up to the closing dashes, on the BEGIN line */
     label = i + SSF_PEM_BEGIN_LEN;
-    for (i = label; (i < pemLen) && !_SSFPEMAt(pem, pemLen, i, SSF_PEM_DASHES,
-                                                SSF_PEM_DASHES_LEN); i++)
+    for (i = label; (i < pemLen) && (!_SSFPEMAt(pem, pemLen, i, SSF_PEM_DASHES,
+                                                 SSF_PEM_DASHES_LEN)); i++)
     {
         if ((pem[i] < ' ') || (pem[i] > '~')) goto fail;
     }
     labelLen = i - label;
+    /* Are the closing dashes missing or is the label length out of range? */
     if ((i == pemLen) || (labelLen == 0u) || (labelLen > SSF_PEM_MAX_LABEL_LEN)) goto fail;
-    i = _SSFPEMLineEnd(pem, pemLen, i + SSF_PEM_DASHES_LEN, false);
+    i = _SSFPEMLineEnd(pem, pemLen, (i + SSF_PEM_DASHES_LEN), false);
     if (i == 0u) goto fail;
 
     /* Body: Base64 in groups of four characters, whitespace anywhere, up to the END line */
@@ -134,13 +141,14 @@ SSFPEMResult_t SSFPEMDecodeNext(const char *pem, size_t pemLen, size_t *pos,
     {
         char ch = pem[i];
 
+        /* Is the character whitespace? */
         if ((ch == ' ') || (ch == '\t') || (ch == '\r') || (ch == '\n')) { i++; continue; }
+        /* Is this the start of the END line? */
         if (ch == '-')
         {
-            /* Only "-----END <same label>-----" may follow, at the start of a line, after a  */
-            /* complete group. i > 0 here: the BEGIN line precedes the body.                  */
-            if ((quadLen != 0u) || !_SSFPEMIsEol(pem[i - 1u]) ||
-                !_SSFPEMAt(pem, pemLen, i, SSF_PEM_END_TAG, SSF_PEM_END_LEN))
+            /* Yes, it must start a line after a complete group and repeat the label */
+            if ((quadLen != 0u) || (!_SSFPEMIsEol(pem[i - 1u])) ||
+                (!_SSFPEMAt(pem, pemLen, i, SSF_PEM_END_TAG, SSF_PEM_END_LEN)))
             {
                 goto fail;
             }
@@ -148,7 +156,7 @@ SSFPEMResult_t SSFPEMDecodeNext(const char *pem, size_t pemLen, size_t *pos,
             if (!_SSFPEMAt(pem, pemLen, i, &pem[label], labelLen)) goto fail;
             i += labelLen;
             if (!_SSFPEMAt(pem, pemLen, i, SSF_PEM_DASHES, SSF_PEM_DASHES_LEN)) goto fail;
-            i = _SSFPEMLineEnd(pem, pemLen, i + SSF_PEM_DASHES_LEN, true);
+            i = _SSFPEMLineEnd(pem, pemLen, (i + SSF_PEM_DASHES_LEN), true);
             if (i == 0u) goto fail;
 
             *pos = i;
@@ -165,13 +173,16 @@ SSFPEMResult_t SSFPEMDecodeNext(const char *pem, size_t pemLen, size_t *pos,
         i++;
         if (quadLen < 4u) continue;
         quadLen = 0;
-        if (!SSFBase64Decode(quad, sizeof(quad), tri, sizeof(tri), &triLen) || (triLen == 0u))
+        /* Is the group invalid Base64? */
+        if ((!SSFBase64Decode(quad, sizeof(quad), tri, sizeof(tri), &triLen)) || (triLen == 0u))
         {
             goto fail;
         }
         if (triLen < 3u) padded = true;
+        /* Is output requested? */
         if (derOpt != NULL)
         {
+            /* Yes, fail if the group does not fit */
             if ((derSize - written) < triLen) { result = SSF_PEM_ERR_SIZE; goto fail; }
             memcpy(&derOpt[written], tri, triLen);
         }
@@ -192,12 +203,12 @@ out:
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if label[0..labelLen) equals the C string str.                                   */
+/* Returns true if label[0..labelLen) equals the C string cmpStr.                                */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFPEMLabelIs(const char *label, size_t labelLen, const char *str)
+bool SSFPEMLabelIs(const char *label, size_t labelLen, const char *cmpStr)
 {
     SSF_REQUIRE(label != NULL);
-    SSF_REQUIRE(str != NULL);
+    SSF_REQUIRE(cmpStr != NULL);
 
-    return (strlen(str) == labelLen) && (memcmp(label, str, labelLen) == 0);
+    return ((strlen(cmpStr) == labelLen) && (memcmp(label, cmpStr, labelLen) == 0));
 }

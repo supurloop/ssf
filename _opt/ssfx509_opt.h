@@ -8,32 +8,24 @@
 extern "C" {
 #endif
 
-/* Maximum DER-encoded certificate size in bytes accepted by the parser and emitted by the        */
-/* encoder; also sizes the on-stack scratch buffers used during parsing and encoding.             */
+/* Largest DER TBSCertificate or Certificate in bytes the encoder will produce */
 #define SSF_X509_CONFIG_MAX_CERT_SIZE        (4096u)
 
-/* Maximum number of certificates in a chain passed to SSFX509VerifyChain (leaf + intermediates, */
-/* + any root sent). Costs 2 bytes of stack per certificate: the verifier parses only two at a   */
-/* time, whatever the depth. It is also the TLS client's chain limit: ssftlsc keeps this many    */
-/* from a server's Certificate message and drops the rest (traced if verification then fails). 6 */
-/* covers leaf, two intermediates, a cross-signed root and the root. With ssfcms it must be at   */
-/* least SSF_CMS_CONFIG_MAX_CERTS + 1. Must be 1 to 255 (chain lengths are uint8_t; SAFE-04).   */
+/* Maximum certificates in a chain passed to SSFX509VerifyChain() and kept by ssftlsc, 1..255 */
 #ifndef SSF_X509_CONFIG_MAX_CHAIN_DEPTH
 #define SSF_X509_CONFIG_MAX_CHAIN_DEPTH      (6u)
 #endif
 
-/* Maximum number of extensions retained in SSFX509Cert_t.exts; extras are skipped.              */
+/* Maximum extensions retained in SSFX509Cert_t.exts; a certificate with more fails to parse */
 #define SSF_X509_CONFIG_MAX_EXTENSIONS       (16u)
 
-/* Maximum permitted and maximum excluded Name Constraints subtrees retained per certificate.    */
+/* Maximum permitted and maximum excluded Name Constraints subtrees retained per certificate */
 #define SSF_X509_CONFIG_MAX_NAME_CONSTRAINTS (8u)
 
-/* Maximum Subject Alternative Name entries retained in SSFX509Cert_t.san; extras are skipped.   */
+/* Maximum SAN entries retained in SSFX509Cert_t.san; a certificate with more fails to parse */
 #define SSF_X509_CONFIG_MAX_SAN_ENTRIES      (8u)
 
-/* Minimum RSA modulus size in bits for any RSA key used to verify a signature (certificates,   */
-/* chains, CMS signers). Smaller keys are refused even when the signature is mathematically     */
-/* valid, as are keys whose public exponent is even or below 3 (AUDIT RSA-10). Must be >= 1024. */
+/* Minimum RSA modulus size in bits for any RSA key used to verify a signature, >= 1024 */
 #ifndef SSF_X509_CONFIG_RSA_MIN_BITS
 #define SSF_X509_CONFIG_RSA_MIN_BITS         (2048u)
 #endif

@@ -44,8 +44,7 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 /* Defines and typedefs                                                                          */
 /* --------------------------------------------------------------------------------------------- */
-/* Every block SSFMPoolAlloc() returns is aligned to SSF_MPOOL_ALIGN bytes: the strictest        */
-/* alignment of the basic C types, which is what malloc() guarantees.                            */
+/* Union of the basic C types whose strictest alignment defines SSF_MPOOL_ALIGN */
 typedef union
 {
     long double ld;

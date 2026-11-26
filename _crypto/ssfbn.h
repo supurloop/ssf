@@ -79,13 +79,13 @@ typedef uint64_t SSFBNDLimb_t;
 #endif
 
 /* Largest modulus SSFBNModInvSmall / SSFBNModMulSmall accept: P-384 size, or the whole cap */
-#if SSF_BN_MAX_LIMBS >= 12u
+#if ((SSF_BN_MAX_LIMBS) >= 12u)
 #define SSF_BN_SMALL_MAX_LIMBS     (12u)
 #else
 #define SSF_BN_SMALL_MAX_LIMBS     (SSF_BN_MAX_LIMBS)
 #endif
 
-/* Largest modulus SSFBNModExpHalf accepts: half of SSF_BN_MAX_MOD_LIMBS, an RSA CRT prime.     */
+/* Largest modulus SSFBNModExpHalf accepts: half of SSF_BN_MAX_MOD_LIMBS, an RSA CRT prime. */
 #define SSF_BN_HALF_MOD_LIMBS      (((SSF_BN_MAX_MOD_LIMBS) + 1u) / 2u)
 
 /* --------------------------------------------------------------------------------------------- */
@@ -300,7 +300,7 @@ void SSFBNUnitTest(void);
 extern uint32_t _SSFBNModCallCount;
 
 /* Test-only hook fired after each secret local is wiped. */
-extern void (*_SSFBNScrubTestHook)(const void *buf, size_t len);
+extern void (*_SSFBNScrubTestHook)(const void *buf, size_t bufSize);
 
 /* Test-only: the 16-bit-step remainder 32-bit targets' trial division uses (d < 2^16). */
 uint32_t _SSFBNModUint16Test(const SSFBN_t *a, uint32_t d);

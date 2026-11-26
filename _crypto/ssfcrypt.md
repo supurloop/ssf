@@ -78,14 +78,22 @@ ladder fallback) and `SSFECScalarMulDualBase` auto-falls-back to the
 Shamir's-trick path. Also sets `SSF_ECDSA_CONFIG_ENABLE_SIGN` to `0`, dropping
 `SSFECDSASign()` and the DER-encode helper; the verify-only path is
 `ssfasn1`-free, so a MIN_MEMORY build with this default can omit the entire
-`ssfasn1` module. Suited to verify-only signers on Cortex-M0/M3-class targets.
+`ssfasn1` module; targets that need on-device signing override it back to `1`.
+Also sets `SSF_BN_MODEXP_WIN_K` to `3` (8-entry ModExp window table instead of
+16: RSA keygen peak -4.2 KB and sign peak -1.1 KB at the RSA-4096 cap, RSA
+private ops ~5 % slower). Suited to verify-only signers on Cortex-M0/M3-class
+targets.
 
 **`SSF_CRYPT_PROFILE_CUSTOM`** is today's defaults — both fixed-base tables on,
 both curves enabled, RSA-2048/3072/4096 all on. Intended for networked 32-bit
-MCUs in the ~512 KB-RAM range.
+MCUs in the ~512 KB-RAM range. Sets no defaults of its own; each per-module
+opt file picks its own (`COMB_H = 6`, 4-bit ModExp window).
 
 **`SSF_CRYPT_PROFILE_MAX_PERF`** sets `SSF_BN_KARATSUBA_THRESHOLD = 16` so
-RSA-2048+ multiplies enter Karatsuba sooner. Suited to host / server builds.
+RSA-2048+ multiplies enter Karatsuba sooner, and `SSF_BN_MODEXP_WIN_K = 5`
+(32-entry table: RSA private ops 0 to -3 %, RSA keygen peak +8.3 KB and sign
+peak +4.2 KB at the RSA-4096 cap). Suited to host / server builds where RAM and
+flash are not the constraint.
 
 The compiler's dead-code elimination handles the rest: unreferenced KeyGen,
 PSS, larger RSA sizes, or unused curve code paths are stripped at link without

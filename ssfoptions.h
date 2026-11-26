@@ -3,7 +3,7 @@
 /*                                                                                               */
 /* ssfoptions.h                                                                                  */
 /* Aggregator facade -- pulls in every per-module configuration header from _opt/.               */
-/* Existing code that #includes only "ssfoptions.h" continues to work unchanged.                  */
+/* Include this one header to get the configuration of every module.                             */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
 /* Copyright 2022 Supurloop Software LLC                                                         */
@@ -41,8 +41,7 @@ extern "C" {
 #include "ssfport.h"
 #include "ssfassert.h"
 
-/* The _crypto-wide profile selector must be processed BEFORE the per-module crypto opts so its */
-/* defaults are visible to their #ifndef guards. Out of alphabetical order intentionally.        */
+/* Crypto profile selector first so its defaults reach the per-module crypto opt #ifndef guards */
 #include "ssfcrypt_opt.h"
 
 /* Per-module option files. Each is also includable directly by its module's source. */

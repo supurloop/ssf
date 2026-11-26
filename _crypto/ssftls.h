@@ -117,7 +117,7 @@ typedef struct SSFTLSTraceCtx
 #define SSF_TLS_TRACE_ALERT(T, ...) \
     _SSF_TLS_TRACE(T, SSF_TLS_TRACE_WARN, SSF_TLS_TRACE_ALERT, __VA_ARGS__)
 
-/* Legacy macro: expands to nothing; use the category-specific macros instead */
+/* Uncategorized trace macro: expands to nothing; use the category-specific macros instead */
 #define SSF_TLS_TRACE(...)
 
 /* --------------------------------------------------------------------------------------------- */
@@ -287,9 +287,7 @@ void SSFTLSRecordStateDeInit(SSFTLSRecordState_t *state);
 bool SSFTLSRecordEncrypt(SSFTLSRecordState_t *state, uint8_t contentType, const uint8_t *pt,
                          size_t ptLen, uint8_t *record, size_t recordSize, size_t *recordLen);
 
-/* Decrypt a TLS record given as its 5-byte header and its fragment (they need not be          */
-/* adjacent). Validates the AEAD tag and extracts the inner content type. pt may be frag        */
-/* (decrypt in place); otherwise it must not overlap frag. It never overlaps hdr.               */
+/* Verify and decrypt one TLS record from its header and fragment; see ssftls.md for overlap. */
 bool SSFTLSRecordDecrypt(SSFTLSRecordState_t *state, const uint8_t *hdr, const uint8_t *frag,
                          size_t fragLen, uint8_t *pt, size_t ptSize, size_t *ptLen,
                          uint8_t *contentType);

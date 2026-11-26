@@ -105,7 +105,7 @@ static bool _utSpanIn(const uint8_t *p, uint32_t len, const uint8_t *base, uint3
     SSF_REQUIRE(p != NULL);
     SSF_REQUIRE(base != NULL);
 
-    return (p >= base) && ((p + len) <= (base + baseLen));
+    return ((p >= base) && ((p + len) <= (base + baseLen)));
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -372,21 +372,26 @@ static void _utSpecDigest(const _utCmsSpec_t *s, const uint8_t **oidOut, uint32_
     SSF_REQUIRE(oidLenOut != NULL);
     SSF_REQUIRE(algOut != NULL);
 
+    /* Does the spec name the digest algorithm? */
     if (s->digestOid != NULL)
     {
+        /* Yes, use it */
         *oidOut = s->digestOid;
         *oidLenOut = s->digestOidLen;
     }
     else if (s->ed25519)
     {
+        /* No, Ed25519 signers default to SHA-512 */
         *oidOut = _utOidSha512;
         *oidLenOut = sizeof(_utOidSha512);
     }
     else
     {
+        /* No, ECDSA signers default to SHA-256 */
         *oidOut = _utOidSha256;
         *oidLenOut = sizeof(_utOidSha256);
     }
+    /* Which digest algorithm does the selected OID name? */
     if (_utSpanEq(*oidOut, *oidLenOut, _utOidSha384, sizeof(_utOidSha384)))
     {
         *algOut = SSF_CMS_DIGEST_SHA384;
@@ -583,7 +588,7 @@ static bool _utBuildCms(const _utCmsSpec_t *s, uint8_t *out, uint32_t outSize, u
     ct = (s->eContentType != NULL) ? s->eContentType : _utOidData;
     ctLen = (s->eContentType != NULL) ? s->eContentTypeLen : sizeof(_utOidData);
 
-    /* Content digest */
+    /* Which digest algorithm covers the content? */
     if (alg == SSF_CMS_DIGEST_SHA384)
     {
         digestLen = SSF_SHA2_384_BYTE_SIZE;
@@ -600,9 +605,10 @@ static bool _utBuildCms(const _utCmsSpec_t *s, uint8_t *out, uint32_t outSize, u
         SSFSHA256(s->content, s->contentLen, digest, digestLen);
     }
 
-    /* Signed attributes, and what the signature covers */
+    /* Does the signature cover signed attributes rather than the content itself? */
     if (!s->noAttrs)
     {
+        /* Yes, sign the DER SET OF the attributes */
         if (!_utEncAttrsContent(s, digest, digestLen, attrs, sizeof(attrs), &attrsLen))
         {
             return false;
@@ -614,19 +620,22 @@ static bool _utBuildCms(const _utCmsSpec_t *s, uint8_t *out, uint32_t outSize, u
     }
     else
     {
+        /* No, sign the content directly */
         signedPtr = s->content;
         signedLen = s->contentLen;
     }
 
-    /* Signature */
+    /* Is the signer Ed25519? */
     if (s->ed25519)
     {
+        /* Yes, sign the bytes directly */
         SSF_REQUIRE(s->pub != NULL);
         if (!SSFEd25519Sign(s->priv, s->pub, signedPtr, signedLen, sig)) return false;
         sigLen = SSF_ED25519_SIG_SIZE;
     }
     else
     {
+        /* No, ECDSA signs the SHA-256 hash of the bytes */
         SSFSHA256(signedPtr, signedLen, hash, SSF_SHA2_256_BYTE_SIZE);
         if (!_SSFECDSAUTSign(_UT_CURVE, s->priv, _UT_PRIV_LEN, hash, SSF_SHA2_256_BYTE_SIZE, sig,
                              sizeof(sig), &sigLen)) return false;
@@ -638,6 +647,7 @@ static bool _utBuildCms(const _utCmsSpec_t *s, uint8_t *out, uint32_t outSize, u
                           (s->siVersionOverride != 0u) ? s->siVersionOverride :
                           (s->useSkid ? 3u : 1u), &w)) return false;
     pos += w;
+    /* Which SignerIdentifier form does the spec select? */
     if (s->sidBadTag)
     {
         if (!SSFASN1EncOctetString(&si[pos], sizeof(si) - pos, cert.skid, cert.skidLen, &w))
@@ -668,13 +678,16 @@ static bool _utBuildCms(const _utCmsSpec_t *s, uint8_t *out, uint32_t outSize, u
         }
         pos += w;
     }
+    /* Does the digest algorithm carry invalid parameters? */
     if (s->digestParamsBad)
     {
+        /* Yes, add an INTEGER as its parameters */
         if (!SSFASN1EncIntU64(tmp2, sizeof(tmp2), 7u, &w)) return false;
         if (!_utEncAlgId(&si[pos], sizeof(si) - pos, dOid, dOidLen, tmp2, w, &w)) return false;
     }
     else
     {
+        /* No, leave the parameters absent */
         if (!_utEncAlgId(&si[pos], sizeof(si) - pos, dOid, dOidLen, NULL, 0u, &w)) return false;
     }
     pos += w;
@@ -722,6 +735,7 @@ static bool _utBuildCms(const _utCmsSpec_t *s, uint8_t *out, uint32_t outSize, u
         static uint8_t algs[200];
         uint32_t a = 0;
 
+        /* Which digestAlgorithms entry does the spec select? */
         if (s->setDigestParamsBad)
         {
             if (!SSFASN1EncIntU64(tmp2, sizeof(tmp2), 7u, &w)) return false;
@@ -894,8 +908,10 @@ static bool _utMakeCert(bool ed25519, bool isCA, const char *cnStr, const char *
     p.keyUsageBits = isCA ? SSF_X509_KU_KEY_CERT_SIGN : SSF_X509_KU_DIGITAL_SIGNATURE;
     p.skid = skid;
     p.skidLen = sizeof(skid);
+    /* Is the certificate key Ed25519? */
     if (ed25519)
     {
+        /* Yes, self-sign with Ed25519 */
         if (!SSFEd25519KeyGen(priv, pub)) return false;
         p.sigAlgOidRaw = _utOidEd25519;
         p.sigAlgOidRawLen = sizeof(_utOidEd25519);
@@ -909,6 +925,7 @@ static bool _utMakeCert(bool ed25519, bool isCA, const char *cnStr, const char *
     }
     else
     {
+        /* No, sign with ECDSA by the issuer or self */
         if (!SSFECDSAKeyGen(_UT_CURVE, priv, SSF_ECDSA_MAX_PRIV_KEY_SIZE, pub,
                             SSF_ECDSA_MAX_PUB_KEY_SIZE, &pubLen)) return false;
         p.sigAlgOidRaw = _utOidEcdsaSha256;
@@ -1068,6 +1085,7 @@ static void _utGenKey(SSFPRNGContext_t *prng, const uint8_t *privOpt, _utGenCert
 
     for (tries = 0; (tries < 8u) && (!ok); tries++)
     {
+        /* Is the private key supplied? */
         if (privOpt != NULL) memcpy(c->priv, privOpt, _UT_PRIV_LEN);
         else _utGenRandom(prng, c->priv, _UT_PRIV_LEN);
         ok = SSFECDSAPubKeyFromPrivKey(_UT_CURVE, c->priv, _UT_PRIV_LEN, c->pub, sizeof(c->pub),
@@ -1252,6 +1270,7 @@ static bool _utGenEncExts(const _utGenCert_t *c, const _utGenCert_t *issuer, uin
         }
     }
 
+    /* Which profile's extension set and order apply? */
     if (c->profile == _UT_GEN_PROFILE_ROOT)
     {
         ok = ok && _utGenEncExt(out, outSize, &pos, _utOidExtKU, sizeof(_utOidExtKU), true, kuCA,
@@ -1709,7 +1728,7 @@ static void _utGenChainsTest(void)
         _utGenRandom(&prng, leaf.serial, 20u);
         leaf.serial[0] = (uint8_t)((leaf.serial[0] & 0x3Fu) | 0x40u);
         leaf.serialLen = 20u;
-        leaf.notBefore = 1792049823ull + _utGenRange(&prng, 3u * 365u * _UT_GEN_DAY);
+        leaf.notBefore = 1792049823ull + _utGenRange(&prng, (3u * 365u * _UT_GEN_DAY));
         leaf.notAfter = leaf.notBefore + (10950u * _UT_GEN_DAY) - 1u;
         _utGenKey(&prng, NULL, &leaf);
         SSF_ASSERT(_utGenEncCert(&leaf, &master));
@@ -1986,8 +2005,7 @@ void SSFCMSUnitTest(void)
     SSF_ASSERT(SSFCMSParse(buf, SSF_CMS_CONFIG_MAX_DER_LEN + 1u, &sd) == false);
     SSF_ASSERT(SSFCMSParse(buf, n, &sd) == true);
 
-    /* An RSA scheme compiled out of ssfx509 fails closed, so these then expect false */
-    /* ---- RSA PKCS#1 v1.5 with rsaEncryption as the signature algorithm (RFC 3370) ---- */
+    /* ---- RSA PKCS#1 v1.5 rsaEncryption signatures (RFC 3370); compiled out fails closed ---- */
     n = sizeof(_utFixRsaPkcs1Detached);
     SSF_ASSERT(SSFCMSParse(_utFixRsaPkcs1Detached, n, &sd) == true);
     SSF_ASSERT((sd.signersLen == 1u) && (sd.certsLen == 1u));
@@ -2198,8 +2216,7 @@ void SSFCMSUnitTest(void)
     _UT_TRACE_ASSERT(_utTraceSawSigFail == true);
     _UT_TRACE_ASSERT(_utTraceSawChainFail == false);
 
-    /* ---- AUDIT CMS-4: chain building follows the key identifier, not just the issuer name ---- */
-    /* Two intermediates named "SSF Rollover CA" (old key first); the signer's AKID names the new */
+    /* ---- AUDIT CMS-4: two same-name CAs (old key first); the signer's AKID picks the new ---- */
     trust[0] = _utFixRollRootDer;
     trustLen[0] = sizeof(_utFixRollRootDer);
     SSF_ASSERT(SSFCMSParse(_utFixRollBoth, sizeof(_utFixRollBoth), &sd) == true);
@@ -2212,8 +2229,7 @@ void SSFCMSUnitTest(void)
     SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256, trust,
                                   trustLen, 1u, now, &res) == false);
 
-    /* Without key identifiers the issuer is still found: the verifier's path building tries   */
-    /* each same-name intermediate and keeps the one whose key verifies (the new CA).          */
+    /* Without key identifiers path building tries each same-name CA and keeps the new one */
     SSF_ASSERT(SSFCMSParse(_utFixRollBothNoKid, sizeof(_utFixRollBothNoKid), &sd) == true);
     SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256, trust,
                                   trustLen, 1u, now, &res) == true);
@@ -2940,8 +2956,8 @@ void SSFCMSUnitTest(void)
             s.omitCert = true;
             for (c = 0; c < SSF_CMS_CONFIG_MAX_CERTS; c++)
             {
-                s.extraDer[c] = lcCert[SSF_CMS_CONFIG_MAX_CERTS - 1u - c];
-                s.extraDerLen[c] = lcLen[SSF_CMS_CONFIG_MAX_CERTS - 1u - c];
+                s.extraDer[c] = lcCert[(SSF_CMS_CONFIG_MAX_CERTS - 1u) - c];
+                s.extraDerLen[c] = lcLen[(SSF_CMS_CONFIG_MAX_CERTS - 1u) - c];
             }
             s.extraCount = SSF_CMS_CONFIG_MAX_CERTS;
             _BUILD();
@@ -3021,10 +3037,7 @@ void SSFCMSUnitTest(void)
         #undef _SPEC_RESET
     }
 
-    /* ---- Modeled firmware signature, the production shape: root not embedded, two CA ---- */
-    /* ---- levels with 19-byte serials, policies, CRL and AIA pointers and expiry in 2075, a */
-    /* ---- leaf with a 20-byte serial and CN-first subject, CMSAlgorithmProtection among the  */
-    /* ---- signed attributes, and an RFC 3161 timestamp token in the unsigned attributes.    */
+    /* ---- Modeled production firmware signature, the shape ssfcms.md describes ---- */
     {
         static const uint8_t apDigestPattern[] = {
             0x06u, 0x09u, 0x60u, 0x86u, 0x48u, 0x01u, 0x65u, 0x03u, 0x04u, 0x02u, 0x01u,

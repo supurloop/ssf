@@ -59,64 +59,100 @@
 /* OpenSSL cross-check helpers.                                                                  */
 /* --------------------------------------------------------------------------------------------- */
 
-/* Convert an SSFBN_t to a BIGNUM via the canonical big-endian byte representation. */
+/* --------------------------------------------------------------------------------------------- */
+/* Converts an SSFBN_t to a BIGNUM via the canonical big-endian byte representation.             */
+/* --------------------------------------------------------------------------------------------- */
 static void _ToOSSL(BIGNUM *dst, const SSFBN_t *src)
 {
     uint8_t buf[SSF_BN_MAX_BYTES];
-    size_t outSize = (size_t)src->len * sizeof(SSFBNLimb_t);
+    size_t outSize;
 
+    SSF_REQUIRE(dst != NULL);
+    SSF_REQUIRE(src != NULL);
+
+    outSize = (size_t)src->len * sizeof(SSFBNLimb_t);
     SSF_ASSERT(outSize <= sizeof(buf));
     SSF_ASSERT(SSFBNToBytes(src, buf, outSize) == true);
     SSF_ASSERT(BN_bin2bn(buf, (int)outSize, dst) != NULL);
 }
 
-/* Convert a BIGNUM into an SSFBN_t with the given working limb count. The BIGNUM must fit. */
+/* --------------------------------------------------------------------------------------------- */
+/* Converts a BIGNUM that fits into an SSFBN_t of numLimbs working limbs.                        */
+/* --------------------------------------------------------------------------------------------- */
 static void _FromOSSL(SSFBN_t *dst, const BIGNUM *src, uint16_t numLimbs)
 {
     uint8_t buf[SSF_BN_MAX_BYTES];
     size_t outSize = (size_t)numLimbs * sizeof(SSFBNLimb_t);
 
+    SSF_REQUIRE(dst != NULL);
+    SSF_REQUIRE(src != NULL);
     SSF_ASSERT(outSize <= sizeof(buf));
     SSF_ASSERT((size_t)BN_num_bytes(src) <= outSize);
     SSF_ASSERT(BN_bn2binpad(src, buf, (int)outSize) == (int)outSize);
     SSF_ASSERT(SSFBNFromBytes(dst, buf, outSize, numLimbs) == true);
 }
 
-/* Compare an SSFBN_t to a BIGNUM by exporting both to a fixed-width big-endian buffer. */
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if a equals b, compared as fixed-width big-endian buffers, else false.           */
+/* --------------------------------------------------------------------------------------------- */
 static bool _EqOSSL(const SSFBN_t *a, const BIGNUM *b)
 {
     uint8_t bufA[SSF_BN_MAX_BYTES];
     uint8_t bufB[SSF_BN_MAX_BYTES];
-    size_t outSize = (size_t)a->len * sizeof(SSFBNLimb_t);
+    size_t outSize;
 
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(b != NULL);
+
+    outSize = (size_t)a->len * sizeof(SSFBNLimb_t);
     if (BN_num_bytes(b) > (int)outSize) return false;
     if (!SSFBNToBytes(a, bufA, outSize)) return false;
     if (BN_bn2binpad(b, bufB, (int)outSize) != (int)outSize) return false;
-    return memcmp(bufA, bufB, outSize) == 0;
+    return (memcmp(bufA, bufB, outSize) == 0);
 }
 
-/* Generate a random SSFBN_t of exactly `bits` bits (top bit set), mirrored into `mirror`. */
+/* --------------------------------------------------------------------------------------------- */
+/* Generates a random dst of exactly bits bits (top bit set), mirrored into mirror.              */
+/* --------------------------------------------------------------------------------------------- */
 static void _RandSSFBN(SSFBN_t *dst, BIGNUM *mirror, int bits, uint16_t numLimbs)
 {
+    SSF_REQUIRE(dst != NULL);
+    SSF_REQUIRE(mirror != NULL);
+    SSF_REQUIRE(bits > 0);
+
     SSF_ASSERT(BN_rand(mirror, bits, BN_RAND_TOP_ONE, BN_RAND_BOTTOM_ANY) == 1);
     _FromOSSL(dst, mirror, numLimbs);
 }
 
-/* Generate a random odd modulus `m` of exactly `bits` bits. */
+/* --------------------------------------------------------------------------------------------- */
+/* Generates a random odd modulus dst of exactly bits bits, mirrored into mirror.                */
+/* --------------------------------------------------------------------------------------------- */
 static void _RandOddModulus(SSFBN_t *dst, BIGNUM *mirror, int bits, uint16_t numLimbs)
 {
+    SSF_REQUIRE(dst != NULL);
+    SSF_REQUIRE(mirror != NULL);
+    SSF_REQUIRE(bits > 0);
+
     SSF_ASSERT(BN_rand(mirror, bits, BN_RAND_TOP_ONE, BN_RAND_BOTTOM_ODD) == 1);
     _FromOSSL(dst, mirror, numLimbs);
 }
 
-/* Generate a random value strictly less than the given modulus. */
+/* --------------------------------------------------------------------------------------------- */
+/* Generates a random dst strictly less than modulus, mirrored into mirror.                      */
+/* --------------------------------------------------------------------------------------------- */
 static void _RandBelow(SSFBN_t *dst, BIGNUM *mirror, const BIGNUM *modulus, uint16_t numLimbs)
 {
+    SSF_REQUIRE(dst != NULL);
+    SSF_REQUIRE(mirror != NULL);
+    SSF_REQUIRE(modulus != NULL);
+
     SSF_ASSERT(BN_rand_range(mirror, modulus) == 1);
     _FromOSSL(dst, mirror, numLimbs);
 }
 
-/* Drive verification for a single modulus size. */
+/* --------------------------------------------------------------------------------------------- */
+/* Cross-checks every operation against OpenSSL for iters random moduli of bits bits.            */
+/* --------------------------------------------------------------------------------------------- */
 static void _VerifyAtSize(int bits, uint16_t iters, bool prime_capable)
 {
     uint16_t nLimbs = (uint16_t)((bits + 31) / 32);
@@ -131,6 +167,9 @@ static void _VerifyAtSize(int bits, uint16_t iters, bool prime_capable)
     BIGNUM *bnTmp = BN_new();
     uint16_t i;
 
+    SSF_REQUIRE(bits > 0);
+    SSF_REQUIRE(((uint32_t)bits) <= SSF_BN_CONFIG_MAX_BITS);
+
     SSF_ASSERT(ctx != NULL);
     SSF_ASSERT(bnA != NULL); SSF_ASSERT(bnB != NULL); SSF_ASSERT(bnM != NULL);
     SSF_ASSERT(bnE != NULL); SSF_ASSERT(bnR != NULL); SSF_ASSERT(bnQ != NULL);
@@ -139,8 +178,10 @@ static void _VerifyAtSize(int bits, uint16_t iters, bool prime_capable)
     /* Build a prime modulus once per size for ModInv coverage; slow, so gated by prime_capable */
     BIGNUM *bnPrime = NULL;
     SSFBN_DEFINE(prime, SSF_BN_MAX_LIMBS);
+    /* Is a prime modulus wanted for ModInv coverage? */
     if (prime_capable)
     {
+        /* Yes, generate it once for this size */
         bnPrime = BN_new();
         SSF_ASSERT(bnPrime != NULL);
         SSF_ASSERT(BN_generate_prime_ex(bnPrime, bits, 0, NULL, NULL, NULL) == 1);
@@ -160,16 +201,19 @@ static void _VerifyAtSize(int bits, uint16_t iters, bool prime_capable)
         _RandBelow(&b, bnB, bnM, nLimbs);
 
         /* ---- Add (limit operands so a+b still fits the working width) ---- */
+        /* Does the 2 * nLimbs width fit the working limbs? */
         if (mulLimbs <= SSF_BN_MAX_LIMBS)
         {
+            /* Yes, check Add */
             SSFBN_DEFINE(sumR, SSF_BN_MAX_LIMBS);
             SSFBNCopy(&sumR, &a);
             sumR.len = nLimbs;
             (void)SSFBNAdd(&sumR, &a, &b);
             SSF_ASSERT(BN_add(bnR, bnA, bnB) == 1);
-            /* a+b can overflow nLimbs*32 bits; SSFBNAdd truncates, mask OpenSSL the same way. */
-            if (BN_num_bits(bnR) > (int)nLimbs * 32)
+            /* Did a + b overflow nLimbs * 32 bits? */
+            if (BN_num_bits(bnR) > ((int)nLimbs * 32))
             {
+                /* Yes, SSFBNAdd truncates, so mask OpenSSL the same way */
                 SSF_ASSERT(BN_mask_bits(bnR, (int)nLimbs * 32) == 1);
             }
             SSF_ASSERT(_EqOSSL(&sumR, bnR));
@@ -190,13 +234,15 @@ static void _VerifyAtSize(int bits, uint16_t iters, bool prime_capable)
         }
 
         /* ---- Mod (split a 2*nLimbs dividend by m) ---- */
+        /* Does the 2 * nLimbs dividend fit the working limbs? */
         if (mulLimbs <= SSF_BN_MAX_LIMBS)
         {
+            /* Yes, check Mod */
             SSFBN_DEFINE(big, SSF_BN_MAX_LIMBS);
             SSFBN_DEFINE(modR, SSF_BN_MAX_LIMBS);
             BIGNUM *bnBig = BN_new();
 
-            SSF_ASSERT(BN_rand(bnBig, bits * 2 - 1, BN_RAND_TOP_ONE, BN_RAND_BOTTOM_ANY) == 1);
+            SSF_ASSERT(BN_rand(bnBig, (bits * 2) - 1, BN_RAND_TOP_ONE, BN_RAND_BOTTOM_ANY) == 1);
             _FromOSSL(&big, bnBig, mulLimbs);
             modR.len = nLimbs;
             SSFBNMod(&modR, &big, &m);
@@ -206,14 +252,16 @@ static void _VerifyAtSize(int bits, uint16_t iters, bool prime_capable)
         }
 
         /* ---- DivMod ---- */
+        /* Does the 2 * nLimbs dividend fit the working limbs? */
         if (mulLimbs <= SSF_BN_MAX_LIMBS)
         {
+            /* Yes, check DivMod */
             SSFBN_DEFINE(big, SSF_BN_MAX_LIMBS);
             SSFBN_DEFINE(qOut, SSF_BN_MAX_LIMBS);
             SSFBN_DEFINE(rOut, SSF_BN_MAX_LIMBS);
             BIGNUM *bnBig = BN_new();
 
-            SSF_ASSERT(BN_rand(bnBig, bits * 2 - 1, BN_RAND_TOP_ONE, BN_RAND_BOTTOM_ANY) == 1);
+            SSF_ASSERT(BN_rand(bnBig, (bits * 2) - 1, BN_RAND_TOP_ONE, BN_RAND_BOTTOM_ANY) == 1);
             _FromOSSL(&big, bnBig, mulLimbs);
             big.len = mulLimbs;
             qOut.len = mulLimbs; rOut.len = mulLimbs;
@@ -255,8 +303,10 @@ static void _VerifyAtSize(int bits, uint16_t iters, bool prime_capable)
             SSF_ASSERT(BN_mod_sub(bnR, bnA, bnB, bnM, ctx) == 1);
             SSF_ASSERT(_EqOSSL(&rr, bnR));
 
+            /* Does the 2 * nLimbs product fit the working limbs? */
             if (mulLimbs <= SSF_BN_MAX_LIMBS)
             {
+                /* Yes, check ModMul and ModSquare */
                 SSFBNModMul(&rr, &a, &b, &m);
                 SSF_ASSERT(BN_mod_mul(bnR, bnA, bnB, bnM, ctx) == 1);
                 SSF_ASSERT(_EqOSSL(&rr, bnR));
@@ -268,8 +318,10 @@ static void _VerifyAtSize(int bits, uint16_t iters, bool prime_capable)
         }
 
         /* ---- Mul / Square (operand width must satisfy a->len + b->len <= MAX_LIMBS) ---- */
+        /* Does the 2 * nLimbs product fit the working limbs? */
         if (mulLimbs <= SSF_BN_MAX_LIMBS)
         {
+            /* Yes, check Mul and Square */
             SSFBN_DEFINE(mulR, SSF_BN_MAX_LIMBS);
             SSFBN_DEFINE(sqR, SSF_BN_MAX_LIMBS);
 
@@ -285,16 +337,20 @@ static void _VerifyAtSize(int bits, uint16_t iters, bool prime_capable)
         }
 
         /* ---- ModInv / ModInvExt against the prime modulus (when available) ---- */
+        /* Is a prime modulus available? */
         if (prime_capable)
         {
+            /* Yes, check ModInv and ModInvExt against it */
             SSFBN_DEFINE(aP, SSF_BN_MAX_LIMBS);
             SSFBN_DEFINE(invR, SSF_BN_MAX_LIMBS);
             BIGNUM *bnAP = BN_new();
             SSF_ASSERT(bnAP != NULL);
 
             _RandBelow(&aP, bnAP, bnPrime, nLimbs);
+            /* Is aP invertible (non-zero)? */
             if (!SSFBNIsZero(&aP))
             {
+                /* Yes, check both inverses against OpenSSL */
                 SSF_ASSERT(SSFBNModInv(&invR, &aP, &prime) == true);
                 SSF_ASSERT(BN_mod_inverse(bnR, bnAP, bnPrime, ctx) != NULL);
                 SSF_ASSERT(_EqOSSL(&invR, bnR));
@@ -303,7 +359,7 @@ static void _VerifyAtSize(int bits, uint16_t iters, bool prime_capable)
                 SSF_ASSERT(_EqOSSL(&invR, bnR));
 
                 /* Does ModMul's 2 * nLimbs <= MAX_LIMBS allow the aP * inv == 1 round trip? */
-                if ((uint32_t)nLimbs * 2u <= SSF_BN_MAX_LIMBS)
+                if (((uint32_t)nLimbs * 2u) <= SSF_BN_MAX_LIMBS)
                 {
                     /* Yes, check aP * inv mod prime == 1 */
                     SSFBN_DEFINE(check, SSF_BN_MAX_LIMBS);
@@ -355,7 +411,7 @@ static void _VerifyAtSize(int bits, uint16_t iters, bool prime_capable)
             SSF_ASSERT(_EqOSSL(&rOut, bnR));
 
             /* Is this a small size, or every 8th iteration at the larger sizes? */
-            if (bits <= 1024 || (i & 0x7u) == 0u)
+            if ((bits <= 1024) || ((i & 0x7u) == 0u))
             {
                 /* Yes, also check the constant-time path */
                 SSFBNModExp(&rOut, &a, &e, &m);
@@ -392,9 +448,10 @@ static void _VerifyAtSize(int bits, uint16_t iters, bool prime_capable)
             shifted.len = nLimbs;
             SSFBNShiftLeft(&shifted, shiftBy);
             SSF_ASSERT(BN_lshift(bnR, bnA, (int)shiftBy) == 1);
-            /* Mask OpenSSL to SSFBN's working width (BN_mask_bits errors if already shorter) */
-            if (BN_num_bits(bnR) > (int)nLimbs * 32)
+            /* Is the shifted value wider than SSFBN's working width? */
+            if (BN_num_bits(bnR) > ((int)nLimbs * 32))
             {
+                /* Yes, mask OpenSSL to it (BN_mask_bits errors if already shorter) */
                 SSF_ASSERT(BN_mask_bits(bnR, (int)nLimbs * 32) == 1);
             }
             SSF_ASSERT(_EqOSSL(&shifted, bnR));
@@ -492,8 +549,10 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         SSFBNCopy(&r, &rand1); r.len = nLimbs;
         carry = SSFBNAdd(&r, &r, &rand2); (void)carry;
         SSF_ASSERT(BN_add(bnR, bnA, bnB) == 1);
-        if (BN_num_bits(bnR) > (int)nLimbs * 32)
+        /* Is the result wider than SSFBN's working width? */
+        if (BN_num_bits(bnR) > ((int)nLimbs * 32))
         {
+            /* Yes, mask OpenSSL to it, as SSFBN truncates */
             SSF_ASSERT(BN_mask_bits(bnR, (int)nLimbs * 32) == 1);
         }
         SSF_ASSERT(_EqOSSL(&r, bnR));
@@ -502,8 +561,10 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         SSFBNCopy(&r, &rand2); r.len = nLimbs;
         (void)SSFBNAdd(&r, &rand1, &r);
         SSF_ASSERT(BN_add(bnR, bnA, bnB) == 1);
-        if (BN_num_bits(bnR) > (int)nLimbs * 32)
+        /* Is the result wider than SSFBN's working width? */
+        if (BN_num_bits(bnR) > ((int)nLimbs * 32))
         {
+            /* Yes, mask OpenSSL to it, as SSFBN truncates */
             SSF_ASSERT(BN_mask_bits(bnR, (int)nLimbs * 32) == 1);
         }
         SSF_ASSERT(_EqOSSL(&r, bnR));
@@ -512,8 +573,10 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         SSFBNCopy(&r, &rand1); r.len = nLimbs;
         (void)SSFBNAdd(&r, &r, &r);
         SSF_ASSERT(BN_add(bnR, bnA, bnA) == 1);
-        if (BN_num_bits(bnR) > (int)nLimbs * 32)
+        /* Is the result wider than SSFBN's working width? */
+        if (BN_num_bits(bnR) > ((int)nLimbs * 32))
         {
+            /* Yes, mask OpenSSL to it, as SSFBN truncates */
             SSF_ASSERT(BN_mask_bits(bnR, (int)nLimbs * 32) == 1);
         }
         SSF_ASSERT(_EqOSSL(&r, bnR));
@@ -542,8 +605,10 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
 
         /* Aliasing: r = a in r = a - b. */
         SSFBNCopy(&r, &rand1); r.len = nLimbs;
+        /* Is a >= b, so a - b does not underflow? */
         if (BN_cmp(bnA, bnB) >= 0)
         {
+            /* Yes, check the aliased subtraction */
             (void)SSFBNSub(&r, &r, &rand2);
             SSF_ASSERT(BN_sub(bnR, bnA, bnB) == 1);
             SSF_ASSERT(_EqOSSL(&r, bnR));
@@ -551,8 +616,10 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
 
         /* Aliasing: r = b in r = a - b. */
         SSFBNCopy(&r, &rand2); r.len = nLimbs;
+        /* Is a >= b, so a - b does not underflow? */
         if (BN_cmp(bnA, bnB) >= 0)
         {
+            /* Yes, check the aliased subtraction */
             (void)SSFBNSub(&r, &rand1, &r);
             SSF_ASSERT(BN_sub(bnR, bnA, bnB) == 1);
             SSF_ASSERT(_EqOSSL(&r, bnR));
@@ -581,8 +648,10 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         (void)SSFBNAddUint32(&r, &rand1, 0xFFFFFFFFu);
         SSF_ASSERT(BN_set_word(bnTmp, 0xFFFFFFFFu) == 1);
         SSF_ASSERT(BN_add(bnR, bnA, bnTmp) == 1);
-        if (BN_num_bits(bnR) > (int)nLimbs * 32)
+        /* Is the result wider than SSFBN's working width? */
+        if (BN_num_bits(bnR) > ((int)nLimbs * 32))
         {
+            /* Yes, mask OpenSSL to it, as SSFBN truncates */
             SSF_ASSERT(BN_mask_bits(bnR, (int)nLimbs * 32) == 1);
         }
         SSF_ASSERT(_EqOSSL(&r, bnR));
@@ -622,7 +691,7 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         SSFBNMulUint32(&r, &allOnes, 0u); SSF_ASSERT(SSFBNIsZero(&r));
         SSFBNMulUint32(&r, &allOnes, 1u);
         _ToOSSL(bnTmp, &allOnes);
-        SSF_ASSERT(_EqOSSL(&r, bnTmp) || ((r.len == nLimbs + 1u) && r.limbs[nLimbs] == 0u));
+        SSF_ASSERT(_EqOSSL(&r, bnTmp) || ((r.len == (nLimbs + 1u)) && (r.limbs[nLimbs] == 0u)));
 
         SSFBNMulUint32(&r, &rand1, 0xFFFFFFFFu);
         SSF_ASSERT(BN_set_word(bnTmp, 0xFFFFFFFFu) == 1);
@@ -688,7 +757,7 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
 
         /* gcd(0, a) = a. */
         SSFBNGcd(&g, &zero, &rand1);
-        SSF_ASSERT(BN_gcd(bnR, BN_value_one(), bnA, ctx) == 1 || 1);
+        SSF_ASSERT((BN_gcd(bnR, BN_value_one(), bnA, ctx) == 1) || 1);
         {
             BIGNUM *zeroBN = BN_new();
             BN_zero(zeroBN);
@@ -933,7 +1002,7 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
             SSFBN_DEFINE(eWide, SSF_BN_MAX_LIMBS);
             BIGNUM *bnEWide = BN_new();
             SSFBNSetZero(&eWide, (uint16_t)(nLimbs * 2u));
-            SSFBNSetBit(&eWide, (uint32_t)nLimbs * 32u + 5u); /* bit above modulus width */
+            SSFBNSetBit(&eWide, ((uint32_t)nLimbs * 32u) + 5u); /* bit above modulus width */
             SSFBNSetBit(&eWide, 3u);                          /* and a low bit */
             _ToOSSL(bnEWide, &eWide);
             SSFBNModExp(&r, &rand1, &eWide, &m);
@@ -960,8 +1029,10 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         SSFBNCopy(&r, &rand1); r.len = nLimbs;
         SSFBNShiftLeft(&r, 32u);
         SSF_ASSERT(BN_lshift(bnR, bnA, 32) == 1);
-        if (BN_num_bits(bnR) > (int)nLimbs * 32)
+        /* Is the result wider than SSFBN's working width? */
+        if (BN_num_bits(bnR) > ((int)nLimbs * 32))
         {
+            /* Yes, mask OpenSSL to it, as SSFBN truncates */
             SSF_ASSERT(BN_mask_bits(bnR, (int)nLimbs * 32) == 1);
         }
         SSF_ASSERT(_EqOSSL(&r, bnR));
@@ -1014,21 +1085,21 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
             {
                 SSFBNSetZero(&t, nLimbs);
                 SSFBNSetBit(&t, ks[ki]);
-                SSF_ASSERT(SSFBNBitLen(&t) == ks[ki] + 1u);
+                SSF_ASSERT(SSFBNBitLen(&t) == (ks[ki] + 1u));
                 SSF_ASSERT(SSFBNTrailingZeros(&t) == ks[ki]);
             }
         }
         /* BitLen of allOnes = nLimbs * 32. */
-        SSF_ASSERT(SSFBNBitLen(&allOnes) == (uint32_t)nLimbs * 32u);
+        SSF_ASSERT(SSFBNBitLen(&allOnes) == ((uint32_t)nLimbs * 32u));
         /* TrailingZeros(allOnes) = 0. */
         SSF_ASSERT(SSFBNTrailingZeros(&allOnes) == 0u);
 
         /* GetBit at boundary positions. */
         SSF_ASSERT(SSFBNGetBit(&one, 0u) == 1u);
         SSF_ASSERT(SSFBNGetBit(&one, 1u) == 0u);
-        SSF_ASSERT(SSFBNGetBit(&allOnes, (uint32_t)nLimbs * 32u - 1u) == 1u);
+        SSF_ASSERT(SSFBNGetBit(&allOnes, ((uint32_t)nLimbs * 32u) - 1u) == 1u);
         /* GetBit beyond a->len returns 0. */
-        SSF_ASSERT(SSFBNGetBit(&one, (uint32_t)nLimbs * 32u + 7u) == 0u);
+        SSF_ASSERT(SSFBNGetBit(&one, ((uint32_t)nLimbs * 32u) + 7u) == 0u);
 
         /* SetBit then ClearBit returns to original. */
         SSFBNCopy(&t, &rand1); t.len = nLimbs;
@@ -1290,9 +1361,10 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         SSFBNModMulCT(&rCT, &mMinus1, &mMinus1, &m);
         SSF_ASSERT(SSFBNCmpUint32(&rCT, 1u) == 0);
 
-        /* Edge: the dense bit pattern of the P-256 prime stresses shift-and-subtract reduction */
+        /* Is this the P-256 width, whose dense prime stresses shift-and-subtract reduction? */
         if (nLimbs == 8u)
         {
+            /* Yes, compare ModMulCT against ModMulNIST */
             SSFBN_DEFINE(rCTNist, SSF_BN_MAX_LIMBS);
             rCTNist.len = nLimbs;
             SSFBNModMulCT(&rCTNist, &rand1, &rand2, &SSF_BN_NIST_P256);
@@ -1338,9 +1410,9 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
 
         /* dataLen one byte beyond numLimbs * 4 -- must reject regardless of leading byte. */
         memset(buf, 0xFFu, sizeof(buf));
-        SSF_ASSERT(SSFBNFromBytes(&t, buf, (size_t)nLimbs * 4u + 1u, nLimbs) == false);
+        SSF_ASSERT(SSFBNFromBytes(&t, buf, ((size_t)nLimbs * 4u) + 1u, nLimbs) == false);
         memset(buf, 0x00u, sizeof(buf));
-        SSF_ASSERT(SSFBNFromBytes(&t, buf, (size_t)nLimbs * 4u + 1u, nLimbs) == false);
+        SSF_ASSERT(SSFBNFromBytes(&t, buf, ((size_t)nLimbs * 4u) + 1u, nLimbs) == false);
 
         /* Exactly numLimbs * 4 bytes succeeds. */
         SSF_ASSERT(SSFBNFromBytes(&t, buf, (size_t)nLimbs * 4u, nLimbs) == true);
@@ -1456,7 +1528,7 @@ static void _VerifyKaratsubaAtBoundary(void)
             SSF_ASSERT(_EqOSSL(&r, bnR));
 
             /* Are the operands the same size and small enough for SSFBNSquare? */
-            if ((aLen == bLen) && ((uint32_t)aLen * 2u <= SSF_BN_MAX_LIMBS))
+            if ((aLen == bLen) && (((uint32_t)aLen * 2u) <= SSF_BN_MAX_LIMBS))
             {
                 /* Yes, check square parity */
                 SSFBN_DEFINE(sq, SSF_BN_MAX_LIMBS);
@@ -1589,6 +1661,9 @@ static void _VerifyModInvExtAtRSA2048(void)
     BN_CTX_free(ctx);
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Runs the OpenSSL corner-case, boundary and per-size cross-checks.                             */
+/* --------------------------------------------------------------------------------------------- */
 static void _SSFBNVerifyAgainstOpenSSL(void)
 {
     static const struct
@@ -1646,22 +1721,26 @@ static void _SSFBNVerifyAgainstOpenSSL(void)
 
 #endif /* SSF_BN_OSSL_VERIFY */
 
+static uint32_t _scrubCalls;
+static uint32_t _scrubDirty;
+
 /* --------------------------------------------------------------------------------------------- */
 /* AUDIT BN-11: scrub-hook callback; counts calls and any buffer that is not all zero.           */
 /* --------------------------------------------------------------------------------------------- */
-static uint32_t _scrubCalls;
-static uint32_t _scrubDirty;
-static void _ScrubCheck(const void *buf, size_t len)
+static void _ScrubCheck(const void *buf, size_t bufSize)
 {
     const uint8_t *b = (const uint8_t *)buf;
     size_t i;
 
-    SSF_ASSERT(buf != NULL);
+    SSF_REQUIRE(buf != NULL);
+
     _scrubCalls++;
-    for (i = 0; i < len; i++)
+    for (i = 0; i < bufSize; i++)
     {
+        /* Is this byte not wiped? */
         if (b[i] != 0u)
         {
+            /* Yes, count the buffer as dirty */
             _scrubDirty++;
             break;
         }
@@ -1788,20 +1867,26 @@ static void _SSFBNUTCheckModAdd(const SSFBN_t *m, const SSFBN_t *a, const SSFBN_
     }
     top = (SSFBNLimb_t)acc;
     geM = (top != 0u);
+    /* Did the sum not carry out of the top limb? */
     if (!geM)
     {
+        /* Yes, compare s against m from the top limb down */
         geM = true;
         for (q = (int16_t)(m->len - 1u); q >= 0; q--)
         {
+            /* Do the limbs differ at q? */
             if (ref.limbs[q] != m->limbs[q])
             {
+                /* Yes, the first differing limb decides */
                 geM = (ref.limbs[q] > m->limbs[q]);
                 break;
             }
         }
     }
+    /* Is s >= m? */
     if (geM)
     {
+        /* Yes, subtract m */
         acc = 0u;
         for (k = 0u; k < m->len; k++)
         {
@@ -1820,8 +1905,10 @@ static void _SSFBNUTCheckModAdd(const SSFBN_t *m, const SSFBN_t *a, const SSFBN_
     SSFBNCopy(&x, b);
     SSFBNModAdd(&x, a, &x, m);
     SSF_ASSERT(SSFBNCmp(&x, &ref) == 0);
+    /* Are a and b equal? */
     if (SSFBNCmp(a, b) == 0)
     {
+        /* Yes, also check r == a == b */
         SSFBNCopy(&x, a);
         SSFBNModAdd(&x, &x, &x, m);
         SSF_ASSERT(SSFBNCmp(&x, &ref) == 0);
@@ -1833,15 +1920,17 @@ static void _SSFBNUTCheckModAdd(const SSFBN_t *m, const SSFBN_t *a, const SSFBN_
 #pragma warning(push)
 #pragma warning(disable:6262)
 #endif
-/* --------------------------------------------------------------------------------------------- */
-/* Stack hygiene probes: fill, then scan, the region below the caller's frame for unwiped locals */
-/* --------------------------------------------------------------------------------------------- */
 #define _SSFBN_UT_PROBE_BYTES (8u * 1024u)
+
+/* --------------------------------------------------------------------------------------------- */
+/* Fills the stack region below the caller's frame with 0xA5.                                    */
+/* --------------------------------------------------------------------------------------------- */
 SSF_NOINLINE
 static void _SSFBNUTPolluteStack(void)
 {
     volatile uint8_t buf[_SSFBN_UT_PROBE_BYTES];
     size_t i;
+
     for (i = 0u; i < sizeof(buf); i++) buf[i] = 0xA5u;
 }
 
@@ -1857,19 +1946,26 @@ static void _SSFBNUTPolluteStack(void)
 #pragma warning(push)
 #pragma warning(disable: 6001)
 #endif
+/* --------------------------------------------------------------------------------------------- */
+/* Returns the count of offsets below the caller's frame where n1 or n2 (nSize bytes) appears.   */
+/* --------------------------------------------------------------------------------------------- */
 SSF_NOINLINE
-static uint32_t _SSFBNUTScanStack(const uint8_t *n1, const uint8_t *n2, size_t len)
+static uint32_t _SSFBNUTScanStack(const uint8_t *n1, const uint8_t *n2, size_t nSize)
 {
     volatile uint8_t buf[_SSFBN_UT_PROBE_BYTES];
     uint32_t found = 0u;
     size_t i;
     size_t j;
 
-    for (i = 0u; (i + len) <= sizeof(buf); i++)
+    SSF_REQUIRE(n1 != NULL);
+    SSF_REQUIRE(n2 != NULL);
+    SSF_REQUIRE((nSize > 0u) && (nSize <= sizeof(buf)));
+
+    for (i = 0u; (i + nSize) <= sizeof(buf); i++)
     {
         bool m1 = true;
         bool m2 = true;
-        for (j = 0u; j < len; j++)
+        for (j = 0u; j < nSize; j++)
         {
             if (buf[i + j] != n1[j]) m1 = false;
             if (buf[i + j] != n2[j]) m2 = false;
@@ -1901,6 +1997,9 @@ static void _SSFBNUTFib(SSFBN_t *f, uint32_t n, uint16_t len)
     SSFBN_t fa = { aL, 0u, SSF_BN_MAX_LIMBS };
     SSFBN_t fb = { bL, 0u, SSF_BN_MAX_LIMBS };
     uint32_t i;
+
+    SSF_REQUIRE(f != NULL);
+    SSF_REQUIRE((len > 0u) && (len <= SSF_BN_MAX_LIMBS));
 
     SSFBNSetZero(&fa, len);
     SSFBNSetOne(&fb, len);
@@ -2076,7 +2175,7 @@ void SSFBNUnitTest(void)
         static const uint8_t data[] = { 0x01u, 0x23u };
         SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
 
-        /* 4 limbs * 4 bytes = 16 total limb bytes, written into a 6-byte buffer.          */
+        /* 4 limbs * 4 bytes = 16 total limb bytes, written into a 6-byte buffer. */
         SSF_ASSERT(SSFBNFromBytes(&a, data, sizeof(data), 4) == true);
         SSF_ASSERT(SSFBNToBytes(&a, out, sizeof(out)) == true);
 
@@ -2611,8 +2710,7 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(SSFBNGenPrime(&p, 256u, 5u, &prng) == true);
         SSF_ASSERT(_scrubCalls >= 7u);
 
-        /* Composite 221 = 13 * 17: 7 MR locals + 4 per odd-modulus SSFBNMod (acc, c, its     */
-        /* context's mod and rr; SSFBNMontInit keeps no R^2 copy of its own, BN-09)            */
+        /* Composite 221 = 13 * 17: 7 MR locals + 4 per odd-modulus SSFBNMod (BN-09) */
         calls = _scrubCalls;
         _SSFBNModCallCount = 0u;
         SSFBNSetUint32(&c, 221u, 8u);
@@ -3818,14 +3916,16 @@ void SSFBNUnitTest(void)
 #endif
         for (mi = 0u; mi < numMod; mi++)
         {
-            /* Pick the modulus: small primes, then P-256 p and n, then P-384 p and n */
+            /* Is mi one of the small primes? */
             if (mi < (uint16_t)(sizeof(primeLens) / sizeof(primeLens[0])))
             {
+                /* Yes, load it */
                 m.len = primeLens[mi];
                 for (k = 0u; k < m.len; k++) m.limbs[k] = primeLimbs[mi][k];
             }
             else
             {
+                /* No, P-256 p and n, then P-384 p and n */
                 uint16_t which;
 
                 which = (uint16_t)(mi - (uint16_t)(sizeof(primeLens) / sizeof(primeLens[0])));
@@ -3972,9 +4072,10 @@ void SSFBNUnitTest(void)
                     /* Yes, set the top bit */
                     m.limbs[n - 1u] |= 0x80000000u;
                 }
+                /* Is this the composite-modulus seed? */
                 if (seed == 6u)
                 {
-                    /* Composite: 3 * (odd base with two bits of headroom), still n limbs */
+                    /* Yes, 3 * (odd base with two bits of headroom), still n limbs */
                     m.limbs[n - 1u] = (SSFBNLimb_t)((m.limbs[n - 1u] & 0x3FFFFFFFu) | 1u);
                     SSFBNMulUint32(&g, &m, 3u);
                     SSFBNCopy(&m, &g);
@@ -4005,8 +4106,10 @@ void SSFBNUnitTest(void)
                 SSFBNGcd(&g, &a, &m);
                 coprime = SSFBNIsOne(&g);
                 SSF_ASSERT(SSFBNModInvExt(&r, &a, &m) == coprime);
+                /* Is a coprime to m? */
                 if (coprime)
                 {
+                    /* Yes, r is its inverse, also when r aliases a */
                     SSF_ASSERT((r.len == n) && (SSFBNCmp(&r, &m) < 0));
                     SSFBNModMul(&ref, &a, &r, &m);
                     SSF_ASSERT(SSFBNCmp(&ref, &one) == 0);
@@ -4210,11 +4313,11 @@ void SSFBNUnitTest(void)
             nLimbs = np->len;
             for (pat = 0u; pat < ((uint32_t)2u << nLimbs) + 2000u; pat++)
             {
-                /* Is this a structured pattern or a pseudo-random input? */
                 nt.len = (uint16_t)(2u * nLimbs);
+                /* Is this a structured pattern? */
                 if (pat < ((uint32_t)2u << nLimbs))
                 {
-                    /* Structured: bit k of pat picks upper limb k, the top bit the low half */
+                    /* Yes, bit k of pat picks upper limb k, the top bit the low half */
                     for (k = 0u; k < nLimbs; k++)
                     {
                         nt.limbs[k] = ((pat >> nLimbs) != 0u) ? 0xFFFFFFFFu : 0u;
@@ -4223,7 +4326,7 @@ void SSFBNUnitTest(void)
                 }
                 else
                 {
-                    /* Pseudo-random */
+                    /* No, pseudo-random */
                     for (k = 0u; k < nt.len; k++)
                     {
                         lcg = (lcg * 1664525u) + 1013904223u;
@@ -4377,12 +4480,15 @@ void SSFBNUnitTest(void)
                 {
                     /* rem < m, then x = q * m + rem (qLen 0: x is rem itself) */
                     _SSFBNUTFillBelow(&orem, &om, (seed * 31u) + qLen);
+                    /* Is there no quotient part? */
                     if (qLen == 0u)
                     {
+                        /* Yes, x is rem itself */
                         SSFBNCopy(&ox, &orem);
                     }
                     else
                     {
+                        /* No, x = q * m + rem */
                         oq.len = qLen;
                         for (k = 0u; k < qLen; k++) oq.limbs[k] = 0xC2B2AE35u * ((seed + k) + 1u);
                         SSFBNMul(&oprod, &oq, &om);
@@ -4401,7 +4507,7 @@ void SSFBNUnitTest(void)
                 /* A shorter than m: a single small limb is its own remainder */
                 SSFBNSetUint32(&ox, 0x1234567u, 1u);
                 SSFBNMod(&or1, &ox, &om);
-                SSFBNSetUint32(&orem, (n == 1u && seed > 2u) ? (0x1234567u % om.limbs[0]) :
+                SSFBNSetUint32(&orem, ((n == 1u) && (seed > 2u)) ? (0x1234567u % om.limbs[0]) :
                                       0x1234567u, n);
                 SSF_ASSERT(SSFBNCmp(&or1, &orem) == 0);
             }
@@ -4475,8 +4581,8 @@ void SSFBNUnitTest(void)
         SSFBNMontInit(&hm, &hmod);
         for (op = 0u; op < 2u; op++)
         {
-            /* Is this pass the multiply? */
             _SSFBNUTPolluteStack();
+            /* Is this pass the multiply? */
             if (op == 0u)
             {
                 /* Yes */
@@ -4606,8 +4712,7 @@ void SSFBNUnitTest(void)
         SSFBNModExp(&rRef, &a, &e, &m);
         SSF_ASSERT((rHalf.len == 1u) && (SSFBNCmp(&rHalf, &rRef) == 0) && SSFBNIsZero(&rHalf));
 
-        /* The window table, residues and the context holding m (an RSA prime) are wiped: the */
-        /* storage, ctx.mod and ctx.rr (SSFBNMontInit keeps no R^2 copy of its own, BN-09)    */
+        /* Window table, residues and the context holding m (storage, mod, rr) are wiped (BN-09) */
         n = SSF_BN_HALF_MOD_LIMBS;
         SSFBNSetZero(&m, n);
         for (k = 0u; k < n; k++) m.limbs[k] = 0xA5A5A5A5u ^ k;
@@ -4762,8 +4867,7 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(SSFBNFromBytes(&n, spsp82, sizeof(spsp82), 3u));
         SSF_ASSERT(SSFBNIsProbablePrime(&n, 5u, &prng) == false);
 
-        /* Large s (n - 1 = 2^s * d): Fermat primes 257 and 65537 (s = 8, 16) are prime; the */
-        /* composite Fermat numbers 2^32 + 1, 2^64 + 1, 2^128 + 1 (s = 32, 64, 128) are not    */
+        /* Large s (n - 1 = 2^s * d): Fermat primes 257, 65537 pass; 2^32/64/128 + 1 do not */
         SSFBNSetUint32(&n, 257u, 1u);
         SSF_ASSERT(SSFBNIsProbablePrime(&n, 5u, &prng) == true);
         SSFBNSetUint32(&n, 65537u, 1u);
@@ -4776,9 +4880,10 @@ void SSFBNUnitTest(void)
             SSF_ASSERT(SSFBNIsProbablePrime(&n, 5u, &prng) == false);
         }
 
-        /* 45 * 2^200 + 1 (206 bits, s = 200) and 97 * 2^400 + 1 (407 bits, s = 400) are prime */
+        /* Are 13-limb moduli in range? */
         if (SSF_BN_MAX_MOD_LIMBS >= 13u)
         {
+            /* Yes, 45 * 2^200 + 1 (s = 200) and 97 * 2^400 + 1 (s = 400) are prime */
             SSFBNSetZero(&n, 7u);
             n.limbs[200u / 32u] = 45u << (200u % 32u);
             n.limbs[0] = 1u;
@@ -4846,8 +4951,7 @@ void SSFBNUnitTest(void)
         SSFBNSetUint32(&td, 1613u * 1613u, 1u);
         SSF_ASSERT(_SSFBNTrialDivPassTest(&td) == false);
 
-        /* SSFBNGenPrime screens by trial division: with a fixed seed, about 85% of odd       */
-        /* candidates have a factor up to 1613, so some are rejected before Miller-Rabin.      */
+        /* SSFBNGenPrime trial division rejects some candidates (~85% odd have a factor <= 1613) */
         {
             uint8_t tdSeed[SSF_PRNG_ENTROPY_SIZE];
             SSFPRNGContext_t tdPrng;
@@ -4995,9 +5099,10 @@ void SSFBNUnitTest(void)
             SSFBNGcd(&gg, &gb, &ga);
             SSF_ASSERT(SSFBNCmp(&gg, &gw) == 0);
 
-            /* A shared 2^5: the result carries it back */
+            /* Is there room for one more limb? */
             if (len < SSF_BN_MAX_LIMBS)
             {
+                /* Yes, a shared 2^5: the result carries it back */
                 ga.len = (uint16_t)(len + 1u);
                 gb.len = ga.len;
                 ga.limbs[len] = 0u;
@@ -5049,8 +5154,7 @@ void SSFBNUnitTest(void)
 
         for (pass = 0u; pass < 5u; pass++)
         {
-            /* Primes: P-256, P-384 when built; composite odd moduli: 2^(32n) - 1 at curve width */
-            /* (pass 3) and at SSF_BN_MAX_MOD_LIMBS (pass 4, the widest the precondition takes) */
+            /* Primes P-256, P-384; composite 2^(32n) - 1 at curve and SSF_BN_MAX_MOD_LIMBS width */
 #if SSF_BN_CONFIG_MAX_BITS >= 768
             SSFBNCopy(&m, (pass == 1u) ? &SSF_BN_NIST_P384 : &SSF_BN_NIST_P256);
 #elif SSF_BN_CONFIG_MAX_BITS >= 512
@@ -5060,8 +5164,10 @@ void SSFBNUnitTest(void)
 #endif
             if (pass == 4u) m.len = SSF_BN_MAX_MOD_LIMBS;
             n = m.len;
+            /* Is m the composite 2^(32n) - 1 (divisible by 3) on this pass? */
             if (pass >= 3u)
             {
+                /* Yes, set every limb */
                 for (k = 0u; k < n; k++) m.limbs[k] = 0xFFFFFFFFu; /* 2^(32n) - 1: divisible by 3 */
             }
             SSFBNSetZero(&a, n);
@@ -5081,21 +5187,25 @@ void SSFBNUnitTest(void)
             /* SSFBNModInv makes exactly one more wipe, of its working value, and all are clean */
             _scrubCalls = 0u;
             _scrubDirty = 0u;
+            /* Is m prime on this pass? */
             if (pass < 3u)
             {
+                /* Yes, the inverse exists */
                 SSF_ASSERT(SSFBNModInv(&r, &a, &m) == true);
             }
             else
             {
+                /* No, m shares the factor 3 with a */
                 SSF_ASSERT(SSFBNModInv(&r, &a, &m) == false);
             }
             _SSFBNScrubTestHook = NULL;
             SSF_ASSERT(_scrubCalls == (base + 1u));
             SSF_ASSERT(_scrubDirty == 0u);
 
-            /* The inverse itself: equal to SSFBNModInvExt's, and a * r == 1 mod m */
+            /* Is m prime on this pass? */
             if (pass < 3u)
             {
+                /* Yes, check it against ModInvExt and a * r == 1 */
                 SSF_ASSERT(SSFBNModInvExt(&rExt, &a, &m) == true);
                 SSF_ASSERT((r.len == n) && (SSFBNCmp(&r, &rExt) == 0));
                 SSFBNModMulCT(&check, &a, &r, &m);
@@ -5155,8 +5265,10 @@ void SSFBNUnitTest(void)
                 ok = SSFBNModInvOdd(&rOdd, &a, &m);
                 SSF_ASSERT(SSFBNModInvExt(&rExt, &a, &m) == ok);
                 SSF_ASSERT(((pass != 1u) && (pass != 2u)) || ok);
+                /* Is a invertible? */
                 if (ok)
                 {
+                    /* Yes, check it against ModInvExt and a * r == 1 */
                     SSF_ASSERT((rOdd.len == n) && (SSFBNCmp(&rOdd, &rExt) == 0));
                     SSFBNModMul(&check, &a, &rOdd, &m);
                     SSF_ASSERT(SSFBNIsOne(&check));
@@ -5219,8 +5331,7 @@ void SSFBNUnitTest(void)
             m.limbs[n - 1u] |= 0x80000000u;
             a.limbs[n - 1u] &= 0x7FFFFFFFu;
 
-            /* Exponents shorter than, as long as and longer than m; the top limb's top bit set, */
-            /* clear, or the limb just 1, so the leading window carries the exponent's top bits   */
+            /* Exponents shorter, equal and longer than m; top limb with top bit set, clear or 1 */
             for (j = 0u; j < (uint16_t)(sizeof(eLens) / sizeof(eLens[0])); j++)
             {
                 el = eLens[j];
@@ -5377,19 +5488,21 @@ void SSFBNUnitTest(void)
                     a.limbs[n - 1u] &= 0x7FFFFFFFu;
                 }
 
-                /* Exponents: 1, 2, 3, 65537 (a 1 bit, then the first square and multiply), */
-                /* 2^32 + random (a multi-limb exponent whose top limb is 1), random n limbs */
+                /* Exponents: 1, 2, 3, 65537, 2^32 + random (top limb 1), random n limbs */
                 for (ex = 0u; ex < 6u; ex++)
                 {
                     eLen = (ex == 4u) ? 2u : ((ex == 5u) ? n : 1u);
                     SSFBNSetZero(&e, eLen);
+                    /* Is this a small single-limb exponent? */
                     if (ex < 4u)
                     {
+                        /* Yes, take it from the table */
                         static const uint32_t small[] = { 1u, 2u, 3u, 65537u };
                         e.limbs[0] = small[ex];
                     }
                     else
                     {
+                        /* No, random limbs */
                         for (k = 0u; k < eLen; k++)
                         {
                             x ^= x << 13; x ^= x >> 17; x ^= x << 5;
@@ -5608,12 +5721,15 @@ void SSFBNUnitTest(void)
             SSFPortTick_t t0;
             SSFPortTick_t t1;
 
+            /* Is this the P-256 width? */
             if (n == 8u)
             {
+                /* Yes, use the P-256 prime */
                 SSFBNCopy(&mod, &SSF_BN_NIST_P256);
             }
             else
             {
+                /* No, an odd near all-ones modulus */
                 SSFBNSetZero(&mod, n);
                 for (i = 0; i < n; i++) mod.limbs[i] = 0xFFFFFFFFul;
                 mod.limbs[0] ^= 0x58ul;              /* random-ish low bits, still odd */
@@ -5636,8 +5752,10 @@ void SSFBNUnitTest(void)
             SSFBNMontInit(&mont, &mod);
 
             /* --- Raw SSFBNMul / SSFBNSquare (non-Mont) at 2n-limb output. --- */
+            /* Is the raw multiply benchmarked at this width? */
             if (mulIters > 0u)
             {
+                /* Yes, time Mul and Square */
                 t0 = SSFPortGetTick64();
                 for (i = 0; i < mulIters; i++)
                 {
@@ -5708,8 +5826,10 @@ void SSFBNUnitTest(void)
             }
 
             /* --- ModInv (Fermat) vs ModInvExt (binary EEA, non-CT) at P-256 size */
+            /* Is this the P-256 width? */
             if (n == 8u)
             {
+                /* Yes, time ModInv against ModInvExt */
                 SSFBN_DEFINE(rInv, SSF_BN_MAX_LIMBS);
                 rInv.len = n;
                 t0 = SSFPortGetTick64();

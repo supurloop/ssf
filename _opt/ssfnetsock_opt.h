@@ -8,22 +8,16 @@
 extern "C" {
 #endif
 
-/* Host names passed to open(), including the NUL terminator. 2..256. A DNS name is at most 253  */
-/* characters; a longer host makes open() return false.                                          */
+/* Max host string size passed to open(), including the NUL terminator, 2..256 */
 #define SSF_NETSOCK_CONFIG_MAX_HOST_SIZE        (256u)
 
-/* Resolved addresses kept per open(). Connect attempts walk them in order, moving to the next   */
-/* when one fails. 1..255. Addresses beyond this are ignored.                                    */
+/* Max resolved addresses kept per open() and tried in order, 1..255 */
 #define SSF_NETSOCK_CONFIG_MAX_ADDRS            (4u)
 
-/* Name lookups that may be in progress at once across all instances, including lookups still    */
-/* finishing after close() abandoned them because the OS could not cancel them. When all are in  */
-/* use, open() of a host name returns false. 1..255.                                             */
+/* Max name lookups in progress at once across all instances, 1..255 */
 #define SSF_NETSOCK_CONFIG_MAX_LOOKUPS          (2u)
 
-/* Bytes close() reads and discards, without blocking, before closing a connected socket. A     */
-/* socket closed with received data unread is reset (RST) rather than closed (FIN), and the     */
-/* peer may then drop the last bytes sent, such as a TLS alert. 0 disables the drain.          */
+/* Max bytes close() reads and discards before closing a connected socket, 0 disables */
 #define SSF_NETSOCK_CONFIG_CLOSE_DRAIN_MAX      (65536u)
 
 #if (SSF_NETSOCK_CONFIG_MAX_HOST_SIZE < 2) || (SSF_NETSOCK_CONFIG_MAX_HOST_SIZE > 256)

@@ -46,7 +46,7 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 /* - Plaintext TCP, no TLS, no authentication. For hosted builds (Windows, Linux, macOS)         */
 /*   and as the reference for porting the transport to an embedded IP stack.                     */
-/* - IPv4 only (ssfnet.h). A literal IPv4 address is parsed in open(); an IPv6 literal is       */
+/* - IPv4 only (ssfnet.h). A literal IPv4 address is parsed in open(); an IPv6 literal is        */
 /*   refused. A host name is resolved to IPv4 addresses only, so a dual-stack host never         */
 /*   connects over IPv6.                                                                         */
 /* - No call blocks, name resolution included. A host name is resolved with the OS asynchronous  */
@@ -70,7 +70,7 @@ typedef uintptr_t SSFNetSockHandle_t;          /* SOCKET without pulling winsock
 typedef int SSFNetSockHandle_t;
 #endif
 
-#define SSF_NETSOCK_ADDR_SIZE (4u)    /* An IPv4 address, network byte order (IPv4 only)       */
+#define SSF_NETSOCK_ADDR_SIZE (4u)    /* An IPv4 address, network byte order */
 #define SSF_NETSOCK_NO_LOOKUP (0xffu)
 
 typedef enum
@@ -83,21 +83,21 @@ typedef enum
 
 typedef struct
 {
-    SSFNetTransport_t transport;     /* Must be first; this is what the client is handed        */
+    SSFNetTransport_t transport;     /* Must be first; this is what the client is handed */
     SSFNetSockHandle_t sock;
     SSFNetSockState_t state;
-    uint16_t port;                   /* Host byte order                                         */
+    uint16_t port;                   /* Host byte order */
     uint8_t lookup;                  /* Lookup slot while RESOLVING, else SSF_NETSOCK_NO_LOOKUP */
-    uint8_t addrCount;               /* Resolved addresses in addrs                             */
-    uint8_t addrNext;                /* Next address to try                                     */
-    uint8_t addrs[SSF_NETSOCK_CONFIG_MAX_ADDRS][SSF_NETSOCK_ADDR_SIZE];  /* IPv4 addresses     */
+    uint8_t addrCount;               /* Resolved addresses in addrs */
+    uint8_t addrNext;                /* Next address to try */
+    uint8_t addrs[SSF_NETSOCK_CONFIG_MAX_ADDRS][SSF_NETSOCK_ADDR_SIZE];  /* IPv4 addresses */
     uint32_t magic;
 } SSFNetSock_t;
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
-/* Prepares the instance and fills in its transport table. Pass &s->transport to the client.    */
+/* Prepares the instance and fills in its transport table. Pass &s->transport to the client. */
 void SSFNetSockInit(SSFNetSock_t *s);
 
 /* Closes any open connection and releases the instance. */

@@ -32,6 +32,10 @@ All time values are UTC. System ticks are whole seconds scaled by `SSF_TICKS_PER
   struct field is modified outside of the provided API functions.
 - Unix time in this framework does not account for leap seconds; only leap years are handled.
 - `SSF_TICKS_PER_SEC` must be exactly `1000`, `1000000`, or `1000000000`.
+- Unix-to-struct conversion uses no divides or table searches for the date: the year is estimated
+  as `(days * 45839) >> 24` (`days / 366` or one less) and corrected upward, and from 1 March the
+  month lengths repeat every 153 days, so month and day come from exact multiply-shifts. This suits
+  cores without a hardware divider (e.g. Cortex-M0+).
 
 <a id="configuration"></a>
 

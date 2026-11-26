@@ -68,7 +68,7 @@ void SSFSMInit(uint32_t maxEvents, uint32_t maxTimers);
 void SSFSMDeInit(void);
 void SSFSMInitHandler(SSFSMId_t smid, SSFSMHandler_t initial);
 void SSFSMDeInitHandler(SSFSMId_t smid);
-bool SSFSMTask(SSFPortTick_t *nextTimeout);
+bool SSFSMTask(SSFPortTick_t *nextTimeoutOpt);
 
 /* May be called from any context when SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1, */
 /* Otherwise must be called from the same single threaded context as above functions */

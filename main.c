@@ -377,8 +377,11 @@ static bool SSFStartRun(SSFTestRun_t *run, size_t idx)
     if (pipe(pipeFd) != 0) return false;
     pid = fork();
     if (pid < 0) { (void)close(pipeFd[0]); (void)close(pipeFd[1]); return false; }
+
+    /* Is this the forked child process? */
     if (pid == 0)
     {
+        /* Yes, redirect stdout/stderr into the pipe and run the test. */
         (void)close(pipeFd[0]);
         (void)dup2(pipeFd[1], STDOUT_FILENO);
         (void)dup2(pipeFd[1], STDERR_FILENO);
@@ -387,9 +390,7 @@ static bool SSFStartRun(SSFTestRun_t *run, size_t idx)
         (void)fflush(stdout);
         (void)fflush(stderr);
 #if defined(SSF_COVERAGE)
-        /* Run atexit handlers so libgcov flushes counters to .gcda; the worker  */
-        /* registers no other atexit hooks, so exit() and _exit() differ only in */
-        /* this flush.                                                           */
+        /* Run atexit handlers so libgcov flushes coverage counters to .gcda. */
         exit(0);
 #else
         _exit(0);
@@ -397,7 +398,7 @@ static bool SSFStartRun(SSFTestRun_t *run, size_t idx)
     }
     (void)close(pipeFd[1]);
     flags = fcntl(pipeFd[0], F_GETFL, 0);
-    if (flags >= 0) (void)fcntl(pipeFd[0], F_SETFL, flags | O_NONBLOCK);
+    if (flags >= 0) (void)fcntl(pipeFd[0], F_SETFL, (flags | O_NONBLOCK));
 
     run->pid = pid;
     run->fd = pipeFd[0];
@@ -426,12 +427,16 @@ static void SSFDrainRun(SSFTestRun_t *run)
     for (;;)
     {
         n = read(run->fd, tmp, sizeof(tmp));
+
+        /* Were bytes read? */
         if (n > 0)
         {
-            if (run->bufLen + (size_t)n + 1 > run->bufCap)
+            /* Yes, does the capture buffer need to grow to hold them? */
+            if ((run->bufLen + (size_t)n + 1) > run->bufCap)
             {
-                newCap = run->bufCap == 0 ? 8192 : run->bufCap * 2;
-                while (newCap < run->bufLen + (size_t)n + 1) { newCap *= 2; }
+                /* Yes, grow geometrically until they fit. */
+                newCap = (run->bufCap == 0) ? 8192 : (run->bufCap * 2);
+                while (newCap < (run->bufLen + (size_t)n + 1)) { newCap *= 2; }
                 p = (char *)realloc(run->buf, newCap);
                 SSF_ASSERT(p != NULL);
                 run->buf = p;
@@ -464,11 +469,11 @@ static bool SSFFinishRun(SSFTestRun_t *run)
     (void)waitpid(run->pid, &status, 0);
     (void)close(run->fd);
     elapsed = (SSFPortGetTick64() - run->start) / SSF_TICKS_PER_SEC;
-    passed = WIFEXITED(status) && (WEXITSTATUS(status) == 0);
+    passed = (WIFEXITED(status) && (WEXITSTATUS(status) == 0));
 
     printf("Running %20s (%30s) unit test...%s in %llus\r\n",
            unitTests[run->idx].module, unitTests[run->idx].description,
-           passed ? "PASSED" : "FAILED", (unsigned long long)elapsed);
+           (passed ? "PASSED" : "FAILED"), (unsigned long long)elapsed);
     if (run->bufLen > 0) { (void)fwrite(run->buf, 1, run->bufLen, stdout); }
     (void)fflush(stdout);
     free(run->buf);
@@ -497,7 +502,7 @@ int main(void)
     next = 0;
     done = 0;
     cores = SSFCoreCount();
-    if (total > 0 && (size_t)cores > total) cores = (int)total;
+    if ((total > 0) && ((size_t)cores > total)) cores = (int)total;
     if (cores < 1) cores = 1;
     allPassed = true;
 
@@ -517,7 +522,7 @@ int main(void)
 
     while (done < total)
     {
-        for (i = 0; i < cores && next < total; i++)
+        for (i = 0; ((i < cores) && (next < total)); i++)
         {
             if (!runs[i].inUse)
             {
@@ -528,7 +533,7 @@ int main(void)
         nPoll = 0;
         for (i = 0; i < cores; i++)
         {
-            if (runs[i].inUse && !runs[i].eof)
+            if ((runs[i].inUse) && (!runs[i].eof))
             {
                 pfds[nPoll].fd = runs[i].fd;
                 pfds[nPoll].events = POLLIN;
@@ -538,7 +543,7 @@ int main(void)
         }
         if (nPoll > 0)
         {
-            do { pr = poll(pfds, (nfds_t)nPoll, 1000); } while (pr < 0 && errno == EINTR);
+            do { pr = poll(pfds, (nfds_t)nPoll, 1000); } while ((pr < 0) && (errno == EINTR));
         }
         for (i = 0; i < cores; i++)
         {
@@ -551,7 +556,7 @@ int main(void)
     free(runs);
     free(pfds);
     printf("\r\n");
-    return allPassed ? 0 : 1;
+    return (allPassed ? 0 : 1);
 }
 
 #else /* _WIN32 */
@@ -606,11 +611,14 @@ static DWORD WINAPI SSFReaderThread(LPVOID param)
     for (;;)
     {
         n = 0;
-        if (!ReadFile(run->pipe, tmp, sizeof(tmp), &n, NULL) || (n == 0)) break;
-        if (run->bufLen + (size_t)n + 1 > run->bufCap)
+        if ((!ReadFile(run->pipe, tmp, sizeof(tmp), &n, NULL)) || (n == 0)) break;
+
+        /* Does the capture buffer need to grow to hold the bytes read? */
+        if ((run->bufLen + (size_t)n + 1) > run->bufCap)
         {
-            newCap = run->bufCap == 0 ? 8192 : run->bufCap * 2;
-            while (newCap < run->bufLen + (size_t)n + 1) { newCap *= 2; }
+            /* Yes, grow geometrically until they fit. */
+            newCap = (run->bufCap == 0) ? 8192 : (run->bufCap * 2);
+            while (newCap < (run->bufLen + (size_t)n + 1)) { newCap *= 2; }
             p = (char *)realloc(run->buf, newCap);
             SSF_ASSERT(p != NULL);
             run->buf = p;
@@ -624,8 +632,7 @@ static DWORD WINAPI SSFReaderThread(LPVOID param)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Spawns a worker process to run unitTests[idx] with stdout/stderr captured. Returns true if    */
-/* started.                                                                                      */
+/* Spawns a worker to run unitTests[idx] with stdout/stderr captured. Returns true if started.  */
 /* --------------------------------------------------------------------------------------------- */
 static bool SSFStartRun(SSFTestRun_t *run, size_t idx)
 {
@@ -664,8 +671,7 @@ static bool SSFStartRun(SSFTestRun_t *run, size_t idx)
     si.hStdError = writeEnd;
     memset(&pi, 0, sizeof(pi));
 
-    /* Workers are started one at a time and the write end is closed immediately, so a pipe is */
-    /* never inherited by any worker other than its own.                                        */
+    /* Close the write end right after spawning so only this worker inherits it. */
     ok = CreateProcessA(exePath, cmdLine, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi);
     (void)CloseHandle(writeEnd);
     if (!ok) { (void)CloseHandle(readEnd); return false; }
@@ -707,7 +713,7 @@ static bool SSFFinishRun(SSFTestRun_t *run)
     /* The reader thread exits once the worker's end of the pipe closes. */
     (void)WaitForSingleObject(run->reader, INFINITE);
     exitCode = 1;
-    passed = GetExitCodeProcess(run->process, &exitCode) && (exitCode == 0);
+    passed = ((GetExitCodeProcess(run->process, &exitCode)) && (exitCode == 0));
     (void)CloseHandle(run->reader);
     (void)CloseHandle(run->process);
     (void)CloseHandle(run->pipe);
@@ -715,7 +721,7 @@ static bool SSFFinishRun(SSFTestRun_t *run)
 
     printf("Running %20s (%30s) unit test...%s in %llus\r\n",
            unitTests[run->idx].module, unitTests[run->idx].description,
-           passed ? "PASSED" : "FAILED", (unsigned long long)elapsed);
+           (passed ? "PASSED" : "FAILED"), (unsigned long long)elapsed);
     if (run->bufLen > 0) { (void)fwrite(run->buf, 1, run->bufLen, stdout); }
     (void)fflush(stdout);
     free(run->buf);
@@ -733,8 +739,7 @@ static int SSFWorkerMain(const char *idxStr)
 
     SSF_REQUIRE(idxStr != NULL);
 
-    /* Never stall a parallel run on a modal dialog: route crashes, abort() and CRT asserts to */
-    /* the exit code and stderr instead.                                                       */
+    /* Route crashes, abort() and CRT asserts to stderr and the exit code, not modal dialogs. */
     (void)SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
     (void)_set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
 #if defined(_DEBUG)
@@ -775,13 +780,16 @@ int main(int argc, char *argv[])
     DWORD wr;
     int hdrLen;
 
+    SSF_REQUIRE(argc >= 0);
+    SSF_REQUIRE(argv != NULL);
+
     if ((argc == 3) && (strcmp(argv[1], SSF_WORKER_ARG) == 0)) { return SSFWorkerMain(argv[2]); }
 
     total = sizeof(unitTests) / sizeof(SSFUnitTest_t);
     next = 0;
     done = 0;
     cores = SSFCoreCount();
-    if (total > 0 && (size_t)cores > total) cores = (int)total;
+    if ((total > 0) && ((size_t)cores > total)) cores = (int)total;
     if (cores < 1) cores = 1;
     allPassed = true;
 
@@ -803,7 +811,7 @@ int main(int argc, char *argv[])
 
     while (done < total)
     {
-        for (i = 0; i < cores && next < total; i++)
+        for (i = 0; ((i < cores) && (next < total)); i++)
         {
             if (!runs[i].inUse)
             {
@@ -823,7 +831,7 @@ int main(int argc, char *argv[])
         }
         SSF_ASSERT(nWait > 0);
         wr = WaitForMultipleObjects((DWORD)nWait, handles, FALSE, INFINITE);
-        SSF_ASSERT((wr >= WAIT_OBJECT_0) && (wr < WAIT_OBJECT_0 + (DWORD)nWait));
+        SSF_ASSERT((wr >= WAIT_OBJECT_0) && (wr < (WAIT_OBJECT_0 + (DWORD)nWait)));
         i = slots[wr - WAIT_OBJECT_0];
         if (!SSFFinishRun(&runs[i])) allPassed = false;
         done++;
@@ -833,7 +841,7 @@ int main(int argc, char *argv[])
     free(handles);
     free(slots);
     printf("\r\n");
-    return allPassed ? 0 : 1;
+    return (allPassed ? 0 : 1);
 }
 
 #endif /* _WIN32 */

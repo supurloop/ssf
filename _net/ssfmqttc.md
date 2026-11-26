@@ -35,8 +35,10 @@ the application run in `SSFMQTTCTask()`. Both are driven from one application lo
 
 - **One connection.** The client is a singleton. All calls come from the thread that runs
   `SSFSMTask()` and `SSFMQTTCTask()`.
-- **Clean session only.** Every CONNECT requests a clean session. There is no Last Will, and
-  published messages are never retained.
+- **Clean session only.** Every CONNECT requests a clean session. There is no Last Will.
+- **Retained publish.** `TxPublish()` can set RETAIN; the broker then keeps the message as the
+  topic's last known value and gives it to each new subscriber. An empty retained payload
+  clears it. A broker without retained-message support does not store it.
 - **QoS 0 and 1.** A QoS 2 PUBLISH from the broker is a protocol error (no subscription allows
   it) and ends the connection with `RX_PUBLISH_QOS2`, without acknowledgement or delivery.
 - **Self-healing.** Once started the client works continuously to reach and hold READY. Every
@@ -300,7 +302,7 @@ copy the password; the application may zeroize it after STOPPED.
 | [e.g.](#ex-start) | [`void SSFMQTTCStart(opts)`](#ssfmqttcstart) | Begin connecting and hold the connection until stopped. |
 | [e.g.](#ex-stop) | [`void SSFMQTTCStop()`](#ssfmqttcstop) | Flush, disconnect, close; STOPPED is reported asynchronously. |
 | [e.g.](#ex-task) | [`bool SSFMQTTCTask(nextTimeoutOpt)`](#ssfmqttctask) | Pump transport I/O and deliver inbound publishes. Call every loop iteration. |
-| [e.g.](#ex-publish) | [`bool SSFMQTTCTxPublish(...)`](#ssfmqttctxpublish) | Queue a QoS 0 or 1 publish; completion reported by callback. |
+| [e.g.](#ex-publish) | [`bool SSFMQTTCTxPublish(...)`](#ssfmqttctxpublish) | Queue a QoS 0 or 1 publish, optionally retained; completion reported by callback. |
 | | [`SSFMQTTCState_t SSFMQTTCGetState()`](#ssfmqttcgetstate) | Current client state. |
 
 ### Macros
@@ -517,7 +519,7 @@ for (;;)
 
 ```c
 bool SSFMQTTCTxPublish(SSFCStrIn_t topic, const uint8_t *payload, size_t payloadLen,
-                       SSFMQTTCQoS_t qos, SSFMQTTCTxPublishFn_t txPublishFnOpt,
+                       SSFMQTTCQoS_t qos, bool retain, SSFMQTTCTxPublishFn_t txPublishFnOpt,
                        void *txPublishFnCtxOpt);
 ```
 
@@ -531,6 +533,13 @@ not 0 or 1, or a context is given without a callback.
 **Returns:** `false` if not READY, if `topic` is not a valid topic shorter than the topic
 constant, if the encoded packet would not fit a tx block, or if no tx block is free. Retry later.
 `true` if queued.
+
+**Retain:** with `retain` true the broker stores the message and gives it to every later
+subscriber of the topic, replacing any message it stored before. An empty payload with `retain`
+true clears the stored message instead. It works the same at QoS 0 and 1, and completion means
+the same as without it. Use QoS 1 when the stored value matters, a clear included: a lost QoS 0
+PUBLISH leaves the old message stored. A retained message stays on the broker, readable by any
+client allowed to subscribe to the topic, until it is replaced or cleared.
 
 <a id="ex-publish"></a>
 
@@ -546,8 +555,12 @@ if (SSFMQTTCIsReady())
 {
     const char *msg = "21.5";
     if (SSFMQTTCTxPublish("sensors/0001/temperature", (const uint8_t *)msg, strlen(msg),
-                          SSF_MQTTC_QOS_1, OnPublished, (void *)(uintptr_t)42) == false)
+                          SSF_MQTTC_QOS_1, false, OnPublished, (void *)(uintptr_t)42) == false)
     { /* no tx block free or packet too large; try again later */ }
+
+    /* Retained: a dashboard that subscribes later still sees the device's state */
+    (void)SSFMQTTCTxPublish("devices/0001/state", (const uint8_t *)"on", 2, SSF_MQTTC_QOS_1,
+                            true, NULL, NULL);
 }
 ```
 

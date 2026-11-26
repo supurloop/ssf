@@ -391,7 +391,7 @@ size_t SSFMQTTPktPublishLen(size_t topicLen, size_t payloadLen, SSFMQTTCQoS_t qo
 /* --------------------------------------------------------------------------------------------- */
 void SSFMQTTPktEncodePublish(uint8_t *buf, size_t size, size_t *lenOut, SSFCStrIn_t topic,
                              size_t topicSize, const uint8_t *payload, size_t payloadLen,
-                             SSFMQTTCQoS_t qos, uint16_t packetId)
+                             SSFMQTTCQoS_t qos, bool retain, uint16_t packetId)
 {
     SSFMQTTPktWriter_t w;
     uint8_t flags;
@@ -405,7 +405,8 @@ void SSFMQTTPktEncodePublish(uint8_t *buf, size_t size, size_t *lenOut, SSFCStrI
     SSF_REQUIRE((qos == SSF_MQTTC_QOS_0) || (packetId != 0));
     SSF_REQUIRE(SSFMQTTPktIsValidTopic(topic, topicSize));
 
-    flags = (uint8_t)((uint8_t)qos << SSF_MQTT_PUBLISH_QOS_SHIFT);   /* No DUP, no RETAIN */
+    flags = (uint8_t)((uint8_t)qos << SSF_MQTT_PUBLISH_QOS_SHIFT);   /* Never DUP: no resend */
+    if (retain) flags |= SSF_MQTT_PUBLISH_FLAG_RETAIN;
     _SSFMQTTPktWriterInit(&w, buf, size);
     _SSFMQTTPktPutField(&w, (const uint8_t *)topic, _SSFMQTTPktFieldLen(topic, topicSize));
     if (qos != SSF_MQTTC_QOS_0) _SSFMQTTPktPutU16(&w, packetId);

@@ -252,36 +252,37 @@ static void _SSFMQTTPktUTEncodePublish(void)
     size_t i;
 
     SSF_ASSERT_TEST(SSFMQTTPktEncodePublish(NULL, sizeof(_utBuf), &_utLen, topic, sizeof(topic),
-                                            payload, sizeof(payload), SSF_MQTTC_QOS_0, 0));
+                                            payload, sizeof(payload), SSF_MQTTC_QOS_0, false, 0));
     SSF_ASSERT_TEST(SSFMQTTPktEncodePublish(_utBuf, 0, &_utLen, topic, sizeof(topic), payload,
-                                            sizeof(payload), SSF_MQTTC_QOS_0, 0));
+                                            sizeof(payload), SSF_MQTTC_QOS_0, false, 0));
     SSF_ASSERT_TEST(SSFMQTTPktEncodePublish(_utBuf, sizeof(_utBuf), NULL, topic, sizeof(topic),
-                                            payload, sizeof(payload), SSF_MQTTC_QOS_0, 0));
+                                            payload, sizeof(payload), SSF_MQTTC_QOS_0, false, 0));
     SSF_ASSERT_TEST(SSFMQTTPktEncodePublish(_utBuf, sizeof(_utBuf), &_utLen, NULL, sizeof(topic),
-                                            payload, sizeof(payload), SSF_MQTTC_QOS_0, 0));
+                                            payload, sizeof(payload), SSF_MQTTC_QOS_0, false, 0));
     SSF_ASSERT_TEST(SSFMQTTPktEncodePublish(_utBuf, sizeof(_utBuf), &_utLen, topic, sizeof(topic),
-                                            NULL, sizeof(payload), SSF_MQTTC_QOS_0, 0));
+                                            NULL, sizeof(payload), SSF_MQTTC_QOS_0, false, 0));
     SSF_ASSERT_TEST(SSFMQTTPktEncodePublish(_utBuf, sizeof(_utBuf), &_utLen, topic, sizeof(topic),
-                                            payload, sizeof(payload), SSF_MQTTC_QOS_2, 1));
+                                            payload, sizeof(payload), SSF_MQTTC_QOS_2, false, 1));
     SSF_ASSERT_TEST(SSFMQTTPktEncodePublish(_utBuf, sizeof(_utBuf), &_utLen, topic, sizeof(topic),
-                                            payload, sizeof(payload), SSF_MQTTC_QOS_MIN, 1));
+                                            payload, sizeof(payload), SSF_MQTTC_QOS_MIN, false,
+                                            1));
     /* QoS 1 needs a non-zero packet id */
     SSF_ASSERT_TEST(SSFMQTTPktEncodePublish(_utBuf, sizeof(_utBuf), &_utLen, topic, sizeof(topic),
-                                            payload, sizeof(payload), SSF_MQTTC_QOS_1, 0));
+                                            payload, sizeof(payload), SSF_MQTTC_QOS_1, false, 0));
     /* Empty and unterminated topics */
     SSF_ASSERT_TEST(SSFMQTTPktEncodePublish(_utBuf, sizeof(_utBuf), &_utLen, "", 1, payload,
-                                            sizeof(payload), SSF_MQTTC_QOS_0, 0));
+                                            sizeof(payload), SSF_MQTTC_QOS_0, false, 0));
     SSF_ASSERT_TEST(SSFMQTTPktEncodePublish(_utBuf, sizeof(_utBuf), &_utLen, topic,
                                             sizeof(topic) - 1, payload, sizeof(payload),
-                                            SSF_MQTTC_QOS_0, 0));
+                                            SSF_MQTTC_QOS_0, false, 0));
     /* Does not fit by one byte */
     SSF_ASSERT_TEST(SSFMQTTPktEncodePublish(_utBuf, sizeof(qos0) - 1, &_utLen, topic,
                                             sizeof(topic), payload, sizeof(payload),
-                                            SSF_MQTTC_QOS_0, 0));
+                                            SSF_MQTTC_QOS_0, false, 0));
 
     /* QoS 0, exact fit; the packet id is ignored */
     SSFMQTTPktEncodePublish(_utBuf, sizeof(qos0), &_utLen, topic, sizeof(topic), payload,
-                            sizeof(payload), SSF_MQTTC_QOS_0, 0x5555);
+                            sizeof(payload), SSF_MQTTC_QOS_0, false, 0x5555);
     SSF_ASSERT(_SSFMQTTPktUTIsPacket(_utBuf, _utLen, qos0, sizeof(qos0)));
     SSF_ASSERT(SSFMQTTPktPublishLen(sizeof(topic) - 1, sizeof(payload), SSF_MQTTC_QOS_0) == _utLen);
     SSF_ASSERT(SSFMQTTPktDecodePublish(_utBuf, _utLen, &pub));
@@ -298,7 +299,7 @@ static void _SSFMQTTPktUTEncodePublish(void)
 
     /* QoS 1 */
     SSFMQTTPktEncodePublish(_utBuf, sizeof(_utBuf), &_utLen, topic, sizeof(topic), payload,
-                            sizeof(payload), SSF_MQTTC_QOS_1, 0x0102);
+                            sizeof(payload), SSF_MQTTC_QOS_1, false, 0x0102);
     SSF_ASSERT(_SSFMQTTPktUTIsPacket(_utBuf, _utLen, qos1, sizeof(qos1)));
     SSF_ASSERT(SSFMQTTPktPublishLen(sizeof(topic) - 1, sizeof(payload), SSF_MQTTC_QOS_1) == _utLen);
     SSF_ASSERT(SSFMQTTPktDecodePublish(_utBuf, _utLen, &pub));
@@ -314,17 +315,52 @@ static void _SSFMQTTPktUTEncodePublish(void)
 
     /* Empty payload, NULL pointer allowed */
     SSFMQTTPktEncodePublish(_utBuf, sizeof(_utBuf), &_utLen, topic, sizeof(topic), NULL, 0,
-                            SSF_MQTTC_QOS_0, 0);
+                            SSF_MQTTC_QOS_0, false, 0);
     SSF_ASSERT(_SSFMQTTPktUTIsPacket(_utBuf, _utLen, empty, sizeof(empty)));
     SSF_ASSERT(SSFMQTTPktPublishLen(sizeof(topic) - 1, 0, SSF_MQTTC_QOS_0) == _utLen);
     SSF_ASSERT(SSFMQTTPktDecodePublish(_utBuf, _utLen, &pub));
     SSF_ASSERT(pub.payload == NULL);
     SSF_ASSERT(pub.payloadLen == 0);
 
+    /* RETAIN sets only bit 0 of the first byte, at both QoS levels, and decodes back */
+    {
+        static const uint8_t qos0R[] = { 0x31, 0x07, 0x00, 0x03, 'a', '/', 'b', 'h', 'i' };
+        static const uint8_t qos1R[] = { 0x33, 0x09, 0x00, 0x03, 'a', '/', 'b', 0x01, 0x02,
+                                         'h', 'i' };
+        static const uint8_t clearR[] = { 0x31, 0x05, 0x00, 0x03, 'a', '/', 'b' };
+
+        SSFMQTTPktEncodePublish(_utBuf, sizeof(qos0R), &_utLen, topic, sizeof(topic), payload,
+                                sizeof(payload), SSF_MQTTC_QOS_0, true, 0);
+        SSF_ASSERT(_SSFMQTTPktUTIsPacket(_utBuf, _utLen, qos0R, sizeof(qos0R)));
+        SSF_ASSERT(SSFMQTTPktDecodePublish(_utBuf, _utLen, &pub));
+        SSF_ASSERT(pub.retain == true);
+        SSF_ASSERT(pub.dup == false);
+        SSF_ASSERT(pub.qos == SSF_MQTTC_QOS_0);
+
+        SSFMQTTPktEncodePublish(_utBuf, sizeof(_utBuf), &_utLen, topic, sizeof(topic), payload,
+                                sizeof(payload), SSF_MQTTC_QOS_1, true, 0x0102);
+        SSF_ASSERT(_SSFMQTTPktUTIsPacket(_utBuf, _utLen, qos1R, sizeof(qos1R)));
+        SSF_ASSERT(SSFMQTTPktPublishLen(sizeof(topic) - 1, sizeof(payload), SSF_MQTTC_QOS_1) ==
+                   _utLen);
+        SSF_ASSERT(SSFMQTTPktDecodePublish(_utBuf, _utLen, &pub));
+        SSF_ASSERT(pub.retain == true);
+        SSF_ASSERT(pub.dup == false);
+        SSF_ASSERT(pub.qos == SSF_MQTTC_QOS_1);
+        SSF_ASSERT(pub.packetId == 0x0102);
+
+        /* Empty retained payload: the message that clears a retained topic */
+        SSFMQTTPktEncodePublish(_utBuf, sizeof(_utBuf), &_utLen, topic, sizeof(topic), NULL, 0,
+                                SSF_MQTTC_QOS_0, true, 0);
+        SSF_ASSERT(_SSFMQTTPktUTIsPacket(_utBuf, _utLen, clearR, sizeof(clearR)));
+        SSF_ASSERT(SSFMQTTPktDecodePublish(_utBuf, _utLen, &pub));
+        SSF_ASSERT(pub.retain == true);
+        SSF_ASSERT(pub.payloadLen == 0);
+    }
+
     /* Payload large enough for a two byte remaining length (2 + 1 + 126 = 129 = 0x81 0x01) */
     for (i = 0; i < sizeof(big); i++) big[i] = (uint8_t)i;
     SSFMQTTPktEncodePublish(_utBuf, sizeof(_utBuf), &_utLen, topic1, sizeof(topic1), big,
-                            sizeof(big), SSF_MQTTC_QOS_0, 0);
+                            sizeof(big), SSF_MQTTC_QOS_0, false, 0);
     SSF_ASSERT(_utLen == (sizeof(bigHdr) + sizeof(big)));
     SSF_ASSERT(memcmp(_utBuf, bigHdr, sizeof(bigHdr)) == 0);
     SSF_ASSERT(memcmp(&_utBuf[sizeof(bigHdr)], big, sizeof(big)) == 0);

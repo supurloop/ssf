@@ -141,7 +141,7 @@ void SSFMQTTPktEncodeConnect(uint8_t *buf, size_t size, size_t *lenOut, SSFCStrI
                              uint16_t keepAliveSec);
 void SSFMQTTPktEncodePublish(uint8_t *buf, size_t size, size_t *lenOut, SSFCStrIn_t topic,
                              size_t topicSize, const uint8_t *payload, size_t payloadLen,
-                             SSFMQTTCQoS_t qos, uint16_t packetId);
+                             SSFMQTTCQoS_t qos, bool retain, uint16_t packetId);
 void SSFMQTTPktEncodeSubscribe(uint8_t *buf, size_t size, size_t *lenOut, uint16_t packetId,
                                const SSFMQTTPktSub_t *subs, uint32_t count, size_t filterSize);
 void SSFMQTTPktEncodePubAck(uint8_t *buf, size_t size, size_t *lenOut, uint16_t packetId);

@@ -214,9 +214,10 @@ void SSFMQTTCStop(void);
 bool SSFMQTTCTask(SSFPortTick_t *nextTimeoutOpt);
 
 /* Queues a PUBLISH; valid only when SSFMQTTCIsReady(). Returns false if not READY, the topic is */
-/* invalid, the packet does not fit a tx block, or no tx block is free.                          */
+/* invalid, the packet does not fit a tx block, or no tx block is free. retain asks the broker   */
+/* to store it for later subscribers; with an empty payload it clears the stored message.        */
 bool SSFMQTTCTxPublish(SSFCStrIn_t topic, const uint8_t *payload, size_t payloadLen,
-                       SSFMQTTCQoS_t qos, SSFMQTTCTxPublishFn_t txPublishFnOpt,
+                       SSFMQTTCQoS_t qos, bool retain, SSFMQTTCTxPublishFn_t txPublishFnOpt,
                        void *txPublishFnCtxOpt);
 
 SSFMQTTCState_t SSFMQTTCGetState(void);

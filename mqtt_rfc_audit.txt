@@ -6,8 +6,8 @@ Scope      : _net/ssfmqttc.c, _net/ssfmqttpkt.c/.h, _opt/ssfmqttc_opt.h, _net/ss
              MQTT is not an IETF RFC; "the spec" below means MQTT 3.1.1. Section numbers are
              from that document. Code at commit a8ce46f (branch mqtt).
 Status     : MQTT-IOP-01 and MQTT-FEAT-07 are FIXED (commit 0bc61a9); MQTT-IOP-03 is FIXED;
-             MQTT-IOP-02 is PARTLY FIXED (lower grants); MQTT-IOP-04, MQTT-IOP-06, MQTT-IOP-11
-             and MQTT-FEAT-10 are FIXED; every other item is OPEN.
+             MQTT-IOP-02 is PARTLY FIXED (lower grants); MQTT-IOP-04, MQTT-IOP-06, MQTT-IOP-11,
+             MQTT-FEAT-01 and MQTT-FEAT-10 are FIXED; every other item is OPEN.
 
 Lists
   Part A  Interoperability problems, most likely to happen with real brokers first.
@@ -257,14 +257,20 @@ PART B: MISSING FEATURES (most likely to be needed first)
 MQTT-FEAT-01  RETAIN on outbound PUBLISH
   Likelihood : HIGH
   Spec       : 3.3.1.3.
-  Why        : Device status and "last known value" topics, Home Assistant MQTT discovery and
-               availability, and Sparkplug B birth certificates all depend on retained
-               messages. Today the client always sends RETAIN=0 (ssfmqttpkt.c
-               SSFMQTTPktEncodePublish), so a dashboard or new subscriber sees nothing until
-               the next publish. Also needed: publishing an empty retained message to clear
-               one.
+  Why        : Device status and "last known value" topics, and Home Assistant MQTT discovery
+               and availability, depend on retained messages. Today the client always sends
+               RETAIN=0 (ssfmqttpkt.c SSFMQTTPktEncodePublish), so a dashboard or new
+               subscriber sees nothing until the next publish. Also needed: publishing an empty
+               retained message to clear one. (Correction: Sparkplug B birth certificates are
+               sent with RETAIN=0; the retained STATE message is published by the host
+               application, not by an edge node.)
   Effort     : Small. Add a flag to TxPublish() and the encoder; inbound retain is already
                reported.
+  Status     : FIXED. SSFMQTTCTxPublish() and SSFMQTTPktEncodePublish() take a new bool retain
+               (an API change; every caller must pass it) that sets bit 0 of the PUBLISH fixed
+               header. An empty retained payload clears the stored message. The broker test
+               checks a live subscriber gets RETAIN 0, a new session gets the stored message
+               with RETAIN 1, and then clears it.
 
 MQTT-FEAT-02  Last Will and Testament
   Likelihood : HIGH

@@ -1719,7 +1719,7 @@ done:
 /* Returns true if the PUBLISH was queued, else false.                                           */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFMQTTCTxPublish(SSFCStrIn_t topic, const uint8_t *payload, size_t payloadLen,
-                       SSFMQTTCQoS_t qos, SSFMQTTCTxPublishFn_t txPublishFnOpt,
+                       SSFMQTTCQoS_t qos, bool retain, SSFMQTTCTxPublishFn_t txPublishFnOpt,
                        void *txPublishFnCtxOpt)
 {
     SSFMQTTCTxBlock_t *b;
@@ -1741,7 +1741,7 @@ bool SSFMQTTCTxPublish(SSFCStrIn_t topic, const uint8_t *payload, size_t payload
 
     b->packetId = (qos == SSF_MQTTC_QOS_1) ? _SSFMQTTCNextPacketId() : 0;
     SSFMQTTPktEncodePublish(SSF_MQTTC_TX_DATA(b), _mqttc.txBlockSize, &b->len, topic,
-                            SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE, payload, payloadLen, qos,
+                            SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE, payload, payloadLen, qos, retain,
                             b->packetId);
 
     b->qos = qos;

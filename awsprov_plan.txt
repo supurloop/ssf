@@ -1,0 +1,499 @@
+SSF AWS IOT CORE PROVISIONING MODULE PLAN: ssfawsprov
+=====================================================
+Plan date  : 2026-11-26
+Scope      : A device-side module for AWS IoT Core Fleet Provisioning over MQTT
+             (CreateCertificateFromCsr + RegisterThing), built on ssftlsc, ssfmqttc, ssfecdsa,
+             ssfx509, ssfpem, ssfpkey and ssfjson. Code at commit ab41294 (branch mqtt).
+Sources    : AWS docs read on 2026-11-26. Each fact in section 1 names its page.
+               [TS]  developerguide/transport-security.html
+               [TLS] developerguide/iot-endpoints-tls-config.html
+               [SA]  developerguide/server-authentication.html
+               [XC]  developerguide/x509-client-certs.html
+               [PR]  developerguide/protocols.html
+               [FPA] developerguide/fleet-provision-api.html
+               [PWC] developerguide/provision-wo-cert.html
+               [JIT] developerguide/jit-provisioning.html
+               [Q]   general/latest/gr/iot-core.html (quotas)
+               [API] apireference/API_CreateProvisioningTemplate.html
+             (developerguide = https://docs.aws.amazon.com/iot/latest/developerguide/)
+Status     : G01 done (commit 9041eba, 2026-11-26). Everything else is plan only.
+
+Layout
+  Section 1  Findings checked against AWS docs, including the TLS 1.3 answer.
+  Section 2  Gaps in existing SSF modules. Tasks AWSPROV-Gnn. Do these first.
+  Section 3  The new module. Tasks AWSPROV-Mnn.
+  Section 4  Live validation against a real AWS account. Tasks AWSPROV-Vnn.
+  Section 5  Out of scope / deferred.
+  Section 6  Suggested order and dependencies.
+
+Every task lists Change, Test and Done-when. Each task is meant to be one commit that builds,
+passes ./ssf, and leaves every other module unchanged in behavior.
+
+
+=====================================================================================================
+1. FINDINGS CHECKED AGAINST AWS DOCS
+=====================================================================================================
+
+1.1 TLS 1.3: SUPPORTED, AND ON BY DEFAULT FOR NEW ENDPOINTS
+  - "AWS IoT Core supports the following versions of the TLS protocol: TLS 1.3, TLS 1.2." [TS]
+  - "The default predefined security policy for non-AWS GovCloud (US) regions is
+    IoTSecurityPolicy_TLS13_1_2_2022_10." It allows TLS 1.2 and TLS 1.3. [TS]
+  - "If you create a new domain configuration, the security policy will default to
+    IoTSecurityPolicy_TLS13_1_2_2022_10 for all regions excluding AWS GovCloud (US)." [TLS]
+  - GovCloud default is IoTSecurityPolicy_TLS13_1_2_2022_01 (TLS 1.2 + 1.3, AES-GCM only). [TS]
+  - Other policies that allow TLS 1.3: IoTSecurityPolicy_TLS13_1_3_2022_10 (TLS 1.3 only). [TS]
+  - Policies with NO TLS 1.3: IoTSecurityPolicy_TLS12_1_2_2022_10, _TLS12_1_0_2016_01,
+    _TLS12_1_0_2015_01. [TS]
+  - NOT DOCUMENTED: which policy the existing iot:Data-ATS endpoint of an older account uses.
+    It can be read and changed:
+        aws iot describe-domain-configuration --domain-configuration-name "iot:Data-ATS"
+        aws iot update-domain-configuration --domain-configuration-name "iot:Data-ATS" \
+            --tls-config securityPolicy=IoTSecurityPolicy_TLS13_1_2_2022_10          [TLS]
+    Custom security policies are not supported. [TLS]
+  Consequence: ssftlsc (TLS 1.3 only) works against the default endpoint configuration. An
+  account whose iot:Data-ATS still uses a TLS12_* policy needs one update-domain-configuration
+  call. ssfawsprov.md must say so (task M09), and V01 checks it on a real account.
+
+1.2 TLS PARAMETERS MATCH WHAT ssftlsc OFFERS
+  - TLS 1.3 suites in the 2022_10 policies: TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384,
+    TLS_CHACHA20_POLY1305_SHA256. [TS] ssftlsc offers ChaCha20-Poly1305, AES-128-GCM,
+    AES-256-GCM, AES-128-CCM (_net/ssftlsc.c:813). There is overlap on all three AWS suites.
+  - Server roots: Amazon Root CA 1 (RSA 2048) and Amazon Root CA 3 (ECC P-256); CA 2 (RSA 4096)
+    and CA 4 (ECC P-384) are "reserved for future use". All cross-signed by Starfield. The chain
+    served depends on the endpoint type and the negotiated suite. [SA] The app should trust CA 1
+    and CA 3 (and may add CA 2 / CA 4). ssfx509 verifies both key types.
+  - Client keys: RSA >= 2048, ECC P-256 / P-384 / P-521, RSA-PSS (TLS 1.3 only). [XC]
+    ssftlsc signs CertificateVerify with P-256, P-384, Ed25519 or RSA-PSS: P-256 and P-384 fit.
+  - Supported key-exchange groups: not documented. ssftlsc offers x25519, P-256, P-384. V01
+    records which one is negotiated.
+  - SNI: [TS] says "not required but highly recommended", and required for custom domains,
+    configured TLS policies and multi-account registration; [XC] and [JIT] say the device is
+    required to send it. ssftlsc always sends SNI for a host name. No change needed.
+  - ALPN: MQTT with an X.509 client certificate on port 443 must offer ALPN "x-amzn-mqtt-ca";
+    port 8883 needs no ALPN. [PR] SSFTLSCSetALPN() exists; the name (14 bytes + 1 length byte)
+    fits SSF_TLS_CONFIG_MAX_ALPN_LEN (32).
+
+1.3 MQTT LIMITS [Q]
+  - Client ID: 128 bytes UTF-8, not adjustable. ssfmqttc default is 64 (incl. NUL): too small
+    for clientId = thingName. See G05.
+  - Thing name: 128 bytes UTF-8, not adjustable.
+  - Keep-alive: requests in 1..29 s are treated as 30 s; 0 or > 1200 gets 1200 s. ssfmqttc
+    requires keepAliveSec >= 120 with its 30 s PINGRESP timeout. Use 120..1200.
+  - Payload: 128 KB per publish. Topic: 256 bytes, at most 7 '/'. Subscriptions: 50 per
+    connection. Publish: 100 per second per connection.
+  - Fleet provisioning throttles (account-wide, adjustable): CreateCertificateFromCsr 20 TPS,
+    CreateKeysAndCertificate 10 TPS, RegisterThing 10 TPS. A fleet coming up together will be
+    throttled: retry with backoff and jitter (M07).
+
+1.4 FLEET PROVISIONING MQTT API [FPA]
+  - Topics ({fmt} is json or cbor):
+        $aws/certificates/create-from-csr/{fmt}                 request
+        $aws/certificates/create-from-csr/{fmt}/accepted        response
+        $aws/certificates/create-from-csr/{fmt}/rejected        error
+        $aws/provisioning-templates/{templateName}/provision/{fmt}             request
+        $aws/provisioning-templates/{templateName}/provision/{fmt}/accepted    response
+        $aws/provisioning-templates/{templateName}/provision/{fmt}/rejected    error
+    (CreateKeysAndCertificate: $aws/certificates/create/{fmt}[/accepted|/rejected], empty
+    request payload. Not used; see section 5.)
+  - CreateCertificateFromCsr request : {"certificateSigningRequest": "<CSR in PEM>"}
+    response: {"certificateOwnershipToken": "...", "certificateId": "...",
+               "certificatePem": "..."}
+  - RegisterThing request : {"certificateOwnershipToken": "...",
+                             "parameters": {"string": "string", ...}}     (parameters optional)
+    response: {"deviceConfiguration": {"string": "string", ...}, "thingName": "..."}
+  - Error, all operations: {"statusCode": int, "errorCode": "string", "errorMessage": "string"}.
+    No error codes are listed.
+  - "Before publishing a request message topic, subscribe to the response topics." Results come
+    back on the same MQTT connection. QoS and wildcard subscriptions are not covered: use QoS 1
+    and the four exact filters.
+  - The ownership token "expires after one hour"; RegisterThing must be called before then.
+    The new certificate is PENDING_ACTIVATION until RegisterThing, then ACTIVE or INACTIVE per
+    the template. If it is not activated before the token expires, AWS deletes it, and the
+    device can simply call CreateCertificateFromCsr again. A repeated CSR therefore leaves no
+    permanent orphan certificate.
+  - Template name: 1..36 characters, pattern ^[0-9A-Za-z_-]+$. [API] Longest topic is then
+    28 + 36 + 24 = 88 bytes with 5 '/': fits SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE (128) and [Q].
+  - CSR key: RSA >= 2048 or ECC P-256 / P-384 / P-521 [XC]. The API page sets no subject rules.
+
+1.5 CLAIM CERTIFICATES [PWC]
+  - By claim: a shared claim certificate with an IoT policy. The documented example policy
+    allows $aws/certificates/create/* and $aws/provisioning-templates/<name>/provision/*. That
+    wildcard does NOT match create-from-csr; the policy for this module must name
+    $aws/certificates/create-from-csr/* (Publish, Receive) and the matching topicfilter
+    (Subscribe). ssfawsprov.md must show the corrected policy (M09).
+  - By trusted user: an app calls CreateProvisioningClaim and gives the device a temporary claim
+    certificate that "expires after five minutes"; the device must finish provisioning within
+    five minutes of connecting with it. Same MQTT flow, shorter deadline (M07).
+  - Pre-provisioning hooks (Lambda) see the RegisterThing parameters; nothing device-side.
+
+1.6 JITP (NO MODULE NEEDED) [JIT]
+  The device connects with a certificate signed by a registered CA that has a JITP template;
+  sending the CA certificate is optional, SNI is required. AWS runs RegisterThing itself. With
+  ssftlsc this is just SSFTLSCSetClientCert() with a one- or two-certificate chain. Document it
+  in ssfawsprov.md; no code.
+
+1.7 STILL UNVERIFIED (settled by V01..V03)
+  - Real response sizes, especially the ownership token length. The estimate below drives G04.
+  - Which iot:Data-ATS policy a given existing account has.
+  - Whether AWS accepts wildcard subscriptions on these topics (not needed by this plan).
+
+1.8 SIZE ESTIMATE FOR THE CreateCertificateFromCsr RESPONSE
+  certificatePem ~1.2 KB (escaped "\n" adds ~20 bytes) + certificateId 64 + token several
+  hundred bytes to ~1 KB + keys and punctuation ~100 => ~2.1..2.5 KB. This exceeds
+  SSF_JSON_CONFIG_MAX_IN_LEN (2047). V02 measures it.
+
+
+=====================================================================================================
+2. GAPS IN EXISTING MODULES (DO FIRST)
+=====================================================================================================
+
+AWSPROV-G01  ssfpem: PEM encoder
+  Why    : The CSR travels as PEM text inside JSON. ssfpem only decodes (SSFPEMDecodeNext).
+           Output must be byte-identical to OpenSSL's and must decode with SSFPEMDecodeNext.
+
+  API (_codec/ssfpem.h)
+    /* Bytes SSFPEMEncode() writes, NUL included: 2L + 32 + 4*ceil(n/3) + ceil(n/48) + 1.     */
+    #define SSF_PEM_ENCODE_SIZE(labelLen, derLen) \
+        ((2u * (labelLen)) + 33u + (4u * (((derLen) + 2u) / 3u)) + (((derLen) + 47u) / 48u))
+
+    bool SSFPEMEncode(const char *label, const uint8_t *derOpt, size_t derLen,
+                      char *pemOpt, size_t pemSize, size_t *pemLenOut);
+
+  Output : "-----BEGIN <label>-----\n", Base64 at 64 characters (48 input bytes) per line, each
+           line ending "\n", "-----END <label>-----\n", then NUL. This is OpenSSL's layout. Empty
+           DER gives the two lines only, which the decoder already accepts (ssfpem_ut.c:155).
+
+  Behavior
+    - *pemLenOut is always set to the length needed (NUL not counted), including when the
+      call fails for size, so a caller can size a buffer. pemOpt NULL measures, returns true.
+    - pemSize < need + 1: returns false and zeroes all pemSize bytes of pemOpt (the block may
+      hold a private key; same policy as the decoder's fail path). Nothing beyond pemSize is
+      touched. The size is checked before writing, so no partial block is ever visible.
+    - SSF_REQUIRE (programming errors): label or pemLenOut NULL; derOpt NULL with derLen > 0;
+      derLen > SIZE_MAX / 2 (keeps the length formula from overflowing); pemOpt overlapping
+      derOpt; an invalid label.
+    - Label rules match the decoder exactly, so every label the decoder returns re-encodes,
+      and every label the encoder accepts decodes back:
+        * 1..SSF_PEM_MAX_LABEL_LEN (40) characters;
+        * each character 0x20..0x7E;
+        * no "-----" anywhere in it (the decoder ends the label at the first "-----");
+        * last character not '-' (it would merge with the closing dashes; the decoder then
+          rejects the BEGIN line, so it never returns such a label).
+      Leading, trailing and repeated spaces are allowed, as in the decoder. RFC 7468 is
+      stricter (no leading/trailing/double space or '-'); conforming output is the caller's
+      choice of label. A bad label can only come from a coding error (labels are literals at
+      every planned call site), hence REQUIRE rather than a false return.
+
+  Implementation (_codec/ssfpem.c, about 70 lines)
+    1. static _SSFPEMLabelIsValid(label, &labelLen): one pass applying the rules above.
+    2. need = formula above; *pemLenOut = need; if pemOpt == NULL return true.
+    3. If pemSize < need + 1: SSFCryptSecureZero(pemOpt, pemSize) when pemSize > 0; false.
+    4. memcpy the BEGIN line; for each chunk of up to 48 bytes, SSFBase64Encode(chunk, c,
+       &pem[w], 65, &n) (writes <= 64 chars + NUL) and overwrite the NUL with '\n'; memcpy the
+       END line; NUL.
+    5. SSF_ASSERT(w == need).
+    Uses only the public SSFBase64Encode (SSFBase64Enc24To32 is not in ssfbase64.h). No
+    scratch buffer to wipe: Base64 goes straight to the caller's buffer. ssfpem.c already
+    includes ssfbase64.h and ssfcrypt.h, so no build changes.
+
+  Tests (_codec/ssfpem_ut.c, new "---- Encode ----" sections)
+    1. Known vectors: {0,1,2,3}, "TEST" => exactly
+       "-----BEGIN TEST-----\nAAECAw==\n-----END TEST-----\n"; empty DER, "EMPTY" => exactly
+       "-----BEGIN EMPTY-----\n-----END EMPTY-----\n" (the decoder tests' own strings).
+    2. Line boundaries, n = 1, 2, 3, 45, 46, 47, 48, 49, 95, 96, 97, 144: every body line but
+       the last is 64 characters; the last is 4*ceil(r/3) where r is the bytes left for it;
+       no blank line when n % 48 == 0; "=" / "==" padding exactly when n % 3 is 2 / 1.
+    3. Round trip, every n in 0..300 with a fixed byte pattern: encode, then SSFPEMDecodeNext
+       gives SSF_PEM_BLOCK, the same label and bytes, pos == encoded length; the returned
+       length == strlen(output) == SSF_PEM_ENCODE_SIZE(L, n) - 1.
+    4. OpenSSL byte-exact: embed one OpenSSL-made certificate PEM (3+ lines, padded last
+       line) and one CERTIFICATE REQUEST PEM (reused by G03); decode, re-encode, memcmp with
+       the original text. A comment records the openssl command that made each.
+    5. Measure mode: pemOpt NULL returns true and the same *pemLenOut as a real encode;
+       char buf[SSF_PEM_ENCODE_SIZE(11u, 900u)] compiles (array size) and fits exactly.
+    6. Buffer sizes, using a buffer filled with a marker byte: pemSize = need (no room for
+       NUL), 1, and 0 each return false with *pemLenOut == need, bytes [0, pemSize) zero,
+       bytes past pemSize still the marker; pemSize = need + 1 succeeds.
+    7. Labels, accepted and round-tripped: "X", "CERTIFICATE", "CERTIFICATE REQUEST", "A-B",
+       "A----B", "EC PRIVATE KEY", " X", "X ", "A  B", a 40-character label. Also: every
+       label the decoder accepts in the existing decoder tests re-encodes and decodes back.
+       Refused with SSF_ASSERT_TEST (as ssfbase64_ut.c:143): "", 41 characters, "A-",
+       "A-----B", "-----", '\t', '\n', 0x7F, 0x80.
+    8. REQUIRE: SSF_ASSERT_TEST on NULL label, NULL pemLenOut, NULL derOpt with derLen 1,
+       derLen SIZE_MAX / 2 + 1, overlapping buffers; NULL derOpt with derLen 0 succeeds.
+
+  Docs   : ssfpem.h header comment "block decoder" -> "block encoder and decoder"; ssfpem.md
+           retitled "PEM Block Codec" (renames the [↑] anchors), SSFPEMEncode and
+           SSF_PEM_ENCODE_SIZE added to API Summary and Function Reference with an example,
+           note on output format and label rules; _codec/README.md row -> "PEM (RFC 7468)
+           block encoder and decoder".
+  Done   : ./ssf passes on Linux and with build-asan.ninja; tools/coverage shows 100% of the
+           new lines; ARM and XC32 builds have no new warnings; tools/config-matrix
+           features.sh passes. One commit: ssfpem.{h,c,md}, ssfpem_ut.c, _codec/README.md.
+
+AWSPROV-G02  ssfpkey: build a key from a raw EC scalar
+  Why    : SSFTLSCSetClientCert() only takes an SSFPKey_t from SSFPKeyDecodeDER/PEM. The device
+           generates its key with SSFECDSAKeyGen and should store only the 32/48-byte scalar.
+  Change : SSFPKeyFromECPriv(SSFPKeyType_t type, const uint8_t *priv, size_t privLen,
+           SSFPKey_t *keyOut) for P-256 and P-384: check length, scalar in [1, n-1], derive pub
+           with SSFECDSAPubKeyFromPrivKey, fill every field as SSFPKeyDecodeDER does. Wipe
+           keyOut on failure. Respects the curve compile-outs.
+  Test   : For a fixture key, result equals SSFPKeyDecodeDER of the SEC1 DER of the same key,
+           field by field; scalar 0, n, n+1, all-0xFF, wrong length and disabled curve fail and
+           leave type NONE; SSFTLSCSetClientCert accepts it with the matching certificate and
+           rejects it with a different one; builds with P-256 or P-384 compiled out.
+  Done   : ./ssf passes; tools/config-matrix features.sh passes.
+
+AWSPROV-G03  ssfx509: PKCS#10 CSR encoder
+  Why    : CreateCertificateFromCsr needs a CSR. ssfx509 encodes certificates but not CSRs.
+  Change : Mirror the EncodeTBS / EncodeCert split so signing stays outside ssfx509:
+             SSFX509EncodeCSRInfo(bufOpt, size, params, lenOut)  CertificationRequestInfo
+             SSFX509EncodeCSR(bufOpt, size, params, sig, sigLen, lenOut)
+           params: subject (SSFX509GenName_t), public key (EC P-256 / P-384 uncompressed
+           point, with curve OID), signature algorithm (ecdsa-with-SHA256 / SHA384), empty
+           attributes [0]. Reuse the private _SSFX509EncDN and SPKI encoders in ssfx509.c.
+           RSA CSRs: not in this task (section 5).
+  Test   : Byte-exact against a fixture made with "openssl req -new" from a fixed key, using
+           SSFECDSASign's RFC 6979 deterministic signature; a generated CSR self-verifies (parse
+           with ssfasn1, verify with SSFECDSAVerify); measure mode; one byte short fails;
+           subject with only CN, with all fields, with empty subject; P-384 variant;
+           tools/tlsc-interop or a script runs "openssl req -verify" on generated output.
+  Done   : ./ssf passes; ssfx509.md documents the API; coverage of the new code is 100%
+           (tools/coverage).
+
+AWSPROV-G04  ssfjson: allow a larger input limit per build
+  Why    : The CSR response is ~2.1..2.5 KB (1.8) and SSF_JSON_CONFIG_MAX_IN_LEN is 2047 and
+           not overridable.
+  Change : Wrap SSF_JSON_CONFIG_MAX_IN_LEN (and its _MAX_IN_DEPTH) in #ifndef so a build can
+           pass -DSSF_JSON_CONFIG_MAX_IN_LEN=4095. Keep the default at 2047. Check that internal
+           index types handle values above 2047 (and above 65535, if allowed) and add an #error
+           range check. ssfawsprov will #error if the limit is below what it needs.
+  Test   : ssfjson_ut passes at 2047 and 4095; a new test parses a string of exactly the limit
+           and fails at limit + 1 for both values; add a config-matrix row with 4095.
+  Done   : ./ssf passes in both configurations.
+
+AWSPROV-G05  ssfmqttc: allow AWS-sized client IDs per build
+  Why    : AWS client IDs and thing names are up to 128 bytes; the default
+           SSF_MQTTC_CONFIG_MAX_CLIENT_ID_SIZE is 64.
+  Change : Make the string-size options in ssfmqttc_opt.h #ifndef-overridable (CLIENT_ID,
+           TOPIC, HOST, USERNAME, PASSWORD), keep current defaults, and document in ssfmqttc.md
+           that AWS needs CLIENT_ID_SIZE >= 129 and HOST_SIZE large enough for
+           "<prefix>-ats.iot.<region>.amazonaws.com" (64 is enough for standard endpoints;
+           custom domains may need more).
+  Test   : ssfmqttc_ut passes with CLIENT_ID_SIZE 129 and a 128-byte client ID connects through
+           the mock transport; a 129-byte ID is rejected by Start's validation.
+  Done   : ./ssf passes; config-matrix row added.
+
+AWSPROV-G06  (optional) ssfpkey: encode an EC key as SEC1 / PKCS#8 DER
+  Why    : Only if the product wants keys stored in a standard format or exported for tools.
+           G02 alone is enough for the module.
+  Change : SSFPKeyEncodeDER(key, format, bufOpt, size, lenOut).
+  Test   : Round trip through SSFPKeyDecodeDER; byte-exact against OpenSSL fixtures.
+  Done   : ./ssf passes. Skip unless requested.
+
+AWSPROV-G07  ssfbase64: constant-time encode, wipe the working copy
+  Why    : Found in the G01 audit (pre-existing). SSFBase64Enc24To32() picks each output
+           character by indexing the _b64[] alphabet table with data bits, so encode timing
+           can depend on the data (cache side channel), and it copies up to three input bytes
+           into a local b24[3] that is not wiped. Harmless for certificates and CSRs, which
+           are public; ssfpem.md and ssfbase64.md therefore say to encode public data only.
+           Needed before anything encodes a secret, e.g. G06 writing a private key as PEM.
+  Change : Map each 6-bit value to its character with mask arithmetic, no table index or
+           branch on the value (the mirror of the decoder's constant-time mapping), e.g.
+           c = v + 'A' + ((25 - v) >> 8 & 6) - ((51 - v) >> 8 & 75) - ((61 - v) >> 8 & 15)
+           + ((62 - v) >> 8 & 3), on unsigned ints. Padding position stays data-independent
+           (it depends only on the length). SSFCryptSecureZero() the b24 copy before return;
+           add a unit-test scrub hook in the style of _ssfPEMUTScrubHook. Then drop the
+           "public data only" notes from ssfpem.md and ssfbase64.md.
+  Test   : All 64 values map to the RFC 4648 alphabet (exhaustive); existing ssfbase64 and
+           ssfpem vectors unchanged, including the OpenSSL byte-exact fixtures; the scrub hook
+           sees b24 zeroed on every return; a differential run against the old table encoder
+           over random inputs; check the compiled ARM -Os code of the mapping has no table load
+           and no data-dependent branch (objdump).
+  Done   : ./ssf and ASan pass; tools/coverage 100% of the changed lines; ARM / XC32 no
+           warnings; README Base64 size figure updated if it changes.
+
+No gap for ssftlsc: TLS 1.3, mutual TLS, SNI and ALPN already cover AWS (1.2).
+No gap for ssfmqttc routing: its rx and event callbacks are bound at SSFMQTTCInit, and
+SSFMQTTCDeInit/Init are allowed in STOPPED, so the app Inits with ssfawsprov's callbacks for
+provisioning and re-Inits with its own afterwards (M07, M08).
+
+
+=====================================================================================================
+3. THE MODULE: _net/ssfawsprov.{h,c,md}, _net/ssfawsprov_ut.c, _opt/ssfawsprov_opt.h
+=====================================================================================================
+
+Layer 1 (M02..M06) is pure functions with no I/O. Layer 2 (M07..M08) is a state machine on top
+of ssfmqttc. JSON payload format only.
+
+AWSPROV-M01  Skeleton and build wiring
+  Change : Empty header and source with SSFAWSProvUnitTest(); _opt/ssfawsprov_opt.h with
+           template name size (37), token buffer size, rx copy size, per-step timeouts;
+           #error checks against SSF_JSON_CONFIG_MAX_IN_LEN, SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE
+           and SSF_MQTTC_CONFIG_MAX_CLIENT_ID_SIZE. Add to build.ninja, build-linux.ninja,
+           build-asan.ninja, build scripts, ssf.vcxproj(.filters), main.c unit-test list,
+           _net/README.md.
+  Test   : ./ssf runs the empty unit test on Linux; ARM and XC32 builds have no warnings.
+  Done   : Every build target compiles.
+
+AWSPROV-M02  Topic names and subscription set
+  Change : SSFAWSProvTemplateNameIsValid() (1..36, [0-9A-Za-z_-]); builders for the two request
+           topics and the four response filters; a function that fills an SSFMQTTCSub_t[4] with
+           QoS 1.
+  Test   : Valid names of length 1 and 36; length 0, 37, and each bad character fail; exact
+           topic strings for a fixed name; buffer one byte short fails; topics pass ssfmqttc's
+           own topic validation.
+  Done   : ./ssf passes.
+
+AWSPROV-M03  CreateCertificateFromCsr request
+  Change : SSFAWSProvBuildCsrRequest(curve, priv, subject, out, outSize, outLen): pub from
+           priv, CSR (G03) signed with SSFECDSASign, PEM (G01), then
+           {"certificateSigningRequest":"<pem>"} via ssfjson (escapes "\n"). Wipes scratch.
+           Key generation stays with the caller (SSFECDSAKeyGen), so the key is never inside
+           the module's buffers longer than one call.
+  Test   : Fixed key => byte-exact JSON fixture; the JSON parses back with SSFJsonGetString to
+           the same PEM, which decodes to a CSR that self-verifies; measure mode; one byte short
+           fails; scratch scrubbed (same hook style as _ssfPEMUTScrubHook).
+  Done   : ./ssf passes.
+
+AWSPROV-M04  CreateCertificateFromCsr response parsing
+  Change : SSFAWSProvParseCsrAccepted(payload, len, ...) copies the payload into a
+           NUL-terminated buffer (rxPublish data is only valid during the callback and is not
+           NUL terminated), extracts certificateId, certificatePem -> DER (SSFPEMDecodeNext,
+           label CERTIFICATE) and certificateOwnershipToken. Checks that the certificate parses
+           (SSFX509Parse) and that its public key equals the device key; else fail.
+           SSFAWSProvParseRejected(payload, len, &statusCode, errorCode, errorMessage) for all
+           three error topics.
+  Test   : Fixtures shaped exactly as [FPA] (replace with V02 captures when available):
+           happy path; missing each field; field of the wrong type; certificate for a
+           different key; PEM with two blocks; token longer than its buffer; payload at the JSON
+           limit and one over; non-JSON; embedded NUL; rejected with and without errorMessage.
+  Done   : ./ssf passes; fuzz target added (M10).
+
+AWSPROV-M05  RegisterThing request and response
+  Change : SSFAWSProvBuildRegisterRequest(token, params[], paramCount, out, outSize, outLen)
+           where params is an array of {key, value} strings (parameters omitted when count is
+           0). SSFAWSProvParseRegisterAccepted(payload, len, thingName, thingNameSize,
+           &cfgStart, &cfgEnd) returns thingName (<= 128 bytes) and the byte span of
+           deviceConfiguration so the app can read it with ssfjson.
+  Test   : Byte-exact request fixtures with 0, 1 and several parameters; keys and values that
+           need JSON escaping; buffer one byte short fails. Response: happy path, thingName of
+           128 and 129 bytes, missing or empty deviceConfiguration, wrong types.
+  Done   : ./ssf passes.
+
+AWSPROV-M06  Error classification
+  Change : SSFAWSProvIsRetryable(statusCode): 429 and 5xx retry; 4xx (other) fatal. AWS lists
+           no error codes [FPA], so classify on statusCode only; pass errorCode and
+           errorMessage to the app unchanged.
+  Test   : Table of status codes; boundaries 399/400/428/429/430/499/500/599/600.
+  Done   : ./ssf passes.
+
+AWSPROV-M07  Provisioning state machine over ssfmqttc
+  Change : SSFAWSProvStart(opts, doneFn, ctx) where opts holds the claim-connection
+           SSFMQTTCOpts_t fields, template name, subject, parameters, device key and the
+           deadline mode (claim: none; trusted user: 5 min from first connect). The module
+           provides SSFAWSProvRxPublish / SSFAWSProvEvent for the app to pass to SSFMQTTCInit,
+           and SSFAWSProvTask() for timeouts. States:
+             CONNECTING -> READY (4 subscriptions granted) -> CSR_SENT -> HAVE_CERT
+             -> REGISTER_SENT -> DONE | FAILED
+           Rules:
+           - Publish only after READY ([FPA]: subscribe first).
+           - Per-step response timeout from the opt header; on timeout or a retryable error,
+             retry with exponential backoff plus jitter (throttle limits, 1.3).
+           - Disconnect after HAVE_CERT: ssfmqttc reconnects; resume at REGISTER_SENT while the
+             token is under one hour old, else go back to the CSR step (AWS deletes the
+             unactivated certificate, 1.4).
+           - Trusted-user mode fails with a distinct reason when the 5-minute window closes.
+           - A fatal rejected response ends with FAILED and the AWS statusCode/errorCode.
+           - Ignore PUBLISHes on unexpected topics and duplicate responses.
+           - SSFAWSProvStop() at any point; token and key material wiped on DONE, FAILED, Stop.
+  Test   : Drive through ssfmqttc with the mock transport from ssfmqttc_ut (a scripted broker
+           that sends CONNACK, SUBACK and response PUBLISHes): happy path; rejected on each
+           step (retryable then success, fatal); response timeout; disconnect before CSR,
+           between steps, and after REGISTER_SENT; token age past one hour (fake tick);
+           trusted-user deadline; SUBACK refusing a filter; unexpected-topic PUBLISH;
+           duplicate accepted message; Stop in every state; no key or token bytes left in
+           module state after DONE/FAILED (scrub check).
+  Done   : ./ssf passes; ASan build clean; coverage 100% of reachable lines.
+
+AWSPROV-M08  Handing the credentials to the operational connection
+  Change : On DONE the callback gets {curve, priv scalar, certificate DER, thingName,
+           deviceConfiguration span}. Helpers:
+             SSFAWSProvApplyTLS(session, cred, key) -> SSFPKeyFromECPriv (G02) +
+               SSFTLSCSetClientCert
+             a versioned, CRC-checked persistence blob layout (scalar + cert DER + thingName,
+               < 1.5 KB) that fits one ssfcfg record (SSF_CFG_MAX_STORAGE_SIZE 4096).
+           The app then calls SSFMQTTCStop, DeInit, re-Inits with its own callbacks, and Starts
+           with clientId = thingName.
+  Test   : Blob round trip; corrupted CRC, wrong version, truncated blob fail; ApplyTLS with a
+           matching and a mismatched certificate; end-to-end in the unit test: provision on the
+           mock broker, then reconnect with the new identity and see CONNECT carry thingName.
+  Done   : ./ssf passes.
+
+AWSPROV-M09  Documentation: _net/ssfawsprov.md
+  Content: Flow diagram; API; sizing (rxBlockSize >= ~3 KB, txBlockSize >= ~1.5 KB, JSON limit,
+           CLIENT_ID_SIZE 129); AWS setup: provisioning template, the corrected claim policy
+           with $aws/certificates/create-from-csr/* (1.5), the iot:Data-ATS TLS policy check and
+           update command (1.1), trust Amazon Root CA 1 and 3, port 8883 or 443 with ALPN
+           "x-amzn-mqtt-ca"; trusted-user 5-minute window; JITP note (1.6); what is not
+           supported (section 5).
+  Test   : Every code snippet compiles (copy into a scratch test, as other .md files do).
+  Done   : Reviewed against the final API.
+
+AWSPROV-M10  Fuzz targets
+  Change : tools/fuzz/fuzz_awsprov_parse.c over SSFAWSProvParseCsrAccepted, ParseRejected and
+           ParseRegisterAccepted, with seeds from the unit-test fixtures and V02 captures.
+  Test   : Runs clean under ASan/UBSan for the time run.sh uses for other targets.
+  Done   : tools/fuzz/README.md lists it.
+
+
+=====================================================================================================
+4. LIVE VALIDATION AGAINST AWS (needs an AWS test account; not part of ./ssf)
+=====================================================================================================
+
+AWSPROV-V01  TLS and MQTT connectivity, before M07
+  Do     : Extend tools/tlsc-interop (or a new tools/awsprov-interop) with an AWS row: read the
+           endpoint's TLS policy with describe-domain-configuration; connect with ssftlsc to
+           iot:Data-ATS on 8883 and on 443 with ALPN "x-amzn-mqtt-ca", using a test device
+           certificate (P-256); record negotiated suite, group, server chain root (CA 1 or 3);
+           MQTT CONNECT/CONNACK with keepAlive 120 and a 128-byte client ID.
+  Done   : Both ports connect with TLS 1.3. If the account was on a TLS12_* policy, the update
+           command in 1.1 fixed it and that is written in ssfawsprov.md.
+
+AWSPROV-V02  Capture real provisioning responses, before finalizing M04/M05 fixtures
+  Do     : Using the AWS CLI or SDK (not SSF), run CreateCertificateFromCsr and RegisterThing on
+           a test template; save the accepted and rejected payloads (scrub real IDs, keep
+           lengths). Record the token length and total response sizes.
+  Done   : Fixtures replaced with captures; G04's limit and the opt-header buffer sizes set
+           from measured sizes plus margin.
+
+AWSPROV-V03  End-to-end with ssfawsprov
+  Do     : Claim certificate + template on the test account; run the full flow with SSF on
+           Linux; then reconnect as thingName. Repeat with a trusted-user temporary claim
+           certificate. Run one target build (ARM or MIPS under QEMU) to record RAM and time.
+  Done   : The thing exists, its certificate is ACTIVE, and the device publishes with its own
+           identity. Results written to ssfawsprov.md.
+
+
+=====================================================================================================
+5. OUT OF SCOPE / DEFERRED
+=====================================================================================================
+  - CreateKeysAndCertificate: AWS generates the key and returns it in the response (~4 KB),
+    so the private key crosses the network. The CSR path is preferred.
+  - CBOR payload format: SSF has no CBOR codec; JSON is enough.
+  - RSA device keys and RSA CSRs: P-256 / P-384 cover AWS [XC] and are far cheaper on small
+    cores. Can be added to G03 later.
+  - JITP / JITR: no device protocol beyond mutual TLS (1.6). Documentation only.
+  - Certificate rotation after provisioning (AWS IoT Device Defender / Jobs): separate module.
+  - MQTT 5 and custom authentication (ALPN "mqtt"): not supported by ssfmqttc.
+
+
+=====================================================================================================
+6. SUGGESTED ORDER AND DEPENDENCIES
+=====================================================================================================
+  G01, G02, G04, G05 are independent and small.        V01 can run in parallel with them.
+  G03 needs nothing new (G01 only for its openssl round-trip test).
+  M01 -> M02 -> M03 (needs G01, G03) -> M04 (needs G04) -> M05 -> M06
+  V02 before M04/M05 fixtures are final.
+  M07 needs M02..M06 and G05.  M08 needs G02 and M07.  M09, M10 after M08.  V03 last.
+  G06 only if requested; G07 must land before G06 (or anything else that encodes a secret).

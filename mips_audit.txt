@@ -1,0 +1,243 @@
+SSF MIPS PERFORMANCE AUDIT: RSA-4096 TLS 1.3 HANDSHAKE
+=======================================================
+Audit date : 2026-11-25
+Scope      : client-side cost of a TLS 1.3 handshake (ssftlsc) with 4096-bit RSA, on a single-core
+             little-endian MIPS at ~200 MHz, with RSA-2048 and ECDSA P-384 chains for
+             comparison. Code at commit 434e4af (branch mqtt).
+Status     : measurement only. Nothing here has been implemented; every item is OPEN.
+
+SUMMARY
+-------
+A handshake with an RSA-4096 server certificate takes about 0.5 s of client CPU time. If the
+device also signs with its own RSA-4096 key (mutual TLS), it takes about 6 s.
+
+  Case (-O2 build)                                  Instructions   Time at 200 MHz
+  RSA-4096 server chain (leaf + intermediate)           68 M       ~0.48 s (0.41-0.61)
+  Same, plus an RSA-4096 client key (mutual TLS)       822 M       ~5.8 s  (4.9-7.4)
+  Same, plus a P-256 client key instead                 74 M       ~0.52 s
+  RSA-2048 server chain (leaf + intermediate)           36 M       ~0.25 s (0.22-0.32)
+  Same, plus an RSA-2048 client key                    152 M       ~1.07 s (0.91-1.37)
+  P-384 server chain (leaf + intermediate)             148 M       ~1.03 s (0.89-1.33)
+  Same, with P-384 key exchange instead of X25519      180 M       ~1.26 s (1.08-1.62)
+  P-384 chain, plus a P-384 client key                 163 M       ~1.14 s (0.98-1.47)
+
+  - RSA arithmetic (ssfbn) is 78% of the server-only handshake and 98% of the mutual-TLS one.
+    Each RSA-4096 verify costs ~0.1 s (three per handshake); an RSA-4096 signature ~5.3 s.
+  - RSA-2048 is about half the cost of RSA-4096: ~25 ms per verify, ~0.8 s per signature.
+  - A P-384 certificate chain costs about twice an RSA-4096 one: ~0.28 s per ECDSA P-384 verify
+    (three per handshake). P-384 signing is cheap, ~0.1 s.
+  - -Os instead of -O2 is 25-32% slower.
+  - Instruction counts are measured (emulated real handshakes). The conversion to time assumes
+    a typical in-order MIPS core and is not measured on hardware. A core with the low-area
+    iterative multiplier would roughly double every time.
+
+METHOD
+------
+Build    : mipsel-linux-gnu-gcc 14, -march=mips32r2, -O2 and -Os, static, in the ssf-cross image
+           (tools/cross-test/docker), SSF_CONFIG_HAVE_OPENSSL=0, unit-test build objects.
+Client   : a copy of tools/tlsc-interop/tlsc_interop.c with three changes: a noinline _Mark()
+           around the pollOpen() loop to bracket the handshake, a 1 ms nanosleep per WANT_* poll
+           (the original busy-wait adds spurious instructions), and a 900 s deadline instead of
+           20 s (traced runs are slow and otherwise fail with tls=0).
+Server   : OpenSSL s_server on loopback, -tls1_3, groups and suites forced per scenario.
+Counting : qemu-mipsel-static 10.0 -d in_asm,exec,nochain streamed into a small aggregator:
+           instructions = sum over TBs of (TB size x executions), attributed to object file and
+           function with the link map and nm. Debian's QEMU has no TCG plugin support.
+           Note: QEMU's disassembler prints maddu as "madu".
+Check    : a micro-benchmark timed each primitive alone between _Mark() calls; its results match
+           the differences between handshake scenarios.
+Repeat   : runs repeated to within 0.5%. All scenarios completed a handshake and echoed data.
+Time     : cycles = instructions x CPI, CPI band 1.2 (optimistic) / 1.4 (expected) / 1.8
+           (conservative); time = cycles / 200 MHz. Network round trips and server time extra.
+
+CPI ASSUMPTION
+--------------
+Single-issue in-order core of the 24K / microAptiv class with a pipelined 32x32 multiplier.
+The bignum inner loop is 14 instructions per 32x32 multiply-accumulate step
+(mtlo, mthi, maddu, mflo, mfhi, addu/sltu carry, 2 loads, store, branch, pointer updates) and
+stalls about 3 cycles per step waiting on mflo, giving ~1.2-1.35 CPI in the hot loops.
+Pushing higher:
+  - iterative (area-efficient) MDU on some microAptiv / M14K parts: ~32 cycles per multiply,
+    CPI near 3, roughly 2x every time here;
+  - PIC32MZ-class memory: 4 KB D-cache, flash wait states on I-cache misses.
+On hardware, read CP0 Count (ticks every 2 CPU cycles) around SSFTLSCOpen and the poll loop.
+
+RESULTS BY SCENARIO
+-------------------
+Times in seconds at 200 MHz for CPI 1.2 / 1.4 / 1.8.
+
+  Scenario                                        -O2 insns   -O2 time            -Os insns   -Os @1.4
+  A    RSA-4096 leaf + RSA-4096 int, X25519,        68.3 M    0.41 / 0.48 / 0.61     85.6 M     0.60
+       AES-128-GCM, server-auth only
+  A1   RSA-4096 leaf issued directly by the root    53.6 M    0.32 / 0.38 / 0.48     66.6 M     0.47
+  P384 chain A, secp384r1, AES-256-GCM/SHA-384     102.1 M    0.61 / 0.71 / 0.92    132.6 M     0.93
+  B    A + mTLS RSA-4096 client key (PSS)          822.2 M    4.93 / 5.76 / 7.40   1086.6 M     7.61
+  C    A + mTLS P-256 client key                    74.4 M    0.45 / 0.52 / 0.67     93.5 M     0.65
+  R2K  RSA-2048 leaf + RSA-2048 CA (no int)         32.2 M    0.19 / 0.23 / 0.29     38.4 M     0.27
+  R2   RSA-2048 leaf + RSA-2048 int, X25519         36.1 M    0.22 / 0.25 / 0.32     43.3 M     0.30
+  R2M  R2 + mTLS RSA-2048 client key (PSS)         152.3 M    0.91 / 1.07 / 1.37    195.8 M     1.37
+  E3   P-384 leaf + P-384 int (ECDSA), X25519      147.8 M    0.89 / 1.03 / 1.33    195.2 M     1.37
+  E3G  E3 with secp384r1 key exchange              179.7 M    1.08 / 1.26 / 1.62    240.0 M     1.68
+  E3M  E3 + mTLS P-384 client key                  162.8 M    0.98 / 1.14 / 1.47    213.6 M     1.50
+
+  All except A1 and R2K use a leaf + intermediate chain and a root trust anchor. E3 certificates
+  are signed with ECDSA SHA-384 (the client certificate in E3M is issued by a P-256 CA).
+
+BREAKDOWN OF SCENARIO A (-O2, CPI 1.4)
+--------------------------------------
+  Step                                                  Instructions    Time
+  ClientHello: X25519 key pair                              6.0 M       42 ms
+  ClientHello: P-384 key pair                              11.4 M       80 ms
+  ServerHello: X25519 shared secret                         6.0 M       42 ms
+  Certificate chain: 2 x RSA-4096 PKCS#1 v1.5 verify       28.4 M      199 ms
+  CertificateVerify: RSA-4096 PSS verify                   14.2 M       99 ms
+  SHA-2, HKDF, AES-GCM, X.509/ASN.1, libc                  ~2.3 M       16 ms
+
+By module: ssfbn 77.9%, ssffe25519 15.5%, libc 1.7%, ssfx25519 1.6%, ssfsha2 1.1%,
+ssfaesgcm 0.9%, ssfaes 0.5%; ssftlsc, ssfx509 and ssfasn1 together under 0.2%.
+
+PRIMITIVE COSTS (micro-benchmark, instructions)
+-----------------------------------------------
+  Operation                     -O2            -Os
+  X25519 key pair               5,986,912      5,993,754
+  X25519 shared secret          5,987,057      5,993,926
+  P-384 key pair (comb)        11,382,172     15,385,498
+  P-384 ECDH                   38,281,956     51,562,620
+  RSA-4096 PSS verify          14,196,488     18,695,940
+  RSA-4096 PSS sign           753,531,571    999,974,623
+  RSA-2048 PSS verify           3,590,635      4,693,390
+  RSA-2048 PSS sign           115,683,755    152,103,502
+  ECDSA P-384 verify (*)         ~40.6 M        ~55 M
+  ECDSA P-384 sign (*)           ~15.0 M        ~18 M
+  SHA-256, 16 KB                1,090,748      1,093,745
+  AES-128-GCM, 16 KB            4,235,146      3,349,943
+
+(*) Not in the micro-benchmark; derived from handshake differences. Verify: (E3 - X25519 key
+pair and shared secret - P-384 key pair - ~2.5 M other) / 3 verifies. Sign: E3M - E3.
+
+ECDSA P-384 verify: in E3, SSFBNMul and _SSFBNReduceP384 (19,201 calls each, field multiplies
+on the generic bignum code) are 64% of the handshake, SSFBNMontSquare 5%.
+
+RSA-4096 verify: 28 SSFBNMontSquare (430 k insns each at 128 limbs) + 3 SSFBNMontMul (644 k
+each) = 85% / 14% of the verify. 16 squarings are the exponent (e = 65537); 12 build R^2 mod n
+in SSFBNMontInit (w = 4096 = 1 x 2^12).
+RSA-4096 sign: 4,359 squarings and 1,110 multiplies (CRT at prime width), 9 SSFBNMontInit, one
+binary modular inverse (blinding), 2 public-exponent exponentiations (blinding and the
+signature check); MontSquare 67%, MontMul 25%.
+
+OPPORTUNITIES (ranked by probable payoff; none implemented)
+-----------------------------------------------------------
+MIPS-01  PERF  ssftlsc: ClientHello1 always computes a P-384 key share                 [M]
+  Effect : -11.4 M insns (-17% of scenario A, ~80 ms at CPI 1.4) when the server picks X25519.
+  Trade  : servers that insist on P-384 then cost a HelloRetryRequest round trip. Alternatively
+           compute both key pairs while idle so they leave the critical path.
+  Status : OPEN
+
+MIPS-02  PERF  ssfbn: R^2 mod n from 12 Montgomery squarings per 4096-bit modulus       [E]
+  Effect : the R^2 setup is 5.2 M insns, ~37% of each RSA-4096 verify, ~15.5 M (~23%) of
+           scenario A. A division-based R^2 (2^(2w) mod n, about one MontMul of work) or caching
+           R^2 for trust-anchor keys should recover most of it.
+  Risk   : R^2 is key-derived for secret primes; any new path must stay constant-time there.
+  Status : OPEN
+
+MIPS-03  PERF  ssfbn: multiply-accumulate inner loop is 14 instructions per step         [E]
+  Effect : a hand-written MIPS32 loop typically needs 7-9 per step; estimated 1.5-1.8x on RSA
+           (scenario B ~5.8 s -> ~3.5 s). Option-gated assembly; must keep constant time.
+  Status : OPEN
+
+MIPS-04  PERF  build: ssfbn at -O2 even in an -Os image                                 [M]
+  Effect : -Os costs +25% (scenario A) / +32% (B), almost all in ssfbn. Size cost not measured.
+  Status : OPEN
+
+MIPS-05  PERF  deployment: P-256 rather than RSA-4096 client keys for mutual TLS        [M]
+  Effect : a P-256 client key adds 6.1 M insns (~43 ms); RSA-4096 adds 754 M (~5.3 s).
+  Status : OPEN (guidance, not a code change)
+
+MIPS-06  PERF  ssfec / ssfbn: ECDSA P-384 verify ~40.6 M insns (~0.28 s), 3x RSA-4096  [M]
+  Effect : three verifies are ~122 M of the 148 M P-384-chain handshake (E3). Field multiplies
+           go through generic SSFBNMul + _SSFBNReduceP384; a fixed 12-limb multiply, the
+           MIPS-03 inner loop, or a joint (Shamir) double-scalar multiply in verify are the
+           levers. Gain not estimated.
+  Status : OPEN
+
+Labels: [M] measured, [E] estimated.
+
+SECURITY: P-384 VS RSA-4096
+---------------------------
+Bit-security figures are standard published estimates (NIST SP 800-57 Part 1 and the usual
+extrapolations of factoring attacks), not measured here.
+
+                              RSA-4096                          P-384
+  Classical security          ~140-150 bits (GNFS)              ~192 bits (Pollard rho)
+  NIST SP 800-57              not listed; between RSA-3072      192-bit
+                              (128) and RSA-7680 (192)
+  CNSA 1.0                    approved (>= 3072 bits)           approved
+  Quantum (Shor)              broken; ~8,000 logical qubits     broken; a few thousand logical
+                                                                qubits, likely to fall first
+
+P-384 is stronger by roughly 40-50 bits classically (about 2^40 or more times the work). Neither
+resists a large quantum computer.
+
+What this means for these handshakes:
+  1. A session is only as strong as its weakest part. Scenario A uses X25519 (~128-bit) and
+     AES-128-GCM, so it is capped at ~128 bits whichever certificate is used. Reaching 192 bits
+     also needs P-384 key exchange and AES-256-GCM (scenario E3G, ~1.26 s).
+  2. The certificate key only protects authentication (no server impersonation during the
+     handshake). TLS 1.3 key exchange is ephemeral, so a certificate key stolen later does not
+     decrypt recorded sessions; the key only has to hold for the certificate's lifetime.
+  3. Both are above the 128-bit level considered sufficient beyond 2030, so choose on cost and
+     compatibility. On this core RSA-4096 verifies faster (~0.1 s vs ~0.28 s); P-384 signs far
+     faster (~0.1 s vs ~5.3 s) with much smaller keys and signatures.
+  4. For long-term confidentiality the threat is quantum record-now-decrypt-later, which
+     switching RSA-4096 to P-384 does not address. Post-quantum key exchange (ML-KEM, or an
+     X25519 + ML-KEM hybrid) does; ssftlsc does not support it yet.
+
+XC32 BUILD CHECK: PIC32MZ2051W104132
+------------------------------------
+Date     : 2026-11-25, commit 434e4af. Compile and link only; nothing executed. Problems recorded,
+           not fixed.
+Part     : no PIC32MZ2051W10432 exists in either toolchain; 32MZ2051W104132 (PIC32MZ W1, shipped
+           with v4.45) was used as the intended part.
+Sources  : all 122 .c files in build-linux.ninja (library, unit tests, main.c, ssfport.c).
+Flags    : -std=gnu11 -O2 -g -ffunction-sections -fdata-sections, the build-arm.sh warning set,
+           -DSSF_CONFIG_HAVE_OPENSSL=0 -DSSF_CONFIG_ENABLE_THREAD_SUPPORT=0.
+           Link: all objects that compiled, -Wl,--gc-sections.
+
+  Toolchain              Target options                               Optimization
+  XC32 v4.45 (gcc 8.3.1) -mprocessor=32MZ2051W104132                  -O2 (free license ignores
+                                                                      -Os: "requires the MPLAB
+                                                                      XC32 PRO compiler")
+  XC32 v6.00 (gcc 13.2.1) -mprocessor fails: "No DFP location has     -O2
+                         been provided. The -mdfp option is required
+                         when using -mprocessor." No device pack is
+                         installed, so the core options v4.45 derives
+                         for this part were used: -mips32r2 -mabi=32
+                         -mdsp -mdspr2 -msoft-float -EL
+
+Result: 118 of 122 sources compile with both; neither produces a linked image.
+
+Compile errors (both toolchains)
+  main.c:40                 fatal error: poll.h: No such file or directory
+  _net/ssfnetsock.c:55      fatal error: netdb.h: No such file or directory
+  _net/ssfnetsock_ut.c:50   fatal error: sys/socket.h: No such file or directory
+  _net/ssftlsc_ut.c:51      fatal error: sys/socket.h: No such file or directory
+
+Compile warnings (v4.45: 8, v6.00: 11)
+  _net/ssfmqttc.c:337, 423, 457, 630, 692, 1323                         v4.45  v6.00
+      -Wcast-align: cast of a linked-list item to SSFMQTTCTxBlock_t* / SSFMQTTCRxBlock_t*
+  _net/ssftlsc.c:3079                                                   v4.45  v6.00
+      -Wcast-align: cast of the transport to SSFTLSCSession_t*
+  _net/ssftlsc.c:127                                                    v4.45  v6.00
+      -Wunused-function: '_Put8' defined but not used
+  _crypto/ssfbn.c:3057 (SSFBNModExpMontPub), reported twice                    v6.00
+      -Wstrict-overflow: assuming signed overflow does not occur when changing
+      X +- C1 cmp C2 to X cmp C2 -+ C1
+  _crypto/ssfbn.c:3519 (end of SSFBNGenPrime)                                  v6.00
+      -Wstrict-overflow: same message
+
+Link (both fail; each stops before reporting undefined references)
+  v4.45 : pic32m-ld: cannot find -l:default_isr_vectors.o. This install's support for the part
+          is source only (.S, .ld); other parts (e.g. 32MX320F032H) ship the prebuilt object.
+  v6.00 : not meaningful without a device pack (no startup code or device linker script):
+          "A heap is required, but has not been specified" (_min_heap_size undefined);
+          "cannot find entry symbol _start"; warning: fopen links the C library's open() stub.

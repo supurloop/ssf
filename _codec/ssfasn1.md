@@ -118,6 +118,10 @@ context-implicit constructed, etc.).
   tagging drops the `CONSTRUCTED` bit when the underlying type is primitive — use
   [`SSF_ASN1_CONTEXT_IMPLICIT(n)`](#api-summary) and OR `SSF_ASN1_CONSTRUCTED` back in if
   the underlying type is itself constructed.
+- **Code not reached by the unit tests, by construction.** The needless-leading-`0x00`
+  rejection in the internal unsigned-INTEGER check cannot fire: both callers
+  (`SSFASN1DecGetUInt()`, `SSFASN1DecGetIntU64()`) run `SSFASN1DecGetInt()` first, which
+  already refuses empty and non-minimal INTEGERs. It is kept as a defensive check.
 
 <a id="configuration"></a>
 

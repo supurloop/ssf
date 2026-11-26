@@ -213,6 +213,10 @@ comparable security.
   point re-parses the DER blob on entry. If you're signing many messages under the same
   key, this is a few hundred microseconds per call that could in principle be
   amortised — at the moment the API does not expose a parsed-key handle.
+- **Code not reached by the unit tests, by construction.** The `p == 1` rejection in
+  [`SSFRSAPrivKeyIsValid()`](#ssfrsaprivkeyisvalid) cannot fire: the private-key decoder pins
+  `p` to half the modulus width, and the public-field rules then refuse any modulus narrow
+  enough for a one-limb `p`. It is kept as a defensive check.
 
 <a id="configuration"></a>
 

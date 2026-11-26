@@ -269,6 +269,17 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   200 bytes, and the output goes straight into the caller's buffer. Reduce the chain depth or the
   SAN / extension / Name Constraints limits in [`_opt/ssfx509_opt.h`](../_opt/ssfx509_opt.h) to
   fit smaller stacks; see the module's footnotes in the [SSF README](../README.md#codecs).
+- **Code not reached by the unit tests, by construction.**
+  - The countryName encode failure: the DN encoder validates `c` (exactly two printable
+    characters) before encoding it.
+  - The over-length hostname check in the internal hostname matcher: chain verification
+    treats a hostname longer than 253 characters as non-DNS, so it fails closed on the IP
+    path and never reaches the matcher.
+  - Most child-failure returns in the certificate encoder: every level measures its children
+    and rejects a short buffer before writing, so a child can fail only on an internal
+    constant OID or a length near 4 GB.
+  - The chain verifier's certificate re-parse failure, which fires only if a certificate that
+    already parsed fails to parse again.
 
 <a id="configuration"></a>
 

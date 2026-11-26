@@ -74,6 +74,8 @@ so callers can size their MAC buffer without hard-coding a constant.
 - `hash` must be one of the four defined variants in [`SSFHMACHash_t`](#ssfhmachash-t); the
   `MIN`/`MAX` sentinels are bounds only and must not be passed as a valid selector.
 - `key` must be non-`NULL`. `msg` / `data` may be `NULL` when the corresponding length is `0`.
+- **Code not reached by the unit tests, by construction.** On 64-bit hosts the update path
+  feeds inputs larger than `UINT32_MAX` bytes in 4 GB chunks; no unit test hashes that much.
 
 <a id="configuration"></a>
 

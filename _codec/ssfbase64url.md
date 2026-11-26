@@ -51,8 +51,9 @@ the encoding used by JWS / JWT (RFC 7515) and other web token formats.
   caller that reads `*outLen` without checking the return value cannot consume a partial result.
 - **Stack scratch is scrubbed.** Base64URL is the encoding of JWK private keys and JWS / HMAC
   secrets, so the re-padded stack copy is cleared with `SSFCryptSecureZero()` before return on
-  every path that writes it, and a failed encode clears its output buffer the same way. Note that the underlying [`ssfbase64`](ssfbase64.md) alphabet lookup
-  is not constant-time; decode timing can depend on the character values being processed.
+  every path that writes it, and a failed encode clears its output buffer the same way. The
+  underlying [`ssfbase64`](ssfbase64.md) decode is constant-time per character. Translating
+  `-` / `_` to `+` / `/` before decoding still branches on the character.
 
 <a id="configuration"></a>
 

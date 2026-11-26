@@ -76,7 +76,14 @@ SAFE-02  ssfbase64 (used by ssfpem / ssfpkey): data-dependent timing over key te
   Fix      : branch-free range decode (A-Z, a-z, 0-9, +, /, = by masks). Measured: +94 B
              code, 3.4x faster on the host (~150 -> ~40 cycles/char on M4, E); checked
              against the old table for all 256 byte values. Also PEM-01.
-  Status   : OPEN
+  Status   : DONE (2026-11-25): as specified (range masks for A-Z / a-z / 0-9, equality
+             masks for + / =); the return values 0-63 / 64 / 65 are unchanged. No branch or
+             table index on the character in the generated code: GCC -Os / -O2 / -O3 on
+             Cortex-M4, -Os / -O2 on M0+, -O2 / -O3 on x86. Host per-character time was 2.2
+             ('A') to 37.0 ('/') TSC ticks, now 5.6 for every character. Left as is: the
+             encoder still indexes _b64 by data (no in-tree caller encodes secrets), and
+             ssfbase64url's '-' / '_' translation branches on the character. Measurements
+             under PEM-01.
 
 SAFE-03  ssfbn: a window size that does not divide 32 silently gives wrong results     [V]
   Location : _opt/ssfbn_opt.h:52-59 (SSF_BN_MODEXP_WIN_K), _crypto/ssfbn.c:2945
@@ -1179,7 +1186,20 @@ ssfpem  (PEM)     baseline: code 719 B; bss 0
 =====================================================================================
 PEM-01  PERF  ~3.4x faster Base64 decode (host); +94 B code                               M
   See SAFE-02 (the same change, made for its timing behaviour).
-  Status   : OPEN
+  Status   : DONE (2026-11-25), with SAFE-02. Measured (-Os, on 71fa825):
+             _SSFBase64GetEncoding 32 -> 134 B (+102) on Cortex-M4, 28 -> 126 B (+98) on M0+;
+             its leaf frame 8 -> 20 B (M4), 0 -> 32 B (M0+), at the bottom of the PEM decode
+             chain, far below the RSA-sign peak. Host SSFPEMDecodeNext: RSA-2048 key (1,704
+             chars) 14.1 -> 4.8 us, RSA-4096 (3,272 chars) 33.1 -> 9.4 us; SSFPKeyDecodePEM
+             153 -> 128 us and 557 -> 499 us (the rest is outside Base64). M4 (E): ~15-580,
+             ~300 average, -> ~45 cycles per character (43 straight-line instructions).
+             Decoded DER identical for both keys. Test: every byte value 0-255 in every
+             position of seven quads against a reference decoder over an independently
+             written alphabet (return value and output bytes); a behaviour guard, passing on
+             HEAD. Mutants under ASan: 10 of 10 killed (range bounds Z->Y, 9->8, a->b; the
+             lowercase and digit offsets; '=' mask dropped; invalid 65 -> 64; mask shift 31
+             -> 30; equality mask without -1; '/' -> 62); invalid 65 -> 64 is caught only by
+             the new test.
 
 PEM-02  CODE / PERF  one call layer per quad (small)                                      E
   Location : _codec/ssfpem.c:166-169

@@ -41,19 +41,30 @@
 static const uint8_t _b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
 
 /* --------------------------------------------------------------------------------------------- */
+/* Branch-free masks for a byte value x (0-255): all ones if lo <= x <= hi (or x == c), else 0.  */
+/* --------------------------------------------------------------------------------------------- */
+#define _SSF_B64_IN(x, lo, hi) \
+    ((uint32_t)0u - (((((uint32_t)(lo) - 1u) - (x)) & ((x) - ((uint32_t)(hi) + 1u))) >> 31))
+#define _SSF_B64_EQ(x, c) ((uint32_t)0u - ((((x) ^ (uint32_t)(c)) - 1u) >> 31))
+
+/* --------------------------------------------------------------------------------------------- */
 /* Returns encoding of 0-63 for valid encoded char, 64 for '=' pad, else 65 for invalid.         */
+/* Constant time in e: no branch or table index depends on the character (SAFE-02, PEM-01).      */
 /* --------------------------------------------------------------------------------------------- */
 static uint8_t _SSFBase64GetEncoding(uint8_t e)
 {
-    const uint8_t *p = _b64;
+    uint32_t x = e;
+    uint32_t mU = _SSF_B64_IN(x, 'A', 'Z');
+    uint32_t mL = _SSF_B64_IN(x, 'a', 'z');
+    uint32_t mD = _SSF_B64_IN(x, '0', '9');
+    uint32_t mP = _SSF_B64_EQ(x, '+');
+    uint32_t mS = _SSF_B64_EQ(x, '/');
+    uint32_t mE = _SSF_B64_EQ(x, '=');
+    uint32_t v;
 
-    /* Is this table entry neither the char sought nor the terminator? */
-    while ((*p != e) && (*p != 0))
-    {
-        /* Yes, try the next entry */
-        p++;
-    }
-    return (uint8_t)(p - _b64);
+    v = (mU & (x - 'A')) | (mL & (x - ('a' - 26u))) | (mD & (x + (52u - '0'))) |
+        (mP & 62u) | (mS & 63u) | (mE & 64u);
+    return (uint8_t)(v | (~(mU | mL | mD | mP | mS | mE) & 65u));
 }
 
 /* --------------------------------------------------------------------------------------------- */

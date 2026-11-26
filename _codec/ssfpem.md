@@ -50,9 +50,9 @@ provisioning.
   does not want without room for them.
 - The label pointer points into the input buffer; it is not null-terminated. Compare it with
   [`SSFPEMLabelIs()`](#ssfpemlabelis).
-- Base64 decoding is not constant-time (the [`ssfbase64`](ssfbase64.md) alphabet lookup), so
-  decode timing can depend on the key bytes being decoded. Decode keys at load time, not where an
-  attacker can time repeated decodes.
+- Base64 decoding is constant-time per character (see [`ssfbase64`](ssfbase64.md)). The body
+  loop still branches on whitespace and line breaks, so timing reflects the layout of the text
+  and its length, not the key bytes.
 
 <a id="configuration"></a>
 

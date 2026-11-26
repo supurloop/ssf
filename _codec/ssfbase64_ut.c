@@ -87,6 +87,45 @@ SSBase64UT_t _b64StringUT[] = {
 };
 
 /* --------------------------------------------------------------------------------------------- */
+/* Reference character decode for the SAFE-02 / PEM-01 test: the alphabet's index, 64 for '=',   */
+/* else 65. Found by searching an alphabet written out independently of ssfbase64.c.             */
+/* --------------------------------------------------------------------------------------------- */
+static uint8_t _SSFBase64UTRefEnc(uint8_t ch)
+{
+    static const char alphabet[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
+    uint8_t i;
+
+    for (i = 0; i < 65u; i++)
+    {
+        if ((uint8_t)alphabet[i] == ch) return i;
+    }
+    return 65u;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Reference block decode: the rules of SSFBase64Dec32To24 over _SSFBase64UTRefEnc.              */
+/* --------------------------------------------------------------------------------------------- */
+static uint8_t _SSFBase64UTRefDec(const char *q, uint8_t *out)
+{
+    uint8_t a = _SSFBase64UTRefEnc((uint8_t)q[0]);
+    uint8_t b = _SSFBase64UTRefEnc((uint8_t)q[1]);
+    uint8_t c = _SSFBase64UTRefEnc((uint8_t)q[2]);
+    uint8_t d = _SSFBase64UTRefEnc((uint8_t)q[3]);
+
+    if ((a >= 64u) || (b >= 64u) || (c >= 65u) || (d >= 65u)) return 0;
+    if ((c == 64u) && (d != 64u)) return 0;
+    if ((c == 64u) && ((b & 0x0Fu) != 0u)) return 0;
+    if ((d == 64u) && (c != 64u) && ((c & 0x03u) != 0u)) return 0;
+    out[0] = (uint8_t)((a << 2) | (b >> 4));
+    if (c == 64u) return 1;
+    out[1] = (uint8_t)((b << 4) | (c >> 2));
+    if (d == 64u) return 2;
+    out[2] = (uint8_t)((c << 6) | d);
+    return 3;
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Performs unit test on Base64 external interface.                                              */
 /* --------------------------------------------------------------------------------------------- */
 void SSFBase64UnitTest(void)
@@ -265,6 +304,38 @@ void SSFBase64UnitTest(void)
     /* SSFBase64Dec32To24 with b24outSize=2 on padded 2-byte block must succeed */
     SSF_ASSERT(SSFBase64Dec32To24("YWI=", b24, 2) == 2);
     SSF_ASSERT(memcmp(b24, "ab", 2) == 0);
+
+    /* SAFE-02 / PEM-01: every byte value (0-255, including '\0', '=' and the bytes next to each */
+    /* alphabet range) in every position of several quads decodes as the reference does: the  */
+    /* same return value and the same output bytes.                                            */
+    {
+        static const char *bases[] = { "QUJD", "+/90", "zZaA", "AA==", "AAA=", "//8=", "Yg==" };
+        size_t bi;
+        uint16_t v;
+        uint8_t pos;
+
+        for (bi = 0; bi < (sizeof(bases) / sizeof(bases[0])); bi++)
+        {
+            for (pos = 0; pos < 4u; pos++)
+            {
+                for (v = 0; v < 256u; v++)
+                {
+                    char q[4];
+                    uint8_t got[3] = { 0xA5u, 0xA5u, 0xA5u };
+                    uint8_t exp[3] = { 0xA5u, 0xA5u, 0xA5u };
+                    uint8_t gotLen;
+                    uint8_t expLen;
+
+                    memcpy(q, bases[bi], 4);
+                    q[pos] = (char)v;
+                    gotLen = SSFBase64Dec32To24(q, got, sizeof(got));
+                    expLen = _SSFBase64UTRefDec(q, exp);
+                    SSF_ASSERT(gotLen == expLen);
+                    SSF_ASSERT(memcmp(got, exp, sizeof(got)) == 0);
+                }
+            }
+        }
+    }
 
     /* SSFBase64Decode with outSize=0 and empty input must succeed (vacuous decode) */
     outLen = 99;

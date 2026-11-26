@@ -9,7 +9,8 @@ Status     : MQTT-IOP-01 and MQTT-FEAT-07 are FIXED (commit 0bc61a9); MQTT-IOP-0
              MQTT-IOP-04, MQTT-IOP-05, MQTT-IOP-06, MQTT-IOP-09, MQTT-IOP-11, MQTT-FEAT-01,
              MQTT-FEAT-02, MQTT-FEAT-04 and MQTT-FEAT-10 are FIXED; MQTT-FEAT-03, MQTT-FEAT-05,
              MQTT-FEAT-08, MQTT-FEAT-09, MQTT-FEAT-11 and MQTT-FEAT-13 are deferred; MQTT-IOP-07,
-             MQTT-IOP-08, MQTT-FEAT-06 and MQTT-FEAT-12 are won't do; every other item is OPEN.
+             MQTT-IOP-08, MQTT-IOP-10, MQTT-FEAT-06 and MQTT-FEAT-12 are won't do. No item is
+             open.
 
 Lists
   Part A  Interoperability problems, most likely to happen with real brokers first.
@@ -274,6 +275,14 @@ MQTT-IOP-10  A packet identifier is not checked against in-flight ids before it 
                unacknowledged. txPublishTimeout makes this practically impossible, but nothing
                guarantees it.
   Suggestion : Skip ids still present in txInflight (a list of at most txBlocks entries).
+  Status     : WON'T DO (2026-11-26). Ids are shared by QoS 1 PUBLISH, the SUBSCRIBE and its
+               MQTT-FEAT-04 retries. A reuse needs 65535 ids issued while one QoS 1 PUBLISH
+               (bounded by txPublishTimeout) or SUBSCRIBE (bounded by subscribeTimeout) is still
+               unacknowledged: with a 10 s timeout, over 6500 QoS 1 publishes per second with one
+               stuck. If it happened, the broker would be unaffected (it holds no QoS 1 id after
+               its PUBACK); on the client a PUBACK would complete the first in-flight entry with
+               that id, so a completion could be attributed to the wrong publish. Nothing is
+               lost or corrupted on the wire.
 
 MQTT-IOP-11  A QoS 2 PUBLISH from the broker ends the connection
   Probability: VERY LOW
@@ -346,7 +355,7 @@ MQTT-FEAT-03  Persistent sessions (CleanSession = 0)
                consistent, and optionally skip SUBSCRIBE when the session is present. The
                txPublish completion contract and txPublishTimeout teardown would need to be
                reworked.
-  Status     : OPEN. Deferred (2026-11-26). Needed when the system relies on the broker
+  Status     : DEFERRED (2026-11-26). Needed when the system relies on the broker
                queueing cloud-to-device QoS 1 for offline devices; retained state (FEAT-01),
                a device twin/shadow, or app-level command acks cover most other designs.
 
@@ -375,7 +384,7 @@ MQTT-FEAT-05  SUBSCRIBE and UNSUBSCRIBE at run time
                the session and every in-flight publish. UNSUBACK is currently a protocol error.
   Effort     : Medium. A second in-flight SUBSCRIBE/UNSUBSCRIBE and new callbacks; the
                configured set must still be re-sent on reconnect.
-  Status     : OPEN. Deferred (2026-11-26). Workarounds: a wildcard superset in the Start set
+  Status     : DEFERRED (2026-11-26). Workarounds: a wildcard superset in the Start set
                filtered by the app, or Stop() + Start(). When done, build on the MQTT-FEAT-04
                SUBACK path (staging, id matching, per-filter results, SUBSCRIPTION_CHANGED) and
                share its single outstanding-SUBSCRIBE slot with the refused-filter retry.
@@ -408,7 +417,7 @@ MQTT-FEAT-08  MQTT 5.0
                and request/response correlation. Major brokers and clouds all still accept
                3.1.1, so this is about features, not compatibility.
   Effort     : Large (properties in every packet type, new CONNACK/DISCONNECT semantics).
-  Status     : OPEN. Deferred (2026-11-26). Brokers and clouds all accept 3.1.1. When done,
+  Status     : DEFERRED (2026-11-26). Brokers and clouds all accept 3.1.1. When done,
                failure teardown can send DISCONNECT with a reason code and 0x04 (Disconnect
                with Will Message), which carries the reason without cancelling the will.
 
@@ -420,7 +429,7 @@ MQTT-FEAT-09  QoS 2
                QoS 2 at all, so demand is limited.
   Effort     : Medium (both directions need state that must persist with FEAT-03 to be
                meaningful).
-  Status     : OPEN. Deferred (2026-11-26), with MQTT-FEAT-03 on which it depends. A QoS 2
+  Status     : DEFERRED (2026-11-26), with MQTT-FEAT-03 on which it depends. A QoS 2
                PUBLISH from the broker is reported as RX_PUBLISH_QOS2 (MQTT-IOP-11).
 
 MQTT-FEAT-10  MQTT over WebSockets
@@ -443,7 +452,7 @@ MQTT-FEAT-11  Zero-length client identifier (server-assigned)
   Spec       : 3.1.3.1 (a Server MAY allow zero bytes with CleanSession=1).
   Why        : Convenience for throwaway or test clients; production devices need a stable id.
   Effort     : Trivial (relax the Start() assertion; the encoder already handles it).
-  Status     : OPEN. Deferred (2026-11-26). When done, document that 3.1.1 never tells the
+  Status     : DEFERRED (2026-11-26). When done, document that 3.1.1 never tells the
                client its assigned id, that each reconnect is a new client (no takeover of a
                stale connection, so its will fires only after its keep-alive), and that a
                broker refusing it (CONNACK 0x02) is retried at the backoff rate.
@@ -477,7 +486,7 @@ MQTT-FEAT-13  Failure message: an app-built QoS 0 PUBLISH sent when the client d
   Open       : E1 payload by callback with reason (recommended) or fixed; E2 bounded drain
                (recommended) or send-and-close; report whether it was sent (event or flag).
   Effort     : Medium (new teardown phase in the state machine, callback during teardown).
-  Status     : OPEN. Deferred; do after MQTT-FEAT-02. Since MQTT-FEAT-04 the most common case
+  Status     : DEFERRED; do after MQTT-FEAT-02. Since MQTT-FEAT-04 the most common case
                (a SUBSCRIBE refused on every attempt) is reported by the app at QoS 1 over the
                live connection, so this now matters mainly for broker protocol errors.
 

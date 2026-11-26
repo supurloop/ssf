@@ -1023,36 +1023,298 @@ static void _SSFMQTTCUTScenarioConnAckRefused(void)
     _SSFMQTTCUTEnd();
 }
 
+/* Two filters: "a/b" QoS 1 and "c" QoS 0. */
+static const SSFMQTTCSub_t _utTwoSubs[] = { { "a/b", SSF_MQTTC_QOS_1 }, { "c", SSF_MQTTC_QOS_0 } };
+static const uint8_t _utPktSubscribe2Subs[] =
+{ 0x82, 0x0C, 0x00, 0x01, 0x00, 0x03, 'a', '/', 'b', 0x01, 0x00, 0x01, 'c', 0x00 };
+
 /* --------------------------------------------------------------------------------------------- */
-/* Tests SUBACK failure code and QoS downgrade both ending the attempt.                          */
+/* Drives a fresh client through CONNACK, injects subAck and pumps; opts uses subs/subCount.     */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTSubAckAttempt(const SSFMQTTCSub_t *subs, uint32_t subCount,
+                                     const uint8_t *subscribe, size_t subscribeLen,
+                                     const uint8_t *subAck, size_t subAckLen)
+{
+    SSFMQTTCOpts_t opts;
+
+    _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+    _SSFMQTTCUTOptsInit(&opts);
+    opts.subsOpt = subs;
+    opts.subCount = subCount;
+    opts.connectTimeout = SSF_TICKS_PER_SEC * 5u;     /* Reconnects must not race a loaded host */
+    opts.subscribeTimeout = SSF_TICKS_PER_SEC * 5u;
+    SSFMQTTCStart(&opts);
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktConnect));
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktConnAckOk));
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectTx(subscribe, subscribeLen);
+    _SSFMQTTCUTInject(subAck, subAckLen);
+    _SSFMQTTCUTPump();
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Tests that a SUBACK failure code on any filter ends the attempt, even if others were granted. */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTScenarioSubAckRefused(void)
 {
     static const uint8_t subAckFail[] = { 0x90, 0x03, 0x00, 0x01, 0x80 };
-    static const uint8_t subAckDown[] = { 0x90, 0x03, 0x00, 0x01, 0x00 };
+    static const uint8_t subAckFirst[] = { 0x90, 0x04, 0x00, 0x01, 0x80, 0x00 };
+    static const uint8_t subAckSecond[] = { 0x90, 0x04, 0x00, 0x01, 0x01, 0x80 };
+    static const uint8_t subAckDownFail[] = { 0x90, 0x04, 0x00, 0x01, 0x00, 0x80 };
+    static const uint8_t subAckBoth[] = { 0x90, 0x04, 0x00, 0x01, 0x80, 0x80 };
     static const SSFMQTTCUTEventRec_t expected[] =
     {
         { SSF_MQTTC_EVENT_CONNECTED, SSF_MQTTC_REASON_NONE },
         { SSF_MQTTC_EVENT_CONNECT_FAILED, SSF_MQTTC_REASON_SUBSCRIBE_REFUSED },
     };
-    const uint8_t *subAcks[2];
+    const uint8_t *subAcks[5];
+    uint32_t i;
+
+    subAcks[0] = subAckFail;
+    subAcks[1] = subAckFirst;
+    subAcks[2] = subAckSecond;
+    subAcks[3] = subAckDownFail;
+    subAcks[4] = subAckBoth;
+    for (i = 0; i < 5; i++)
+    {
+        if (i == 0)
+        {
+            _SSFMQTTCUTSubAckAttempt(_utOneSub, 1, SSF_MQTTC_UT_ARRAY(_utPktSubscribe1),
+                                     subAcks[i], sizeof(subAckFail));
+        }
+        else
+        {
+            _SSFMQTTCUTSubAckAttempt(_utTwoSubs, 2, SSF_MQTTC_UT_ARRAY(_utPktSubscribe2Subs),
+                                     subAcks[i], sizeof(subAckFirst));
+        }
+        SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
+        _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktDisconnect));   /* Session was up */
+        _SSFMQTTCUTExpectEvents(expected, 2);
+        _SSFMQTTCUTEnd();
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Tests that a lower granted QoS reaches READY with SUBSCRIBE_DOWNGRADED, that the connection   */
+/* then works, and that the next connection's exact grant reports READY with NONE.               */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTScenarioSubAckDowngraded(void)
+{
+    static const uint8_t subAckDown[] = { 0x90, 0x03, 0x00, 0x01, 0x00 };
+    static const uint8_t subAckDown2[] = { 0x90, 0x04, 0x00, 0x01, 0x00, 0x00 };
+    static const uint8_t subAckExact2[] = { 0x90, 0x04, 0x00, 0x01, 0x01, 0x00 };
+    static const uint8_t rxQos0[] = { 0x30, 0x04, 0x00, 0x01, 'u', 'x' };
+    static const uint8_t reserved[] = { 0xF0, 0x00 };
+    static const uint8_t subscribeId2[] =
+    { 0x82, 0x08, 0x00, 0x02, 0x00, 0x03, 'a', '/', 'b', 0x01 };
+    static const uint8_t subAckOkId2[] = { 0x90, 0x03, 0x00, 0x02, 0x01 };
+    static const uint8_t subAckDownId2[] = { 0x90, 0x03, 0x00, 0x02, 0x00 };
+    static const SSFMQTTCUTEventRec_t down[] =
+    {
+        { SSF_MQTTC_EVENT_CONNECTED, SSF_MQTTC_REASON_NONE },
+        { SSF_MQTTC_EVENT_READY, SSF_MQTTC_REASON_SUBSCRIBE_DOWNGRADED },
+    };
+    static const SSFMQTTCUTEventRec_t exact[] =
+    {
+        { SSF_MQTTC_EVENT_CONNECTED, SSF_MQTTC_REASON_NONE },
+        { SSF_MQTTC_EVENT_READY, SSF_MQTTC_REASON_NONE },
+    };
+    static const SSFMQTTCUTEventRec_t lost[] =
+    { { SSF_MQTTC_EVENT_DISCONNECTED, SSF_MQTTC_REASON_PROTOCOL } };
     uint32_t i;
     SSFMQTTCOpts_t opts;
 
-    subAcks[0] = subAckFail;
-    subAcks[1] = subAckDown;
+    /* One filter, QoS 1 requested, QoS 0 granted: READY, and a QoS 0 PUBLISH is delivered */
+    _SSFMQTTCUTSubAckAttempt(_utOneSub, 1, SSF_MQTTC_UT_ARRAY(_utPktSubscribe1),
+                             SSF_MQTTC_UT_ARRAY(subAckDown));
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTED);
+    SSF_ASSERT(SSFMQTTCIsReady());
+    _SSFMQTTCUTExpectEvents(down, 2);
+    _SSFMQTTCUTExpectTx(NULL, 0);
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(rxQos0));
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(_utRxPublishCount == 1);
+    SSF_ASSERT(strcmp(_utRxTopic, "u") == 0);
+    SSF_ASSERT(_utRx.qos == SSF_MQTTC_QOS_0);
+    SSF_ASSERT((_utRx.payloadLen == 1) && (_utRxPayload[0] == 'x'));
+    _SSFMQTTCUTExpectTx(NULL, 0);
+
+    /* Lose the connection; the reconnect's exact grant is not reported as downgraded */
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(reserved));
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
+    _SSFMQTTCUTExpectEvents(lost, 1);
+    _utMock.txLen = 0;
+    _SSFMQTTCUTPumpUntilState(SSF_MQTTC_STATE_CONNECTING,
+                              SSF_MQTTC_UT_BACKOFF_TICKS + SSF_MQTTC_UT_LOAD_TICKS);
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktConnect));
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktConnAckOk));
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(subscribeId2));
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(subAckOkId2));
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTED);
+    _SSFMQTTCUTExpectEvents(exact, 2);
+    _SSFMQTTCUTEnd();
+
+    /* The reverse: exact first, downgraded on the reconnect */
+    _SSFMQTTCUTSubAckAttempt(_utOneSub, 1, SSF_MQTTC_UT_ARRAY(_utPktSubscribe1),
+                             SSF_MQTTC_UT_ARRAY(_utPktSubAckOk1));
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTED);
+    _SSFMQTTCUTExpectEvents(exact, 2);
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(reserved));
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectEvents(lost, 1);
+    _utMock.txLen = 0;
+    _SSFMQTTCUTPumpUntilState(SSF_MQTTC_STATE_CONNECTING,
+                              SSF_MQTTC_UT_BACKOFF_TICKS + SSF_MQTTC_UT_LOAD_TICKS);
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktConnect));
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktConnAckOk));
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(subscribeId2));
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(subAckDownId2));
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTED);
+    _SSFMQTTCUTExpectEvents(down, 2);
+    _SSFMQTTCUTEnd();
+
+    /* Downgraded, stopped, restarted with no subscriptions: READY is not reported downgraded */
+    _SSFMQTTCUTSubAckAttempt(_utOneSub, 1, SSF_MQTTC_UT_ARRAY(_utPktSubscribe1),
+                             SSF_MQTTC_UT_ARRAY(subAckDown));
+    _SSFMQTTCUTExpectEvents(down, 2);
+    SSFMQTTCStop();
+    _SSFMQTTCUTPumpFor(SSF_MQTTC_UT_SLACK_TICKS);
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_STOPPED);
+    _utEventCount = 0;
+    _utMock.txLen = 0;
+    _SSFMQTTCUTOptsInit(&opts);
+    opts.subsOpt = NULL;
+    opts.subCount = 0;
+    opts.connectTimeout = SSF_TICKS_PER_SEC * 5u;
+    SSFMQTTCStart(&opts);
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktConnect));
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktConnAckOk));
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTED);
+    _SSFMQTTCUTExpectEvents(exact, 2);
+    _SSFMQTTCUTEnd();
+
+    /* Two filters: downgraded on the first only, then exact on both */
     for (i = 0; i < 2; i++)
     {
-        _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
-        _SSFMQTTCUTOptsInit(&opts);
-        SSFMQTTCStart(&opts);
-        _SSFMQTTCUTPump();
-        _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktConnect));
-        _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktConnAckOk));
-        _SSFMQTTCUTPump();
-        _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktSubscribe1));
-        _SSFMQTTCUTInject(subAcks[i], sizeof(subAckFail));
-        _SSFMQTTCUTPump();
+        _SSFMQTTCUTSubAckAttempt(_utTwoSubs, 2, SSF_MQTTC_UT_ARRAY(_utPktSubscribe2Subs),
+                                 (i == 0) ? subAckDown2 : subAckExact2, sizeof(subAckDown2));
+        SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTED);
+        _SSFMQTTCUTExpectEvents((i == 0) ? down : exact, 2);
+        _SSFMQTTCUTExpectTx(NULL, 0);
+        _SSFMQTTCUTEnd();
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Tests that a SUBACK with the wrong packet id or code count fails with PROTOCOL whatever its   */
+/* codes say, and that a second SUBACK after READY ends the connection.                          */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTScenarioSubAckMismatch(void)
+{
+    static const uint8_t wrongIdFail[] = { 0x90, 0x03, 0x00, 0x02, 0x80 };
+    static const uint8_t wrongIdDown[] = { 0x90, 0x03, 0x00, 0x02, 0x00 };
+    static const uint8_t tooFew[] = { 0x90, 0x03, 0x00, 0x01, 0x01 };
+    static const uint8_t tooMany[] = { 0x90, 0x05, 0x00, 0x01, 0x01, 0x00, 0x00 };
+    static const uint8_t subAckDown[] = { 0x90, 0x03, 0x00, 0x01, 0x00 };
+    static const SSFMQTTCUTEventRec_t failed[] =
+    {
+        { SSF_MQTTC_EVENT_CONNECTED, SSF_MQTTC_REASON_NONE },
+        { SSF_MQTTC_EVENT_CONNECT_FAILED, SSF_MQTTC_REASON_PROTOCOL },
+    };
+    static const SSFMQTTCUTEventRec_t down[] =
+    {
+        { SSF_MQTTC_EVENT_CONNECTED, SSF_MQTTC_REASON_NONE },
+        { SSF_MQTTC_EVENT_READY, SSF_MQTTC_REASON_SUBSCRIBE_DOWNGRADED },
+    };
+    static const SSFMQTTCUTEventRec_t lost[] =
+    { { SSF_MQTTC_EVENT_DISCONNECTED, SSF_MQTTC_REASON_PROTOCOL } };
+    uint32_t i;
+
+    /* One filter declared: wrong id carrying 0x80 or a downgrade */
+    for (i = 0; i < 2; i++)
+    {
+        _SSFMQTTCUTSubAckAttempt(_utOneSub, 1, SSF_MQTTC_UT_ARRAY(_utPktSubscribe1),
+                                 (i == 0) ? wrongIdFail : wrongIdDown, sizeof(wrongIdFail));
+        SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
+        _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktDisconnect));
+        _SSFMQTTCUTExpectEvents(failed, 2);
+        _SSFMQTTCUTEnd();
+    }
+
+    /* Two filters declared: one code, or three, all of them grants */
+    _SSFMQTTCUTSubAckAttempt(_utTwoSubs, 2, SSF_MQTTC_UT_ARRAY(_utPktSubscribe2Subs),
+                             SSF_MQTTC_UT_ARRAY(tooFew));
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktDisconnect));
+    _SSFMQTTCUTExpectEvents(failed, 2);
+    _SSFMQTTCUTEnd();
+    _SSFMQTTCUTSubAckAttempt(_utTwoSubs, 2, SSF_MQTTC_UT_ARRAY(_utPktSubscribe2Subs),
+                             SSF_MQTTC_UT_ARRAY(tooMany));
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktDisconnect));
+    _SSFMQTTCUTExpectEvents(failed, 2);
+    _SSFMQTTCUTEnd();
+
+    /* Downgraded READY, then the same SUBACK again: not a second READY */
+    _SSFMQTTCUTSubAckAttempt(_utOneSub, 1, SSF_MQTTC_UT_ARRAY(_utPktSubscribe1),
+                             SSF_MQTTC_UT_ARRAY(subAckDown));
+    _SSFMQTTCUTExpectEvents(down, 2);
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(subAckDown));
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
+    _SSFMQTTCUTExpectEvents(lost, 1);
+    _utMock.txLen = 0;
+    _SSFMQTTCUTEnd();
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Tests that a granted QoS higher than requested ends the attempt with SUBSCRIBE_QOS_EXCEEDED,  */
+/* taking precedence over a failure code on another filter.                                      */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTScenarioSubAckQoSExceeded(void)
+{
+    static const uint8_t subAckQos2[] = { 0x90, 0x03, 0x00, 0x01, 0x02 };
+    static const uint8_t subAck0To1[] = { 0x90, 0x04, 0x00, 0x01, 0x01, 0x01 };
+    static const uint8_t subAck0To2[] = { 0x90, 0x04, 0x00, 0x01, 0x01, 0x02 };
+    static const uint8_t subAckFailFirst[] = { 0x90, 0x04, 0x00, 0x01, 0x80, 0x01 };
+    static const uint8_t subAckFailSecond[] = { 0x90, 0x04, 0x00, 0x01, 0x02, 0x80 };
+    static const uint8_t subAckDownFirst[] = { 0x90, 0x04, 0x00, 0x01, 0x00, 0x01 };
+    static const SSFMQTTCUTEventRec_t expected[] =
+    {
+        { SSF_MQTTC_EVENT_CONNECTED, SSF_MQTTC_REASON_NONE },
+        { SSF_MQTTC_EVENT_CONNECT_FAILED, SSF_MQTTC_REASON_SUBSCRIBE_QOS_EXCEEDED },
+    };
+    const uint8_t *subAcks[6];
+    uint32_t i;
+
+    subAcks[0] = subAckQos2;
+    subAcks[1] = subAck0To1;
+    subAcks[2] = subAck0To2;
+    subAcks[3] = subAckFailFirst;
+    subAcks[4] = subAckFailSecond;
+    subAcks[5] = subAckDownFirst;
+    for (i = 0; i < 6; i++)
+    {
+        if (i == 0)
+        {
+            _SSFMQTTCUTSubAckAttempt(_utOneSub, 1, SSF_MQTTC_UT_ARRAY(_utPktSubscribe1),
+                                     subAcks[i], sizeof(subAckQos2));
+        }
+        else
+        {
+            _SSFMQTTCUTSubAckAttempt(_utTwoSubs, 2, SSF_MQTTC_UT_ARRAY(_utPktSubscribe2Subs),
+                                     subAcks[i], sizeof(subAck0To1));
+        }
         SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
         _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktDisconnect));   /* Session was up */
         _SSFMQTTCUTExpectEvents(expected, 2);
@@ -2015,6 +2277,9 @@ void SSFMQTTCUnitTest(void)
     _SSFMQTTCUTScenarioRxQueueFull();
     _SSFMQTTCUTScenarioConnAckRefused();
     _SSFMQTTCUTScenarioSubAckRefused();
+    _SSFMQTTCUTScenarioSubAckDowngraded();
+    _SSFMQTTCUTScenarioSubAckQoSExceeded();
+    _SSFMQTTCUTScenarioSubAckMismatch();
     _SSFMQTTCUTScenarioProtocolErrors();
     _SSFMQTTCUTScenarioRxOverflow();
     _SSFMQTTCUTScenarioRxTooLarge();

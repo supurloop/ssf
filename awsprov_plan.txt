@@ -16,7 +16,8 @@ Sources    : AWS docs read on 2026-11-26. Each fact in section 1 names its page.
                [Q]   general/latest/gr/iot-core.html (quotas)
                [API] apireference/API_CreateProvisioningTemplate.html
              (developerguide = https://docs.aws.amazon.com/iot/latest/developerguide/)
-Status     : G01 done (commit 9041eba, 2026-11-26). Everything else is plan only.
+Status     : G01 done (commit 9041eba, 2026-11-26). G02 done (2026-11-26, commit
+             "ssfpkey: build a key from a raw EC scalar"). Everything else is plan only.
 
 Layout
   Section 1  Findings checked against AWS docs, including the TLS 1.3 answer.
@@ -233,16 +234,83 @@ AWSPROV-G01  ssfpem: PEM encoder
 
 AWSPROV-G02  ssfpkey: build a key from a raw EC scalar
   Why    : SSFTLSCSetClientCert() only takes an SSFPKey_t from SSFPKeyDecodeDER/PEM. The device
-           generates its key with SSFECDSAKeyGen and should store only the 32/48-byte scalar.
-  Change : SSFPKeyFromECPriv(SSFPKeyType_t type, const uint8_t *priv, size_t privLen,
-           SSFPKey_t *keyOut) for P-256 and P-384: check length, scalar in [1, n-1], derive pub
-           with SSFECDSAPubKeyFromPrivKey, fill every field as SSFPKeyDecodeDER does. Wipe
-           keyOut on failure. Respects the curve compile-outs.
-  Test   : For a fixture key, result equals SSFPKeyDecodeDER of the SEC1 DER of the same key,
-           field by field; scalar 0, n, n+1, all-0xFF, wrong length and disabled curve fail and
-           leave type NONE; SSFTLSCSetClientCert accepts it with the matching certificate and
-           rejects it with a different one; builds with P-256 or P-384 compiled out.
-  Done   : ./ssf passes; tools/config-matrix features.sh passes.
+           generates its key with SSFECDSAKeyGen and should store only the 32/48-byte scalar,
+           rebuilding the SSFPKey_t at boot without a DER round trip. The result must be
+           identical to what SSFPKeyDecodeDER returns for the same key; ssftlsc relies on it.
+
+  API (_codec/ssfpkey.h)
+    /* Builds a P-256 / P-384 key from its raw big-endian scalar; derives and sets pub. */
+    bool SSFPKeyFromECPriv(SSFPKeyType_t type, const uint8_t *priv, size_t privLen,
+                           SSFPKey_t *keyOut);
+
+  Behavior
+    - SSF_REQUIRE (programming errors), matching the ssfecdsa raw-scalar API
+      (SSFECDSAPubKeyFromPrivKey, SSFECDSASign, SSFECDHComputeSecret all REQUIRE
+      privKeyLen == c->bytes):
+        * priv or keyOut NULL;
+        * type not SSF_PKEY_TYPE_P256 / SSF_PKEY_TYPE_P384 (NONE, RSA, ED25519, MIN, MAX);
+        * privLen != the curve size (32 for P-256, 48 for P-384). No short-scalar padding:
+          SSFECDSAKeyGen always writes full width, and padding would turn a truncated record
+          into a different valid key. The caller must validate any stored length first;
+          ssfpkey.md says so.
+        * priv overlapping *keyOut (keyOut is wiped before priv is read).
+    - Returns false, *keyOut wiped to type NONE (data errors):
+        * scalar outside [1, n-1]: 0, n, n+1, all 0xFF;
+        * curve compiled out (SSF_EC_CONFIG_ENABLE_P256/P384 == 0), as the decoders do. The
+          check precedes the curve-size REQUIRE, since the size is unknown for a disabled
+          curve, and precedes SSFECDSAPubKeyFromPrivKey, which REQUIREs an enabled curve.
+    - Success: *keyOut is byte-identical to an SSFPKeyDecodeDER of the same key's SEC1 DER:
+      type set, priv[0..privLen) the scalar, privLen 32/48, pub the uncompressed point,
+      pubLen 65/97, rsaDer NULL, rsaDerLen 0, every unused byte zero.
+    - Cost: one fixed-base scalar multiplication (about one key generation). Once per boot or
+      connection setup; documented.
+
+  Implementation (_codec/ssfpkey.c, about 35 lines)
+    1. REQUIRE priv, keyOut non-NULL, type P256/P384, no overlap (uintptr_t checks as in
+       ssfpem); SSFPKeyWipe(keyOut).
+    2. Select curve from type under #if SSF_EC_CONFIG_ENABLE_*; a compiled-out curve returns
+       false. size = 32 or 48; REQUIRE(privLen == size).
+    3. memcpy(keyOut->priv, priv, size); SSFECDSAPubKeyFromPrivKey(curve, keyOut->priv, size,
+       keyOut->pub, sizeof(keyOut->pub), &keyOut->pubLen) checks 1 <= d <= n-1 and derives
+       pub (the same call _SSFPKeyDecodeSEC1 makes).
+    4. Failure: SSFPKeyWipe(keyOut), return false. Success: privLen = size, type set last.
+
+  Tests (_codec/ssfpkey_ut.c, new "---- FromECPriv ----" section; reuse _UTCheckEC)
+    1. Equivalence: FromECPriv(P256, _pkP256Priv, 32) equals DecodeDER(_pkP256SEC1Der) field
+       by field and by memcmp of the whole struct; pub equals _pkP256Pub. Same for P-384 with
+       _pkP384Priv / _pkP384SEC1Der / _pkP384Pub.
+    2. Stale contents: keyOut pre-filled with 0xAA; after success the unused tails of priv and
+       pub are zero and rsaDer / rsaDerLen are NULL / 0.
+    3. Scalar edges, each curve (needs a new _utP384N beside _utP256N): 1, n-1 and a scalar
+       with a leading 0x00 byte succeed; 0, n, n+1, all 0xFF return false and leave the whole
+       struct zero.
+    4. Failure wipes a valid key: a struct holding a good key, called again with scalar 0,
+       comes back all zero.
+    5. Generated keys: SSFECDSAKeyGen then FromECPriv gives pub equal to the KeyGen output;
+       when signing is built, SSFECDSASign with key.priv verifies against key.pub.
+    6. Compiled out: under SSF_EC_CONFIG_ENABLE_P256 == 0 a P-256 call returns false and wipes
+       (any privLen, since the size check is not reached); same for P-384. Run by the
+       config-matrix p256off / p384off rows.
+    7. REQUIRE (SSF_ASSERT_TEST): NULL priv; NULL keyOut; type NONE, RSA, ED25519,
+       SSF_PKEY_TYPE_MIN, SSF_PKEY_TYPE_MAX; privLen 0, 31, 33, 48 for P-256 and 0, 32, 47,
+       49 for P-384; priv inside keyOut->priv; priv overlapping the first or last byte of
+       *keyOut. priv directly adjacent to *keyOut succeeds.
+    8. TLS (_net/ssftlsc_ut.c, SSFTLSCSetClientCert section): DecodeDER(_utClientP256Key),
+       rebuild with FromECPriv(P256, key.priv, key.privLen); SetClientCert accepts it with
+       _utClientP256Cert and refuses it with _utClientOtherCert. Same for P-384 with
+       _utClientP384Key / _utClientP384Cert.
+
+  Docs   : ssfpkey.md: function reference and example (KeyGen, store the scalar, rebuild at
+           boot, SetClientCert); what returns false vs what is REQUIRE, including "validate a
+           stored length before calling"; the scalar-multiplication cost. _net/README.md (where
+           ssftlsc is documented): the SetClientCert key note adds SSFPKeyFromECPriv(). README
+           and _codec/README.md: ssfpkey row and size figure measured on Cortex-M4.
+  Done   : ./ssf passes on Linux and with build-asan.ninja; tools/coverage shows 100% of the
+           new lines; tools/config-matrix features.sh passes (p256off, p384off, signoff rows);
+           ARM and XC32 builds have no new warnings. One commit, TDD: ssfpkey.{h,c,md},
+           ssfpkey_ut.c, ssftlsc_ut.c, _net/README.md, _codec/README.md, README.md.
+  Note   : Pre-existing, found while planning: SSFECDSAPubKeyFromPrivKey returns early on an
+           invalid scalar without zeroizing its local copy d. Tracked as AWSPROV-G08.
 
 AWSPROV-G03  ssfx509: PKCS#10 CSR encoder
   Why    : CreateCertificateFromCsr needs a CSR. ssfx509 encodes certificates but not CSRs.
@@ -312,6 +380,23 @@ AWSPROV-G07  ssfbase64: constant-time encode, wipe the working copy
            and no data-dependent branch (objdump).
   Done   : ./ssf and ASan pass; tools/coverage 100% of the changed lines; ARM / XC32 no
            warnings; README Base64 size figure updated if it changes.
+
+AWSPROV-G08  ssfecdsa: wipe the scalar copy on every SSFECDSAPubKeyFromPrivKey return
+  Why    : Found while planning G02 (pre-existing). SSFECDSAPubKeyFromPrivKey copies the scalar
+           into a local big number d, then returns false without SSFBNZeroize(&d) when
+           SSFBNFromBytes fails or _SSFECDSAPrivKeyIsValid refuses it (_crypto/ssfecdsa.c:712,
+           713). Only the out-of-range path is reachable with real input, so what is left on
+           the stack is a scalar that is 0 or >= n: a corrupted or wrong key, not a working
+           one, but often a near copy of a real key (e.g. one flipped bit). SSFPKeyFromECPriv
+           (G02) and the SEC 1 / PKCS#8 decoders reach this path with stored data.
+  Change : Route both early returns through one cleanup path that calls SSFBNZeroize(&d), the
+           pattern SSFECDSASign already uses (goto cleanup). Check the other ssfecdsa functions
+           that hold d or k (KeyGen, ECDH, the sign self-check) for the same gap while there.
+  Test   : A unit-test scrub hook in the style of _ssfPEMUTScrubHook, called on every return
+           with d, asserts it is zero; drive it with scalar 0, n, n+1, all 0xFF and a valid
+           scalar. Existing ssfecdsa vectors unchanged.
+  Done   : ./ssf and ASan pass; tools/coverage 100% of the changed lines; ARM / XC32 no
+           warnings. Needs approval to modify ssfecdsa.
 
 No gap for ssftlsc: TLS 1.3, mutual TLS, SNI and ALPN already cover AWS (1.2).
 No gap for ssfmqttc routing: its rx and event callbacks are bound at SSFMQTTCInit, and
@@ -497,3 +582,4 @@ AWSPROV-V03  End-to-end with ssfawsprov
   V02 before M04/M05 fixtures are final.
   M07 needs M02..M06 and G05.  M08 needs G02 and M07.  M09, M10 after M08.  V03 last.
   G06 only if requested; G07 must land before G06 (or anything else that encodes a secret).
+  G08 is independent; best before field deployment of G02.

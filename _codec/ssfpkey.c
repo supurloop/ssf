@@ -393,6 +393,62 @@ done:
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Builds a P-256 / P-384 key from its raw big-endian scalar; see ssfpkey.h.                     */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFPKeyFromECPriv(SSFPKeyType_t type, const uint8_t *priv, size_t privLen,
+                       SSFPKey_t *keyOut)
+{
+    SSFECCurve_t curve;
+    size_t size;
+
+    SSF_REQUIRE(priv != NULL);
+    SSF_REQUIRE(keyOut != NULL);
+    SSF_REQUIRE((type == SSF_PKEY_TYPE_P256) || (type == SSF_PKEY_TYPE_P384));
+
+    /* Is the curve compiled out? */
+#if SSF_EC_CONFIG_ENABLE_P256 == 1
+    if (type == SSF_PKEY_TYPE_P256)
+    {
+        /* No, P-256 is built */
+        curve = SSF_EC_CURVE_P256;
+        size = 32u;
+    }
+    else
+#endif
+#if SSF_EC_CONFIG_ENABLE_P384 == 1
+    if (type == SSF_PKEY_TYPE_P384)
+    {
+        /* No, P-384 is built */
+        curve = SSF_EC_CURVE_P384;
+        size = 48u;
+    }
+    else
+#endif
+    {
+        /* Yes, refuse the key as the decoders do */
+        SSFPKeyWipe(keyOut);
+        return false;
+    }
+    SSF_REQUIRE(privLen == size);
+    SSF_REQUIRE(((uintptr_t)priv >= ((uintptr_t)keyOut + sizeof(*keyOut))) ||
+                (((uintptr_t)priv + size) <= (uintptr_t)keyOut));
+
+    SSFPKeyWipe(keyOut);
+    memcpy(keyOut->priv, priv, size);
+    /* Is the scalar outside [1, n - 1]? */
+    if (!SSFECDSAPubKeyFromPrivKey(curve, keyOut->priv, size, keyOut->pub, sizeof(keyOut->pub),
+                                   &keyOut->pubLen))
+    {
+        /* Yes, leave no part of it behind */
+        SSFPKeyWipe(keyOut);
+        return false;
+    }
+    keyOut->privLen = size;
+    keyOut->type = type;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Zeroes the whole key structure.                                                               */
 /* --------------------------------------------------------------------------------------------- */
 void SSFPKeyWipe(SSFPKey_t *key)

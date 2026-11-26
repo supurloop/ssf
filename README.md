@@ -159,7 +159,7 @@ Encoding and decoding interfaces for common data formats, all with strict buffer
 | [ASN.1 DER](_codec/ssfasn1.md) | ASN.1 DER encoder/decoder (zero-copy decode + measure-then-write encode; X.509 / PKCS#1 / SEC 1 wire formats) | ~3.5 KB | — | ~160 B⁵² | — | Yes |
 | [X.509](_codec/ssfx509.md) | X.509 v3 certificate parser (zero-copy), generator, and RFC 5280 chain verifier (ECDSA / RSA / Ed25519, name constraints, hostname matching) | ~11 KB | ~8 B⁵⁹ | ~14 KB⁵⁸ | — | Yes⁵⁹ |
 | [PEM](_codec/ssfpem.md) | RFC 7468 PEM block decoder and encoder (multi-block buffers, strict Base64, OpenSSL line layout, output wiped on failure) | ~1.1 KB | — | ~140 B | — | Yes |
-| [Private Key](_codec/ssfpkey.md) | Private key decoder: PKCS#8 / SEC 1 / PKCS#1 in PEM or DER (RSA, P-256, P-384, Ed25519), validated, public key checked | ~1.7 KB | — | ~7 KB EC, ~19 KB RSA | — | Yes |
+| [Private Key](_codec/ssfpkey.md) | Private key decoder: PKCS#8 / SEC 1 / PKCS#1 in PEM or DER (RSA, P-256, P-384, Ed25519), validated, public key checked; EC key from a raw scalar | ~1.8 KB | — | ~7 KB EC, ~19 KB RSA | — | Yes |
 | [Base64](_codec/ssfbase64.md) | Base64 encoder/decoder | ~700 B | — | ~64 B | — | Yes |
 | [Base64URL](_codec/ssfbase64url.md) | RFC 4648 §5 URL-safe Base64 encoder/decoder (unpadded output, strict decode; JWT convention) | ~300 B | — | ~1.1 KB⁵⁶ | — | Yes |
 | [Hex ASCII](_codec/ssfhex.md) | Binary-to-hex ASCII encoder/decoder | ~600 B | — | ~64 B | — | Yes |

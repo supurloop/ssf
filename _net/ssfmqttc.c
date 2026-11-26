@@ -120,7 +120,13 @@ typedef enum
 
 /* Event payloads posted by the pump. Each must fit in sizeof(void *) or ssfsm heap-allocates.  */
 typedef struct { uint8_t code; uint8_t sessionPresent; } SSFMQTTCEvConnAck_t;
-typedef struct { uint16_t packetId; uint8_t count; uint8_t isRefused; } SSFMQTTCEvSubAck_t;
+typedef struct { uint16_t packetId; uint8_t count; uint8_t verdict; } SSFMQTTCEvSubAck_t;
+
+/* SSFMQTTCEvSubAck_t verdict, worst over all filters; a higher value takes precedence. */
+#define SSF_MQTTC_SUBACK_EXACT          (0u)   /* Every filter granted at the requested QoS    */
+#define SSF_MQTTC_SUBACK_DOWNGRADED     (1u)   /* A filter granted a lower QoS                 */
+#define SSF_MQTTC_SUBACK_REFUSED        (2u)   /* A filter returned the failure code           */
+#define SSF_MQTTC_SUBACK_QOS_EXCEEDED   (3u)   /* A filter granted a higher QoS: broker error  */
 typedef struct { uint16_t packetId; } SSFMQTTCEvPubAck_t;
 
 typedef struct
@@ -148,6 +154,7 @@ typedef struct
     /* Per connection */
     uint16_t subscribePacketId;
     bool isPingPending;               /* PINGREQ queued or sent, PINGRESP not yet received     */
+    bool isSubDowngraded;             /* SUBACK granted a filter a lower QoS than requested    */
 
     /* Pump owned */
     SSFMQTTCLink_t link;              /* Transport state; closed by the pump on fatal error    */
@@ -594,15 +601,24 @@ static bool _SSFMQTTCRxControlPost(const uint8_t *pkt, size_t pktLen)
         uint8_t codes[SSF_MQTTC_CONFIG_MAX_SUBSCRIPTIONS];
         uint32_t count;
         uint32_t i;
+        uint8_t verdict;
 
         if (SSFMQTTPktDecodeSubAck(pkt, pktLen, &ev.packetId, codes, sizeof(codes), &count) == false)
         { break; }
         /* The declared set is immutable while not STOPPED, so the codes can be compared here  */
-        /* and only the verdict travels in the payload.                                         */
+        /* and only the verdict travels in the payload. The decoder admits only 0..2 and 0x80. */
         ev.count = (uint8_t)count;
-        ev.isRefused = 0u;
+        ev.verdict = SSF_MQTTC_SUBACK_EXACT;
         for (i = 0; (i < count) && (i < _mqttc.opts.subCount); i++)
-        { if (codes[i] != (uint8_t)_mqttc.opts.subsOpt[i].qos) ev.isRefused = 1u; }
+        {
+            if (codes[i] == SSF_MQTT_PKT_SUBACK_FAILURE) verdict = SSF_MQTTC_SUBACK_REFUSED;
+            else if (codes[i] > (uint8_t)_mqttc.opts.subsOpt[i].qos)
+            { verdict = SSF_MQTTC_SUBACK_QOS_EXCEEDED; }
+            else if (codes[i] < (uint8_t)_mqttc.opts.subsOpt[i].qos)
+            { verdict = SSF_MQTTC_SUBACK_DOWNGRADED; }
+            else verdict = SSF_MQTTC_SUBACK_EXACT;
+            if (verdict > ev.verdict) ev.verdict = verdict;
+        }
         SSFSMPutEventData(SSF_SM_MQTTC, SSF_SM_EVENT_MQTTC_RX_SUBACK, (SSFSMData_t *)&ev,
                           sizeof(ev));
         return true;
@@ -1040,7 +1056,8 @@ static void _SSFMQTTCSessionSubscribe(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Acts on a decoded SUBACK: READY if every filter was granted, else fails the attempt.          */
+/* Acts on a decoded SUBACK: READY if every filter was granted, at the requested or a lower QoS, */
+/* else fails the attempt.                                                                       */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCSessionRxSubAck(const SSFMQTTCEvSubAck_t *ev)
 {
@@ -1054,7 +1071,11 @@ static void _SSFMQTTCSessionRxSubAck(const SSFMQTTCEvSubAck_t *ev)
 
     (void)_SSFMQTTCTxInflightRemove(SSF_MQTT_PKT_SUBSCRIBE, ev->packetId, &fn, &fnCtx);
     SSFSMStopTimer(SSF_SM_EVENT_MQTTC_TO_SUBSCRIBE);
-    if (ev->isRefused) { _SSFMQTTCFail(SSF_MQTTC_REASON_SUBSCRIBE_REFUSED); return; }
+    if (ev->verdict == SSF_MQTTC_SUBACK_QOS_EXCEEDED)
+    { _SSFMQTTCFail(SSF_MQTTC_REASON_SUBSCRIBE_QOS_EXCEEDED); return; }
+    if (ev->verdict == SSF_MQTTC_SUBACK_REFUSED)
+    { _SSFMQTTCFail(SSF_MQTTC_REASON_SUBSCRIBE_REFUSED); return; }
+    _mqttc.isSubDowngraded = (ev->verdict == SSF_MQTTC_SUBACK_DOWNGRADED);
     SSFSMTran(_SSFMQTTCStateReady);
 }
 
@@ -1087,6 +1108,7 @@ static void _SSFMQTTCSuperStateSession(SSFSMEventId_t eid, const SSFSMData_t *da
     case SSF_SM_EVENT_ENTRY:
         _mqttc.state = SSF_MQTTC_STATE_SUBSCRIBING;   /* Substate ENTRY follows and may change it */
         _mqttc.isPingPending = false;
+        _mqttc.isSubDowngraded = false;
         SSFSMStartTimer(SSF_SM_EVENT_MQTTC_TO_KEEPALIVE, _SSFMQTTCKeepAliveTicks());
         _SSFMQTTCReport(SSF_MQTTC_EVENT_CONNECTED, SSF_MQTTC_REASON_NONE);
         break;
@@ -1207,7 +1229,8 @@ static void _SSFMQTTCStateReady(SSFSMEventId_t eid, const SSFSMData_t *data, SSF
         _mqttc.state = SSF_MQTTC_STATE_CONNECTED;
         _mqttc.backoff = 0;
         _SSFMQTTCTxPublishArmTimer();
-        _SSFMQTTCReport(SSF_MQTTC_EVENT_READY, SSF_MQTTC_REASON_NONE);
+        _SSFMQTTCReport(SSF_MQTTC_EVENT_READY, _mqttc.isSubDowngraded ?
+                        SSF_MQTTC_REASON_SUBSCRIBE_DOWNGRADED : SSF_MQTTC_REASON_NONE);
         break;
 
     case SSF_SM_EVENT_EXIT:

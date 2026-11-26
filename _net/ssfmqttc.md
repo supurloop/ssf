@@ -41,8 +41,10 @@ the application run in `SSFMQTTCTask()`. Both are driven from one application lo
   `SSFMQTTCStop()` is called. No jitter is added to the backoff; devices in a fleet desynchronize
   through clock drift and differing failure times.
 - **Subscriptions are configuration.** The subscription set is part of the Start options and is
-  sent as one SUBSCRIBE after every CONNACK. READY means every filter was granted at exactly the
-  requested QoS; anything less fails the attempt. No UNSUBSCRIBE is ever sent, since a clean
+  sent as one SUBSCRIBE after every CONNACK. READY means every filter was granted. A filter
+  granted a lower QoS than requested, which MQTT 3.1.1 allows, still reaches READY, reported with
+  `SUBSCRIBE_DOWNGRADED`; any refused filter fails the attempt, and so does a higher QoS than
+  requested, which is a broker error. No UNSUBSCRIBE is ever sent, since a clean
   session discards server-side state. To change the set: Stop, edit the table, Start.
 - **Keep-alive.** CONNECT advertises `keepAliveSec`, but PINGREQ is sent four times per interval
   so the broker's 1.5× deadline is never approached. A missed PINGRESP ends the connection
@@ -100,7 +102,7 @@ READY, then eventually DISCONNECTED or STOPPED. A failed attempt yields CONNECT_
 | Event | When | Reason |
 |-------|------|--------|
 | `CONNECTED` | CONNACK accepted; SUBSCRIBE sent if subscriptions are configured | NONE |
-| `READY` | Every subscription granted, or none configured. Publishing and receiving active. | NONE |
+| `READY` | Every subscription granted, or none configured. Publishing and receiving active. | NONE, or `SUBSCRIBE_DOWNGRADED` |
 | `CONNECT_FAILED` | An attempt ended before READY. Reported at the point of failure; the client then enters RECONNECT_WAIT. | valid |
 | `DISCONNECTED` | A READY connection was lost. Reported at the point of failure; the client then enters RECONNECT_WAIT. | valid |
 | `STOPPED` | `Stop()` complete. The client is in STOPPED. | NONE |
@@ -119,7 +121,9 @@ connection failed in, not RECONNECT_WAIT.
 | `CONNACK_PROTOCOL_VERSION`, `CONNACK_CLIENT_ID`, `CONNACK_SERVER_UNAVAILABLE`, `CONNACK_BAD_CREDENTIALS`, `CONNACK_NOT_AUTHORIZED` | Broker refused CONNECT; one reason per MQTT 3.1.1 return code 1 to 5. |
 | `CONNACK_UNKNOWN` | CONNACK carried a reserved return code. |
 | `SUBSCRIBE_TIMEOUT` | SUBACK not received within `subscribeTimeout`. |
-| `SUBSCRIBE_REFUSED` | SUBACK refused a filter or granted a lower QoS than requested. |
+| `SUBSCRIBE_REFUSED` | SUBACK refused one or more filters. |
+| `SUBSCRIBE_QOS_EXCEEDED` | SUBACK granted a higher QoS than requested for one or more filters. Takes precedence over `SUBSCRIBE_REFUSED`. |
+| `SUBSCRIBE_DOWNGRADED` | Reported with READY, not a failure: SUBACK granted a lower QoS than requested for one or more filters, and refused none. |
 | `KEEPALIVE` | No PINGRESP within [`SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT`](#opt-pingresp). |
 | `TX_PUBLISH_TIMEOUT` | A publish did not complete within `txPublishTimeout`. |
 | `PROTOCOL` | Malformed packet, QoS 2, or a packet type not valid at that point. |
@@ -366,7 +370,8 @@ void SSFMQTTCStart(const SSFMQTTCOpts_t *opts);
 
 Starts the client. From here it works continuously to reach and hold READY. An attempt fails if
 the transport open or CONNACK exceeds `connectTimeout`, CONNACK is refused, SUBACK exceeds
-`subscribeTimeout`, or SUBACK refuses or downgrades any filter. On any failure or lost connection
+`subscribeTimeout`, or SUBACK refuses any filter or grants a higher QoS than requested. A lower
+grant is accepted and reported with READY. On any failure or lost connection
 the client sends DISCONNECT if a session exists, closes the transport, reports `CONNECT_FAILED` or
 `DISCONNECTED`, waits out the backoff in RECONNECT_WAIT, and tries again.
 
@@ -546,9 +551,10 @@ macros are shorthand over this.
 ## [↑](#ssfmqttc--mqtt-311-client) Known Trade-offs
 
 - **Non-transient failures are retried.** CONNACK refusals other than `SERVER_UNAVAILABLE`, and
-  `SUBSCRIBE_REFUSED`, are retried at the backoff rate like any other failure. Bad credentials, a
-  bad filter, or a broker that downgrades a QoS keep hitting the broker until the application calls
-  `SSFMQTTCStop()`. The event carries no per-filter detail. A later revision could stop the client
+  `SUBSCRIBE_REFUSED` and `SUBSCRIBE_QOS_EXCEEDED`, are retried at the backoff rate like any other
+  failure. Bad credentials or a refused filter keep hitting the broker until the application calls
+  `SSFMQTTCStop()`. The event carries no per-filter detail, and one refused filter fails the whole
+  set even if the others were granted. A later revision could stop the client
   itself and report the reason through the STOPPED event, or expose per-filter SUBACK results.
 - **IPv4 only.** SSF is not designed for an IPv6 stack ([`ssfnet.h`](ssfnet.h)): `host` is a
   DNS name or a dotted IPv4 address, names resolve to IPv4 addresses only, and an IPv6 literal

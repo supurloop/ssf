@@ -96,8 +96,8 @@ typedef enum
     SSF_MQTTC_REASON_CONNACK_NOT_AUTHORIZED,    /* 5: not authorized                            */
     SSF_MQTTC_REASON_CONNACK_UNKNOWN,           /* Reserved/undefined return code               */
     SSF_MQTTC_REASON_SUBSCRIBE_TIMEOUT,  /* SUBACK not received within subscribeTimeout          */
-    SSF_MQTTC_REASON_SUBSCRIBE_REFUSED,  /* SUBACK returned 0x80, or granted a QoS lower than    */
-                                         /* requested, for one or more declared filters          */
+    SSF_MQTTC_REASON_SUBSCRIBE_REFUSED,  /* SUBACK returned 0x80 for one or more declared       */
+                                         /* filters                                              */
     SSF_MQTTC_REASON_KEEPALIVE,          /* No PINGRESP within SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT */
     SSF_MQTTC_REASON_TX_PUBLISH_TIMEOUT, /* A txPublish did not complete within txPublishTimeout */
     SSF_MQTTC_REASON_PROTOCOL,           /* Malformed packet, QoS 2, unexpected packet           */
@@ -108,6 +108,10 @@ typedef enum
     SSF_MQTTC_REASON_RX_PUBLISH_TOO_LARGE,  /* Inbound PUBLISH larger than rxBlockSize           */
     SSF_MQTTC_REASON_RX_PUBLISH_TOPIC_TOO_LONG, /* Inbound PUBLISH topic length >=               */
                                          /* SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE                      */
+    SSF_MQTTC_REASON_SUBSCRIBE_DOWNGRADED,   /* READY: SUBACK granted a lower QoS than        */
+                                         /* requested for one or more declared filters           */
+    SSF_MQTTC_REASON_SUBSCRIBE_QOS_EXCEEDED, /* SUBACK granted a higher QoS than requested       */
+                                         /* for one or more declared filters                     */
     SSF_MQTTC_REASON_MAX
 } SSFMQTTCReason_t;
 
@@ -116,7 +120,8 @@ typedef enum
     SSF_MQTTC_EVENT_MIN = -1,
     SSF_MQTTC_EVENT_CONNECTED,       /* CONNACK accepted; SUBSCRIBE for declared set sent       */
     SSF_MQTTC_EVENT_READY,           /* Every declared subscription granted (or none declared). */
-                                     /* Publishing and receiving now active.                    */
+                                     /* Publishing and receiving now active. Reason NONE, or    */
+                                     /* SUBSCRIBE_DOWNGRADED if a filter got a lower QoS.       */
     SSF_MQTTC_EVENT_CONNECT_FAILED,  /* An attempt ended before READY; reason valid. Reported at */
                                      /* the point of failure; the client then enters            */
                                      /* RECONNECT_WAIT and will try again.                      */
@@ -217,7 +222,7 @@ SSFMQTTCState_t SSFMQTTCGetState(void);
 /* SUBSCRIBING or CONNECTED: session is up                                                       */
 #define SSFMQTTCIsConnected() ((SSFMQTTCGetState() == SSF_MQTTC_STATE_SUBSCRIBING) || \
                                (SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTED))
-/* CONNECTED: all subscriptions granted as requested; may txPublish                              */
+/* CONNECTED: all subscriptions granted, possibly at a lower QoS; may txPublish                  */
 #define SSFMQTTCIsReady() (SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTED)
 
 /* --------------------------------------------------------------------------------------------- */

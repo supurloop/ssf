@@ -6,7 +6,7 @@ Scope      : _net/ssfmqttc.c, _net/ssfmqttpkt.c/.h, _opt/ssfmqttc_opt.h, _net/ss
              MQTT is not an IETF RFC; "the spec" below means MQTT 3.1.1. Section numbers are
              from that document. Code at commit a8ce46f (branch mqtt).
 Status     : MQTT-IOP-01 and MQTT-FEAT-07 are FIXED (commit 0bc61a9); MQTT-IOP-03 is FIXED;
-             every other item is OPEN.
+             MQTT-IOP-02 is PARTLY FIXED (lower grants); every other item is OPEN.
 
 Lists
   Part A  Interoperability problems, most likely to happen with real brokers first.
@@ -76,6 +76,12 @@ MQTT-IOP-02  A lower QoS granted in SUBACK is treated as fatal, so the client ne
                value per filter (event or query API). Make "all or nothing" an option, not the
                only behaviour. Report a 0x80 per filter rather than failing the session, or
                fail the session only when the app asks for that.
+  Status     : PARTLY FIXED. A lower granted QoS now reaches READY, reported with the new
+               reason SUBSCRIBE_DOWNGRADED (an exact grant still reports NONE). A higher QoS than
+               requested fails the attempt with the new reason SUBSCRIBE_QOS_EXCEEDED, which
+               takes precedence over a 0x80 on another filter. By decision, a 0x80 on any filter
+               still fails the whole attempt with SUBSCRIBE_REFUSED, and there is no per-filter
+               query; both remain under MQTT-FEAT-04.
 
 MQTT-IOP-03  Keep-alive race: at the minimum (and documented example) configuration, a missing
              PINGRESP may never be detected
@@ -270,6 +276,8 @@ MQTT-FEAT-04  Report per-filter SUBACK results and accept partial grants
   Why        : This is the feature side of IOP-02: apps need to know which filters were
                granted and at which QoS, and to carry on with the ones that were.
   Effort     : Small to medium.
+  Status     : OPEN. Lower grants are accepted (see MQTT-IOP-02), but a refused filter still
+               fails the set and the granted QoS per filter is not reported.
 
 MQTT-FEAT-05  SUBSCRIBE and UNSUBSCRIBE at run time
   Likelihood : MED

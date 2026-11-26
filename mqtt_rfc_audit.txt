@@ -6,8 +6,8 @@ Scope      : _net/ssfmqttc.c, _net/ssfmqttpkt.c/.h, _opt/ssfmqttc_opt.h, _net/ss
              MQTT is not an IETF RFC; "the spec" below means MQTT 3.1.1. Section numbers are
              from that document. Code at commit a8ce46f (branch mqtt).
 Status     : MQTT-IOP-01 and MQTT-FEAT-07 are FIXED (commit 0bc61a9); MQTT-IOP-03 is FIXED;
-             MQTT-IOP-02 is PARTLY FIXED (lower grants); MQTT-FEAT-10 is FIXED; every other item
-             is OPEN.
+             MQTT-IOP-02 is PARTLY FIXED (lower grants); MQTT-IOP-11 and MQTT-FEAT-10 are
+             FIXED; every other item is OPEN.
 
 Lists
   Part A  Interoperability problems, most likely to happen with real brokers first.
@@ -225,9 +225,15 @@ MQTT-IOP-11  A QoS 2 PUBLISH from the broker ends the connection
   Probability: VERY LOW
   Spec       : 3.8.4 (delivered QoS = min(published QoS, granted QoS)); the client never
                requests QoS 2, so a compliant broker never sends one.
-  Code       : _SSFMQTTCRxPublishQueue() (qos >= QOS_2 -> PROTOCOL).
+  Code       : _SSFMQTTCRxPublishQueue() (was: qos >= QOS_2 -> PROTOCOL); now
+               _SSFMQTTCRxIsQoS2() on both inbound paths -> RX_PUBLISH_QOS2.
   Note       : This is a correct response to a broker violation. It is listed only so that a
                field report of PROTOCOL disconnects can be traced to a broker bug. See FEAT-09.
+  Status     : FIXED (diagnosis). The connection still ends, but with the new reason
+               SSF_MQTTC_REASON_RX_PUBLISH_QOS2 instead of PROTOCOL, on both the normal and
+               the oversized (skip) path and before READY (CONNECT_FAILED). The QoS bits of
+               the fixed header decide, whatever the rest of the packet holds. Nothing is
+               acknowledged or delivered. Accepting QoS 2 remains MQTT-FEAT-09.
 
 
 PART B: MISSING FEATURES (most likely to be needed first)

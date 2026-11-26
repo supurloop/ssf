@@ -1328,20 +1328,22 @@ static void _SSFMQTTCUTScenarioSubAckQoSExceeded(void)
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTScenarioProtocolErrors(void)
 {
-    static const uint8_t qos2[] = { 0x34, 0x05, 0x00, 0x01, 'z', 0x00, 0x01 };
+    static const uint8_t qos3[] = { 0x36, 0x05, 0x00, 0x01, 'z', 0x00, 0x01 };
     static const uint8_t connAckAgain[] = { 0x20, 0x02, 0x00, 0x00 };
     static const uint8_t reserved[] = { 0xF0, 0x00 };
+    static const uint8_t pubRel[] = { 0x62, 0x02, 0x00, 0x01 };
     static const SSFMQTTCUTEventRec_t expected[] =
     { { SSF_MQTTC_EVENT_DISCONNECTED, SSF_MQTTC_REASON_PROTOCOL } };
-    const uint8_t *pkts[3];
-    size_t lens[3];
+    const uint8_t *pkts[4];
+    size_t lens[4];
     uint32_t i;
     SSFMQTTCOpts_t opts;
 
-    pkts[0] = qos2;         lens[0] = sizeof(qos2);
+    pkts[0] = qos3;         lens[0] = sizeof(qos3);
     pkts[1] = connAckAgain; lens[1] = sizeof(connAckAgain);
     pkts[2] = reserved;     lens[2] = sizeof(reserved);
-    for (i = 0; i < 3; i++)
+    pkts[3] = pubRel;       lens[3] = sizeof(pubRel);
+    for (i = 0; i < 4; i++)
     {
         _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
         _SSFMQTTCUTOptsInit(&opts);
@@ -1596,8 +1598,8 @@ static void _SSFMQTTCUTScenarioRxTooLargeMalformed(void)
             len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x32, 200, 0x1234, 5, 5, &hdrLen);
             pkt[hdrLen + 2 + 199] = 0;
             break;
-        default:    /* QoS 2 is not supported */
-            len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x34, 1, 1, 200, 200, &hdrLen);
+        default:    /* QoS 3 with DUP (QoS 2 has its own reason; see RxPublishQoS2) */
+            len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x3E, 1, 1, 200, 200, &hdrLen);
             break;
         }
         _SSFMQTTCUTInject(pkt, len);
@@ -1608,6 +1610,111 @@ static void _SSFMQTTCUTScenarioRxTooLargeMalformed(void)
         _utMock.txLen = 0;
         _SSFMQTTCUTEnd();
     }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Tests that a QoS 2 PUBLISH, which no subscription allows, ends the connection with            */
+/* RX_PUBLISH_QOS2 on both inbound paths and before READY, without delivery or acknowledgement.  */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTScenarioRxPublishQoS2(void)
+{
+    static const uint8_t small[] = { 0x34, 0x05, 0x00, 0x01, 'z', 0x00, 0x01 };
+    static const uint8_t smallDup[] = { 0x3C, 0x06, 0x00, 0x01, 'z', 0x00, 0x02, 'p' };
+    static const uint8_t smallBadId[] = { 0x34, 0x05, 0x00, 0x01, 'z', 0x00, 0x00 };
+    static const uint8_t smallNoTopic[] = { 0x34, 0x04, 0x00, 0x00, 0x00, 0x01 };
+    static const SSFMQTTCUTEventRec_t lost[] =
+    { { SSF_MQTTC_EVENT_DISCONNECTED, SSF_MQTTC_REASON_RX_PUBLISH_QOS2 } };
+    static const SSFMQTTCUTEventRec_t failed[] =
+    {
+        { SSF_MQTTC_EVENT_CONNECTED, SSF_MQTTC_REASON_NONE },
+        { SSF_MQTTC_EVENT_CONNECT_FAILED, SSF_MQTTC_REASON_RX_PUBLISH_QOS2 },
+    };
+    static const size_t chunks[] = { 0, 1, 129 };
+    const uint8_t *pkts[4];
+    size_t lens[4];
+    uint8_t pkt[512];
+    size_t len;
+    size_t hdrLen;
+    uint32_t i;
+    SSFMQTTCOpts_t opts;
+
+    /* Packets that fit the rx block, the flags alone deciding even when the body is malformed */
+    pkts[0] = small;        lens[0] = sizeof(small);
+    pkts[1] = smallDup;     lens[1] = sizeof(smallDup);
+    pkts[2] = smallBadId;   lens[2] = sizeof(smallBadId);
+    pkts[3] = smallNoTopic; lens[3] = sizeof(smallNoTopic);
+    for (i = 0; i < 4u; i++)
+    {
+        _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+        _SSFMQTTCUTOptsInit(&opts);
+        _SSFMQTTCUTGoReady(&opts);
+        _SSFMQTTCUTInject(pkts[i], lens[i]);
+        _SSFMQTTCUTPump();
+        SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
+        SSF_ASSERT(_utRxPublishCount == 0);
+        _SSFMQTTCUTExpectEvents(lost, 1);
+        _SSFMQTTCUTExpectTx(NULL, 0);           /* No PUBREC or PUBACK; the link closes at once */
+        _SSFMQTTCUTEnd();
+    }
+
+    /* Larger than the rx block, read whole, byte by byte, and split */
+    for (i = 0; i < (sizeof(chunks) / sizeof(chunks[0])); i++)
+    {
+        _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+        _SSFMQTTCUTOptsInit(&opts);
+        _SSFMQTTCUTGoReady(&opts);
+        _utMock.recvChunk = chunks[i];
+        len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x34, 1, 1, 200, 200, &hdrLen);
+        _SSFMQTTCUTInject(pkt, len);
+        _SSFMQTTCUTPump();
+        SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
+        SSF_ASSERT(_utRxPublishCount == 0);
+        _SSFMQTTCUTExpectEvents(lost, 1);                   /* Never reported as a drop first */
+        _SSFMQTTCUTExpectTx(NULL, 0);
+        _SSFMQTTCUTEnd();
+    }
+
+    /* Before CONNACK, small and oversized: the attempt fails */
+    for (i = 0; i < 2u; i++)
+    {
+        static const SSFMQTTCUTEventRec_t early[] =
+        { { SSF_MQTTC_EVENT_CONNECT_FAILED, SSF_MQTTC_REASON_RX_PUBLISH_QOS2 } };
+
+        _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+        _SSFMQTTCUTOptsInit(&opts);
+        SSFMQTTCStart(&opts);
+        _SSFMQTTCUTPump();
+        _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktConnect));
+        if (i == 0) { _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(small)); }
+        else
+        {
+            len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x34, 1, 1, 200, 200, &hdrLen);
+            _SSFMQTTCUTInject(pkt, len);
+        }
+        _SSFMQTTCUTPump();
+        SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
+        SSF_ASSERT(_utRxPublishCount == 0);
+        _SSFMQTTCUTExpectEvents(early, 1);
+        _SSFMQTTCUTExpectTx(NULL, 0);
+        _SSFMQTTCUTEnd();
+    }
+
+    /* Before READY: the attempt fails */
+    _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+    _SSFMQTTCUTOptsInit(&opts);
+    SSFMQTTCStart(&opts);
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktConnect));
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktConnAckOk));
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktSubscribe1));
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(small));
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
+    SSF_ASSERT(_utRxPublishCount == 0);
+    _SSFMQTTCUTExpectEvents(failed, 2);
+    _SSFMQTTCUTExpectTx(NULL, 0);
+    _SSFMQTTCUTEnd();
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -2314,6 +2421,7 @@ void SSFMQTTCUnitTest(void)
     _SSFMQTTCUTScenarioRxTopicTooLong();
     _SSFMQTTCUTScenarioRxTooLargeMalformed();
     _SSFMQTTCUTScenarioRxTooLargeRetained();
+    _SSFMQTTCUTScenarioRxPublishQoS2();
     _SSFMQTTCUTScenarioRxTooLargeLinkLoss();
     _SSFMQTTCUTScenarioRxDropBeforeConnAck();
     _SSFMQTTCUTScenarioKeepAliveTimeout();

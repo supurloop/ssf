@@ -531,6 +531,16 @@ static void _SSFMQTTCRxPublishDrop(SSFMQTTCQoS_t qos, uint16_t packetId, SSFMQTT
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Returns true if PUBLISH first byte b0 carries QoS 2. No subscription allows it (the client    */
+/* asks for QoS 0 or 1 and a broker may not exceed the grant, MQTT 3.1.1 3.8.4), and QoS 2 is    */
+/* not supported, so it ends the connection with its own reason.                                 */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFMQTTCRxIsQoS2(uint8_t b0)
+{
+    return ((b0 & 0x06u) >> 1) == (uint8_t)SSF_MQTTC_QOS_2;
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Returns true if the inbound PUBLISH was queued or dropped, else false if the link failed.     */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFMQTTCRxPublishQueue(const uint8_t *pkt, size_t pktLen)
@@ -542,7 +552,10 @@ static bool _SSFMQTTCRxPublishQueue(const uint8_t *pkt, size_t pktLen)
     SSF_REQUIRE(pkt != NULL);
     SSF_REQUIRE(pktLen > 0);
 
-    if ((SSFMQTTPktDecodePublish(pkt, pktLen, &pub) == false) || (pub.qos >= SSF_MQTTC_QOS_2))
+    /* QoS 2 is decided by the flags alone, as on the oversized path, whatever the body holds */
+    if (_SSFMQTTCRxIsQoS2(pkt[0]))
+    { _SSFMQTTCLinkFail(SSF_MQTTC_REASON_RX_PUBLISH_QOS2); return false; }
+    if (SSFMQTTPktDecodePublish(pkt, pktLen, &pub) == false)
     { _SSFMQTTCLinkFail(SSF_MQTTC_REASON_PROTOCOL); return false; }
     if (pub.topicLen >= SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE)
     {
@@ -657,6 +670,8 @@ static bool _SSFMQTTCRxSkipStart(const uint8_t *frame, size_t pktLen)
     SSF_REQUIRE(SSF_MQTT_PKT_TYPE(frame[0]) == SSF_MQTT_PKT_PUBLISH);
 
     /* The same flag rules as SSFMQTTPktDecodePublish(), which cannot see this packet whole */
+    if (_SSFMQTTCRxIsQoS2(frame[0]))
+    { _SSFMQTTCLinkFail(SSF_MQTTC_REASON_RX_PUBLISH_QOS2); return false; }
     qosBits = (uint8_t)((frame[0] & 0x06u) >> 1);
     if ((qosBits >= (uint8_t)SSF_MQTTC_QOS_2) ||
         ((qosBits == (uint8_t)SSF_MQTTC_QOS_0) && ((frame[0] & 0x08u) != 0)))

@@ -104,13 +104,12 @@ comparable security.
   `SSF_PRNG_ENTROPY_SIZE` bytes of platform entropy. With `SSF_RSA_CONFIG_ENABLE_4096` set that
   is 32 bytes (AES-256), so RSA-4096 keys are not capped at 128-bit seed entropy; builds limited
   to RSA-2048 / 3072 may use 16 bytes, which matches their 112 / 128-bit strength.
-- **PKCS#1 v1.5 signatures are deterministic in value, but signing now requires entropy.**
-  `SSFRSASignPKCS1` still yields the same signature for the same `(key, hash)` — the value
-  is deterministic and interoperable. However, every private-key operation now draws
+- **PKCS#1 v1.5 signatures are deterministic in value, but signing requires entropy.**
+  `SSFRSASignPKCS1` yields the same signature for the same `(key, hash)` — the value
+  is deterministic and interoperable. However, every private-key operation draws
   platform entropy at sign time for message and exponent blinding (see the CRT note below);
   the blinding cancels out so the produced signature is unchanged, but **signing fails if
-  entropy is unavailable**. This is a behavior change: PKCS#1 v1.5 signing previously
-  consumed no randomness. `SSFRSASignPSS` additionally draws a fresh random salt (of length
+  entropy is unavailable**. `SSFRSASignPSS` additionally draws a fresh random salt (of length
   equal to the hash output) on every call, so repeat PSS calls produce different signatures
   that all verify. Both schemes therefore require entropy availability at sign time as well
   as at key-gen time — on targets where runtime entropy is scarce, prefer Ed25519 /
@@ -135,16 +134,15 @@ comparable security.
   **CRT fault-injection attack** (Boneh–DeMillo–Lipton) recovers the factors of `n` from a
   single faulty signature if an attacker can glitch one of the two `modexp` branches during
   sign; this is defended by the built-in verify-after-sign check (see below). The blinding
-  and the fresh `r` are the reason signing now requires platform entropy on every call.
+  and the fresh `r` are the reason signing requires platform entropy on every call.
 - **One step of the private-key operation is variable-time, by design.** `r⁻¹ mod n` is
   computed with [`SSFBNModInvOdd()`](ssfbn.md#modinv) (the binary extended GCD for odd `n`),
   whose run time depends on `r`. It does not expose the message or the CRT exponents: `r` is
   fresh random on every call and never reused, and the exponentiations that use `dp` / `dq`
   are constant-time and exponent-blinded. What a precise timing observer could learn is
   information about a single call's blinding factor, which weakens base blinding for that
-  call only. This was reviewed and accepted (AUDIT2 RSA-9). The reduction of the blinded
-  input by the secret primes (`cB mod p`, `cB mod q`) was the second such step; since
-  OPTIMIZE BN-O7 [`SSFBNMod()`](ssfbn.md#ssfbnmod) reduces an odd modulus by constant-time
+  call only. The reduction of the blinded input by the secret primes (`cB mod p`,
+  `cB mod q`) is constant-time: [`SSFBNMod()`](ssfbn.md#ssfbnmod) reduces an odd modulus by
   Montgomery reduction. Deployments where an attacker can take very fine-grained timing or
   power measurements of individual signatures should treat RSA signing here as blinded but
   not fully constant-time.
@@ -152,8 +150,8 @@ comparable security.
   coprime to `λ(n)` by the FIPS check), `d = (1 + k · λ(n)) / 65537` for
   `k = −λ(n)⁻¹ mod 65537`: a sum of limbs for `λ(n) mod 65537` (`2³² ≡ 1`), a fixed
   16-step Fermat inverse mod 65537 and an exact division, none of whose timing depends on
-  `λ(n)`. It yields the same `d` (the unique inverse below `λ(n)`) as the variable-time
-  extended Euclid used before OPTIMIZE BN-07.
+  `λ(n)`. It yields the same `d` (the unique inverse below `λ(n)`) as variable-time
+  extended Euclid would.
 - DBC exception (timing-critical): `_SSFRSAMod65537` and `_SSFRSAMulMod65537` run per limb
   and per Fermat step of that derivation and carry no parameter asserts; their only caller
   keeps every operand below 65537.
@@ -208,7 +206,7 @@ comparable security.
   of `p`, `q` and the CRT intermediates) are not. The scrub is sized to the depth those
   calls reach ([`SSF_RSA_SIGN_STACK_SCRUB_BYTES`](#ssf-rsa-stack-scrub-bytes) for signing,
   [`SSF_RSA_KEYGEN_STACK_SCRUB_BYTES`](#ssf-rsa-stack-scrub-bytes) for keygen), measured
-  with Cortex-M4 GCC `-Os`, so it covers them without raising the peak stack (SAFE-05).
+  with Cortex-M4 GCC `-Os`, so it covers them without raising the peak stack.
   Other compilers and flags can go slightly deeper (M4 `-O2`: 64–80 B, Cortex-M0+ `-Os`:
   96–112 B); set [`SSF_RSA_CONFIG_STACK_SCRUB_MARGIN`](#configuration) to `128u` there to
   cover that too, at the cost of as much more peak stack.
@@ -409,9 +407,7 @@ Every decoded private field and intermediate is zeroized before the function ret
 both the accept and the reject paths. The consistency checks are **variable-time** (they
 reduce by the even `p − 1` and `q − 1`, where `SSFBNMod` / `SSFBNModMul` run shift-and-subtract,
 whose run time depends on the key values): call it once when a key
-is loaded or imported, not in a loop whose timing an attacker can observe. Before 2026-11-19
-only `dp = d mod (p − 1)` and `dq = d mod (q − 1)` were checked, so a key with consistent but
-wrong `d`, `dp`, `dq` was accepted (signing it then failed verify-after-sign).
+is loaded or imported, not in a loop whose timing an attacker can observe.
 
 ---
 

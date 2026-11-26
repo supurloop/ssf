@@ -24,7 +24,10 @@ All time values are UTC. System ticks are whole seconds scaled by `SSF_TICKS_PER
 - All `SSFDTimeStruct_t` fields use **0-based offsets**: `year` is offset from 1970; `month` is
   0 for January through 11 for December; `day` is 0 for the 1st of the month.
 - [`SSFDTimeIsLeapYear()`](#ssfdtimeisleapyear) and [`SSFDTimeDaysInMonth()`](#ssfdtimedaysinmonth)
-  take the **full calendar year** (e.g., `2024`), not the 0-based year offset.
+  take the same **0-based year offset from 1970** as `SSFDTimeStruct_t.year` (e.g., `54` for 2024),
+  not the full calendar year; passing a year above [`SSF_TS_YEAR_MAX`](#const-fsec-max) asserts.
+- [`SSFDTimeDaysInMonth()`](#ssfdtimedaysinmonth) returns the **0-based last day** of the month
+  (`27`–`30`), matching the 0-based `day` field.
 - The `wday` and `yday` fields of `SSFDTimeStruct_t` are computed automatically by
   [`SSFDTimeStructInit()`](#ssfdtimestructinit) and [`SSFDTimeUnixToStruct()`](#ssfdtimeunixtostruct);
   do not set them directly.
@@ -100,8 +103,8 @@ Options live in [`_opt/ssfdtime_opt.h`](../_opt/ssfdtime_opt.h) (aggregated into
 | [e.g.](#ex-structinit) | [`bool SSFDTimeStructInit(ts, year, month, day, hour, min, sec, fsec)`](#ssfdtimestructinit) | Initialize a date/time struct from calendar components |
 | [e.g.](#ex-unixtostruct) | [`bool SSFDTimeUnixToStruct(unixSys, ts, tsSize)`](#ssfdtimeunixtostruct) | Convert Unix time in system ticks to a date/time struct |
 | [e.g.](#ex-structtounix) | [`bool SSFDTimeStructToUnix(ts, unixSys)`](#ssfdtimestructtounix) | Convert a date/time struct to Unix time in system ticks |
-| [e.g.](#ex-isleapyear) | [`bool SSFDTimeIsLeapYear(year)`](#ssfdtimeisleapyear) | Return true if a calendar year is a leap year |
-| [e.g.](#ex-daysinmonth) | [`uint8_t SSFDTimeDaysInMonth(year, month)`](#ssfdtimedaysinmonth) | Return the number of days in a given month |
+| [e.g.](#ex-isleapyear) | [`bool SSFDTimeIsLeapYear(year)`](#ssfdtimeisleapyear) | Return true if a year (offset from 1970) is a leap year |
+| [e.g.](#ex-daysinmonth) | [`uint8_t SSFDTimeDaysInMonth(year, month)`](#ssfdtimedaysinmonth) | Return the 0-based last day of a given month |
 
 <a id="function-reference"></a>
 
@@ -257,13 +260,13 @@ SSFDTimeUnixToStruct(unixSys, &ts2, sizeof(ts2));
 bool SSFDTimeIsLeapYear(uint16_t year);
 ```
 
-Determines whether a calendar year is a leap year using the Gregorian algorithm: divisible by 4,
-except century years unless also divisible by 400. Takes the **full calendar year**, not the
-0-based year offset stored in `SSFDTimeStruct_t`.
+Determines whether a year is a Gregorian leap year. Takes the **0-based year offset from 1970**
+stored in `SSFDTimeStruct_t.year`, not the full calendar year. Within the supported range
+(1970–2199) the only century year is 2100, which is correctly treated as a non-leap year.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `year` | in | `uint16_t` | Full calendar year (e.g., `2024`). Not the 0-based offset from 1970. |
+| `year` | in | `uint16_t` | Year offset from 1970 (e.g., `54` = 2024). Must be `<=` [`SSF_TS_YEAR_MAX`](#const-fsec-max) (`229`), otherwise asserts. |
 
 **Returns:** `true` if `year` is a leap year; `false` otherwise.
 
@@ -272,16 +275,16 @@ except century years unless also divisible by 400. Takes the **full calendar yea
 **Example:**
 
 ```c
-/* Takes the full calendar year — NOT the 0-based year offset */
-SSFDTimeIsLeapYear(2024);   /* returns true  — divisible by 4 */
-SSFDTimeIsLeapYear(2023);   /* returns false */
-SSFDTimeIsLeapYear(2100);   /* returns false — century year, not divisible by 400 */
-SSFDTimeIsLeapYear(2000);   /* returns true  — divisible by 400 */
+/* Takes the year offset from 1970 — NOT the full calendar year */
+SSFDTimeIsLeapYear(2024u - 1970u);   /* returns true  — 2024 divisible by 4 */
+SSFDTimeIsLeapYear(2023u - 1970u);   /* returns false */
+SSFDTimeIsLeapYear(2100u - 1970u);   /* returns false — century year, not divisible by 400 */
+SSFDTimeIsLeapYear(2000u - 1970u);   /* returns true  — divisible by 400 */
 
-/* Accessing the calendar year from a struct */
+/* Passing a struct's year directly */
 SSFDTimeStruct_t ts;
 SSFDTimeStructInit(&ts, 54, SSF_DTIME_MONTH_JAN, 0, 0, 0, 0, 0);
-SSFDTimeIsLeapYear((uint16_t)(1970u + ts.year));   /* returns true (2024) */
+SSFDTimeIsLeapYear(ts.year);   /* returns true (2024) */
 ```
 
 ---
@@ -294,30 +297,32 @@ SSFDTimeIsLeapYear((uint16_t)(1970u + ts.year));   /* returns true (2024) */
 uint8_t SSFDTimeDaysInMonth(uint16_t year, uint8_t month);
 ```
 
-Returns the number of days in the specified month of the given year, correctly handling February
-in leap years. Takes the **full calendar year** and a **0-based month**.
+Returns the 0-based last day of the specified month of the given year (one less than the number
+of days), correctly handling February in leap years. Takes the **0-based year offset from 1970**
+and a **0-based month**, the same encoding as `SSFDTimeStruct_t`.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `year` | in | `uint16_t` | Full calendar year (e.g., `2024`). Used to determine leap year status for February. |
+| `year` | in | `uint16_t` | Year offset from 1970 (e.g., `54` = 2024). Used to determine leap year status for February. Must be `<=` [`SSF_TS_YEAR_MAX`](#const-fsec-max) (`229`), otherwise asserts. |
 | `month` | in | `uint8_t` | Month, 0-based (`0` = January, `11` = December). Use [`SSFDTimeStructMonth_t`](#type-ssfdtimestructmonth-t) constants. |
 
-**Returns:** Number of days in the month: `28`, `29`, `30`, or `31`.
+**Returns:** 0-based last day of the month: `27`, `28`, `29`, or `30` (for 28-, 29-, 30- or
+31-day months). Add `1` for the number of days. Asserts if `month` > `SSF_TS_MONTH_MAX`.
 
 <a id="ex-daysinmonth"></a>
 
 **Example:**
 
 ```c
-/* Takes the full calendar year and a 0-based month */
-SSFDTimeDaysInMonth(2024, SSF_DTIME_MONTH_FEB);   /* returns 29 — leap year */
-SSFDTimeDaysInMonth(2023, SSF_DTIME_MONTH_FEB);   /* returns 28 */
-SSFDTimeDaysInMonth(2024, SSF_DTIME_MONTH_JAN);   /* returns 31 */
-SSFDTimeDaysInMonth(2024, SSF_DTIME_MONTH_APR);   /* returns 30 */
+/* Takes the year offset from 1970 and a 0-based month; returns the 0-based last day */
+SSFDTimeDaysInMonth(54, SSF_DTIME_MONTH_FEB);   /* returns 28 — Feb 2024 has 29 days */
+SSFDTimeDaysInMonth(53, SSF_DTIME_MONTH_FEB);   /* returns 27 — Feb 2023 has 28 days */
+SSFDTimeDaysInMonth(54, SSF_DTIME_MONTH_JAN);   /* returns 30 — 31 days */
+SSFDTimeDaysInMonth(54, SSF_DTIME_MONTH_APR);   /* returns 29 — 30 days */
 
-/* Using a struct's calendar year to find days remaining in the current month */
+/* Using a struct's fields to find days remaining in the current month */
 SSFDTimeStruct_t ts;
 SSFDTimeStructInit(&ts, 54, SSF_DTIME_MONTH_MAR, 14, 0, 0, 0, 0);
-uint8_t daysLeft = SSFDTimeDaysInMonth((uint16_t)(1970u + ts.year), ts.month) - ts.day - 1u;
+uint8_t daysLeft = SSFDTimeDaysInMonth(ts.year, ts.month) - ts.day;
 /* daysLeft == 16 (days after the 15th in March 2024) */
 ```

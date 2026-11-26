@@ -1279,8 +1279,9 @@ bool SSFX509IsKeyP256(const SSFX509Cert_t *cert)
 /* Longest RFC 7093 key identifier method is SHA-512 */
 #define _UB_KEY_IDENTIFIER          (64u)
 
-/* Content emitter: true with *lenOut = content octets written, or needed when buf is NULL */
-typedef bool (*_EncContentFn_t)(uint8_t *buf, uint32_t bufSize, const void *arg, uint32_t *lenOut);
+/* Content emitter: true with *lenOut = content octets written, or needed when bufOpt is NULL */
+typedef bool (*_EncContentFn_t)(uint8_t *bufOpt, uint32_t bufOptSize, const void *arg,
+                                uint32_t *lenOut);
 
 /* Arguments for the generic content emitters below. */
 typedef struct
@@ -1342,182 +1343,183 @@ typedef struct
 } _EncCert_t;
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns bytes for tag wrapping content, or bytes needed when buf is NULL, else 0.             */
+/* Returns bytes for tag wrapping content, or bytes needed when bufOpt is NULL, else 0.          */
 /* --------------------------------------------------------------------------------------------- */
-static uint32_t _SSFX509EncWrap(uint8_t *buf, uint32_t bufSize, uint16_t tag,
+static uint32_t _SSFX509EncWrap(uint8_t *bufOpt, uint32_t bufOptSize, uint16_t tag,
                                 const uint8_t *content, uint32_t contentLen)
 {
     uint32_t n;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE((content != NULL) || (contentLen == 0u));
 
-    if (!SSFASN1EncWrap(buf, bufSize, tag, content, contentLen, &n)) return 0;
+    if (!SSFASN1EncWrap(bufOpt, bufOptSize, tag, content, contentLen, &n)) return 0;
     return n;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns bytes for an OBJECT IDENTIFIER, or bytes needed when buf is NULL, else 0.             */
+/* Returns bytes for an OBJECT IDENTIFIER, or bytes needed when bufOpt is NULL, else 0.          */
 /* --------------------------------------------------------------------------------------------- */
-static uint32_t _SSFX509EncOIDRaw(uint8_t *buf, uint32_t bufSize, const uint8_t *oidRaw,
+static uint32_t _SSFX509EncOIDRaw(uint8_t *bufOpt, uint32_t bufOptSize, const uint8_t *oidRaw,
                                   uint32_t oidRawLen)
 {
     uint32_t n;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(oidRaw != NULL);
     SSF_REQUIRE(oidRawLen > 0u);
 
-    if (!SSFASN1EncOIDRaw(buf, bufSize, oidRaw, oidRawLen, &n)) return 0;
+    if (!SSFASN1EncOIDRaw(bufOpt, bufOptSize, oidRaw, oidRawLen, &n)) return 0;
     return n;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns bytes for a string of type strTag, or bytes needed when buf is NULL, else 0.          */
+/* Returns bytes for a string of type strTag, or bytes needed when bufOpt is NULL, else 0.       */
 /* --------------------------------------------------------------------------------------------- */
-static uint32_t _SSFX509EncString(uint8_t *buf, uint32_t bufSize, uint16_t strTag,
+static uint32_t _SSFX509EncString(uint8_t *bufOpt, uint32_t bufOptSize, uint16_t strTag,
                                   const uint8_t *str, uint32_t strLen)
 {
     uint32_t n;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE((str != NULL) || (strLen == 0u));
 
-    if (!SSFASN1EncString(buf, bufSize, strTag, str, strLen, &n)) return 0;
+    if (!SSFASN1EncString(bufOpt, bufOptSize, strTag, str, strLen, &n)) return 0;
     return n;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns bytes for a BOOLEAN, or bytes needed when buf is NULL, else 0.                        */
+/* Returns bytes for a BOOLEAN, or bytes needed when bufOpt is NULL, else 0.                     */
 /* --------------------------------------------------------------------------------------------- */
-static uint32_t _SSFX509EncBool(uint8_t *buf, uint32_t bufSize, bool val)
+static uint32_t _SSFX509EncBool(uint8_t *bufOpt, uint32_t bufOptSize, bool val)
 {
     uint32_t n;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
 
-    if (!SSFASN1EncBool(buf, bufSize, val, &n)) return 0;
+    if (!SSFASN1EncBool(bufOpt, bufOptSize, val, &n)) return 0;
     return n;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns bytes for an INTEGER from raw octets, or bytes needed when buf is NULL, else 0.       */
+/* Returns bytes for an INTEGER from raw octets, or bytes needed when bufOpt is NULL, else 0.    */
 /* --------------------------------------------------------------------------------------------- */
-static uint32_t _SSFX509EncInt(uint8_t *buf, uint32_t bufSize, const uint8_t *intBuf,
+static uint32_t _SSFX509EncInt(uint8_t *bufOpt, uint32_t bufOptSize, const uint8_t *intBuf,
                                uint32_t intLen)
 {
     uint32_t n;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(intBuf != NULL);
     SSF_REQUIRE(intLen > 0u);
 
-    if (!SSFASN1EncInt(buf, bufSize, intBuf, intLen, &n)) return 0;
+    if (!SSFASN1EncInt(bufOpt, bufOptSize, intBuf, intLen, &n)) return 0;
     return n;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns bytes for a positive INTEGER from a magnitude, or bytes needed if buf NULL, else 0.   */
+/* Returns bytes for a positive INTEGER from a magnitude, or needed if bufOpt is NULL, else 0.   */
 /* --------------------------------------------------------------------------------------------- */
-static uint32_t _SSFX509EncUInt(uint8_t *buf, uint32_t bufSize, const uint8_t *magBuf,
+static uint32_t _SSFX509EncUInt(uint8_t *bufOpt, uint32_t bufOptSize, const uint8_t *magBuf,
                                 uint32_t magLen)
 {
     uint32_t n;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(magBuf != NULL);
     SSF_REQUIRE(magLen > 0u);
 
-    if (!SSFASN1EncUInt(buf, bufSize, magBuf, magLen, &n)) return 0;
+    if (!SSFASN1EncUInt(bufOpt, bufOptSize, magBuf, magLen, &n)) return 0;
     return n;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns bytes for an INTEGER from a uint64_t, or bytes needed when buf is NULL, else 0.       */
+/* Returns bytes for an INTEGER from a uint64_t, or bytes needed when bufOpt is NULL, else 0.    */
 /* --------------------------------------------------------------------------------------------- */
-static uint32_t _SSFX509EncIntU64(uint8_t *buf, uint32_t bufSize, uint64_t val)
+static uint32_t _SSFX509EncIntU64(uint8_t *bufOpt, uint32_t bufOptSize, uint64_t val)
 {
     uint32_t n;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
 
-    if (!SSFASN1EncIntU64(buf, bufSize, val, &n)) return 0;
+    if (!SSFASN1EncIntU64(bufOpt, bufOptSize, val, &n)) return 0;
     return n;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns bytes for a BIT STRING, or bytes needed when buf is NULL, else 0.                     */
+/* Returns bytes for a BIT STRING, or bytes needed when bufOpt is NULL, else 0.                  */
 /* --------------------------------------------------------------------------------------------- */
-static uint32_t _SSFX509EncBitString(uint8_t *buf, uint32_t bufSize, const uint8_t *bits,
+static uint32_t _SSFX509EncBitString(uint8_t *bufOpt, uint32_t bufOptSize, const uint8_t *bits,
                                      uint32_t bitsLen, uint8_t unusedBits)
 {
     uint32_t n;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE((bits != NULL) || (bitsLen == 0u));
     SSF_REQUIRE(unusedBits <= 7u);
 
-    if (!SSFASN1EncBitString(buf, bufSize, bits, bitsLen, unusedBits, &n)) return 0;
+    if (!SSFASN1EncBitString(bufOpt, bufOptSize, bits, bitsLen, unusedBits, &n)) return 0;
     return n;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns bytes for an OCTET STRING, or bytes needed when buf is NULL, else 0.                  */
+/* Returns bytes for an OCTET STRING, or bytes needed when bufOpt is NULL, else 0.               */
 /* --------------------------------------------------------------------------------------------- */
-static uint32_t _SSFX509EncOctetString(uint8_t *buf, uint32_t bufSize, const uint8_t *octets,
+static uint32_t _SSFX509EncOctetString(uint8_t *bufOpt, uint32_t bufOptSize, const uint8_t *octets,
                                        uint32_t octetsLen)
 {
     uint32_t n;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE((octets != NULL) || (octetsLen == 0u));
 
-    if (!SSFASN1EncOctetString(buf, bufSize, octets, octetsLen, &n)) return 0;
+    if (!SSFASN1EncOctetString(bufOpt, bufOptSize, octets, octetsLen, &n)) return 0;
     return n;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns bytes for a UTCTime, or bytes needed when buf is NULL, else 0.                        */
+/* Returns bytes for a UTCTime, or bytes needed when bufOpt is NULL, else 0.                     */
 /* --------------------------------------------------------------------------------------------- */
-static uint32_t _SSFX509EncUTCTime(uint8_t *buf, uint32_t bufSize, uint64_t unixSec)
+static uint32_t _SSFX509EncUTCTime(uint8_t *bufOpt, uint32_t bufOptSize, uint64_t unixSec)
 {
     uint32_t n;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
 
-    if (!SSFASN1EncUTCTime(buf, bufSize, unixSec, &n)) return 0;
+    if (!SSFASN1EncUTCTime(bufOpt, bufOptSize, unixSec, &n)) return 0;
     return n;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns bytes for a tag and length header, or bytes needed when buf is NULL, else 0.          */
+/* Returns bytes for a tag and length header, or bytes needed when bufOpt is NULL, else 0.       */
 /* --------------------------------------------------------------------------------------------- */
-static uint32_t _SSFX509EncTagLen(uint8_t *buf, uint32_t bufSize, uint16_t tag, uint32_t contentLen)
+static uint32_t _SSFX509EncTagLen(uint8_t *bufOpt, uint32_t bufOptSize, uint16_t tag,
+                                  uint32_t contentLen)
 {
     uint32_t n;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
 
-    if (!SSFASN1EncTagLen(buf, bufSize, tag, contentLen, &n)) return 0;
+    if (!SSFASN1EncTagLen(bufOpt, bufOptSize, tag, contentLen, &n)) return 0;
     return n;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns buf + pos, or NULL when only measuring.                                               */
+/* Returns bufOpt + pos, or NULL when only measuring.                                            */
 /* --------------------------------------------------------------------------------------------- */
-static uint8_t *_SSFX509At(uint8_t *buf, uint32_t pos)
+static uint8_t *_SSFX509At(uint8_t *bufOpt, uint32_t pos)
 {
-    return (buf == NULL) ? NULL : &buf[pos];
+    return (bufOpt == NULL) ? NULL : &bufOpt[pos];
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns the bytes remaining in buf after pos, or 0 when only measuring.                       */
+/* Returns the bytes remaining in bufOpt after pos, or 0 when only measuring.                    */
 /* --------------------------------------------------------------------------------------------- */
-static uint32_t _SSFX509Rem(const uint8_t *buf, uint32_t bufSize, uint32_t pos)
+static uint32_t _SSFX509Rem(const uint8_t *bufOpt, uint32_t bufOptSize, uint32_t pos)
 {
-    SSF_REQUIRE((buf == NULL) || (pos <= bufSize));
+    SSF_REQUIRE((bufOpt == NULL) || (pos <= bufOptSize));
 
-    return (buf == NULL) ? 0u : (bufSize - pos);
+    return (bufOpt == NULL) ? 0u : (bufOptSize - pos);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -1535,19 +1537,19 @@ static bool _SSFX509Add(uint32_t *pos, uint32_t n)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if len raw bytes fit at *pos, copying them when writing, and advances *pos.      */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFX509AddBytes(uint8_t *buf, uint32_t bufSize, uint32_t *pos, const uint8_t *data,
-                             uint32_t len)
+static bool _SSFX509AddBytes(uint8_t *bufOpt, uint32_t bufOptSize, uint32_t *pos,
+                             const uint8_t *data, uint32_t len)
 {
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(pos != NULL);
     SSF_REQUIRE((data != NULL) || (len == 0u));
 
     /* Writing? */
-    if (buf != NULL)
+    if (bufOpt != NULL)
     {
         /* Yes, the bytes must fit */
-        if (_SSFX509Rem(buf, bufSize, *pos) < len) return false;
-        if (len > 0u) memcpy(&buf[*pos], data, len);
+        if (_SSFX509Rem(bufOpt, bufOptSize, *pos) < len) return false;
+        if (len > 0u) memcpy(&bufOpt[*pos], data, len);
     }
     *pos += len;
     return true;
@@ -1556,7 +1558,7 @@ static bool _SSFX509AddBytes(uint8_t *buf, uint32_t bufSize, uint32_t *pos, cons
 /* --------------------------------------------------------------------------------------------- */
 /* Returns bytes written or needed for tag wrapping the content fn emits, else 0 on failure.     */
 /* --------------------------------------------------------------------------------------------- */
-static uint32_t _SSFX509EncConstructed(uint8_t *buf, uint32_t bufSize, uint16_t tag,
+static uint32_t _SSFX509EncConstructed(uint8_t *bufOpt, uint32_t bufOptSize, uint16_t tag,
                                        _EncContentFn_t fn, const void *arg)
 {
     uint32_t innerLen;
@@ -1564,7 +1566,7 @@ static uint32_t _SSFX509EncConstructed(uint8_t *buf, uint32_t bufSize, uint16_t 
     uint32_t total;
     uint32_t written;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(fn != NULL);
 
     /* Is the content measurable? */
@@ -1578,18 +1580,18 @@ static uint32_t _SSFX509EncConstructed(uint8_t *buf, uint32_t bufSize, uint16_t 
     total = hdrLen + innerLen;
 
     /* Only measuring? */
-    if (buf == NULL) return total;
+    if (bufOpt == NULL) return total;
 
     /* Do the header and content fit? */
-    if (bufSize < total)
+    if (bufOptSize < total)
     {
         /* No, caller's buffer too small */
         return 0;
     }
 
     /* Yes, header first since its length octets need the measured content size */
-    if (_SSFX509EncTagLen(buf, bufSize, tag, innerLen) != hdrLen) return 0;
-    if (!fn(&buf[hdrLen], bufSize - hdrLen, arg, &written)) return 0;
+    if (_SSFX509EncTagLen(bufOpt, bufOptSize, tag, innerLen) != hdrLen) return 0;
+    if (!fn(&bufOpt[hdrLen], bufOptSize - hdrLen, arg, &written)) return 0;
     SSF_ENSURE(written == innerLen);
     return total;
 }
@@ -1597,18 +1599,18 @@ static uint32_t _SSFX509EncConstructed(uint8_t *buf, uint32_t bufSize, uint16_t 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if the nested constructed element arg describes is emitted, else false.          */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFX509EncNestedContent(uint8_t *buf, uint32_t bufSize, const void *arg,
+static bool _SSFX509EncNestedContent(uint8_t *bufOpt, uint32_t bufOptSize, const void *arg,
                                      uint32_t *lenOut)
 {
     const _EncNested_t *n = (const _EncNested_t *)arg;
     uint32_t pos = 0;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(n != NULL);
     SSF_REQUIRE(n->fn != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
-    if (!_SSFX509Add(&pos, _SSFX509EncConstructed(buf, bufSize, n->tag, n->fn,
+    if (!_SSFX509Add(&pos, _SSFX509EncConstructed(bufOpt, bufOptSize, n->tag, n->fn,
                                                   n->arg))) return false;
     *lenOut = pos;
     return true;
@@ -1617,18 +1619,19 @@ static bool _SSFX509EncNestedContent(uint8_t *buf, uint32_t bufSize, const void 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if the tagged primitive arg describes is emitted, else false.                    */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFX509EncTaggedContent(uint8_t *buf, uint32_t bufSize, const void *arg,
+static bool _SSFX509EncTaggedContent(uint8_t *bufOpt, uint32_t bufOptSize, const void *arg,
                                      uint32_t *lenOut)
 {
     const _EncTagged_t *t = (const _EncTagged_t *)arg;
     uint32_t pos = 0;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(t != NULL);
     SSF_REQUIRE((t->data != NULL) || (t->len == 0u));
     SSF_REQUIRE(lenOut != NULL);
 
-    if (!_SSFX509Add(&pos, _SSFX509EncWrap(buf, bufSize, t->tag, t->data, t->len))) return false;
+    if (!_SSFX509Add(&pos, _SSFX509EncWrap(bufOpt, bufOptSize, t->tag, t->data, t->len)))
+        return false;
     *lenOut = pos;
     return true;
 }
@@ -1636,18 +1639,18 @@ static bool _SSFX509EncTaggedContent(uint8_t *buf, uint32_t bufSize, const void 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if the raw bytes arg describes are emitted, else false.                          */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFX509EncBytesContent(uint8_t *buf, uint32_t bufSize, const void *arg,
+static bool _SSFX509EncBytesContent(uint8_t *bufOpt, uint32_t bufOptSize, const void *arg,
                                     uint32_t *lenOut)
 {
     const _EncBytes_t *b = (const _EncBytes_t *)arg;
     uint32_t pos = 0;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(b != NULL);
     SSF_REQUIRE((b->data != NULL) || (b->len == 0u));
     SSF_REQUIRE(lenOut != NULL);
 
-    if (!_SSFX509AddBytes(buf, bufSize, &pos, b->data, b->len)) return false;
+    if (!_SSFX509AddBytes(bufOpt, bufOptSize, &pos, b->data, b->len)) return false;
     *lenOut = pos;
     return true;
 }
@@ -1671,20 +1674,21 @@ static bool _SSFX509IsPrintableChar(char ch)
 /* --------------------------------------------------------------------------------------------- */
 /* Content: AttributeTypeAndValue { OID, PrintableString for countryName else UTF8String }.      */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFX509EncDNAttrSeqContent(uint8_t *buf, uint32_t bufSize, const void *arg,
+static bool _SSFX509EncDNAttrSeqContent(uint8_t *bufOpt, uint32_t bufOptSize, const void *arg,
                                         uint32_t *lenOut)
 {
     const _EncDNAttr_t *a = (const _EncDNAttr_t *)arg;
     uint32_t pos = 0;
     uint16_t strTag;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(a != NULL);
     SSF_REQUIRE(a->oid != NULL);
     SSF_REQUIRE(a->valueStr != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
-    if (!_SSFX509Add(&pos, _SSFX509EncOIDRaw(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+    if (!_SSFX509Add(&pos, _SSFX509EncOIDRaw(_SSFX509At(bufOpt, pos),
+                                             _SSFX509Rem(bufOpt, bufOptSize, pos),
                                              a->oid, a->oidLen)))
         return false;
     /* Is it countryName, which RFC 5280 Appendix A defines as PrintableString? */
@@ -1698,7 +1702,8 @@ static bool _SSFX509EncDNAttrSeqContent(uint8_t *buf, uint32_t bufSize, const vo
         /* No */
         strTag = SSF_ASN1_TAG_UTF8_STRING;
     }
-    if (!_SSFX509Add(&pos, _SSFX509EncString(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+    if (!_SSFX509Add(&pos, _SSFX509EncString(_SSFX509At(bufOpt, pos),
+                                             _SSFX509Rem(bufOpt, bufOptSize, pos),
                                              strTag, (const uint8_t *)a->valueStr,
                                              a->valueLen))) return false;
     *lenOut = pos;
@@ -1708,14 +1713,14 @@ static bool _SSFX509EncDNAttrSeqContent(uint8_t *buf, uint32_t bufSize, const vo
 /* --------------------------------------------------------------------------------------------- */
 /* Returns bytes for one RDN SET { SEQUENCE { OID, UTF8String } }, else 0 if over its bound.     */
 /* --------------------------------------------------------------------------------------------- */
-static uint32_t _SSFX509EncDNAttr(uint8_t *buf, uint32_t bufSize, const uint8_t *oid,
+static uint32_t _SSFX509EncDNAttr(uint8_t *bufOpt, uint32_t bufOptSize, const uint8_t *oid,
                                   uint32_t oidLen, SSFCStrIn_t valueStr, uint32_t upperBound)
 {
     _EncDNAttr_t attr;
     _EncNested_t seq;
     size_t valueLen;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(oid != NULL);
     SSF_REQUIRE(valueStr != NULL);
 
@@ -1732,19 +1737,21 @@ static uint32_t _SSFX509EncDNAttr(uint8_t *buf, uint32_t bufSize, const uint8_t 
     seq.tag = SSF_ASN1_TAG_SEQUENCE;
     seq.fn = _SSFX509EncDNAttrSeqContent;
     seq.arg = &attr;
-    return _SSFX509EncConstructed(buf, bufSize, SSF_ASN1_TAG_SET, _SSFX509EncNestedContent, &seq);
+    return _SSFX509EncConstructed(bufOpt, bufOptSize, SSF_ASN1_TAG_SET,
+                                  _SSFX509EncNestedContent, &seq);
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Content: Name as a sequence of RDNs in C, ST, L, O, OU, CN order.                             */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFX509EncDNContent(uint8_t *buf, uint32_t bufSize, const void *arg, uint32_t *lenOut)
+static bool _SSFX509EncDNContent(uint8_t *bufOpt, uint32_t bufOptSize, const void *arg,
+                                 uint32_t *lenOut)
 {
     const SSFX509GenName_t *name = (const SSFX509GenName_t *)arg;
     uint32_t pos = 0;
     size_t cLen;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(name != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
@@ -1767,7 +1774,8 @@ static bool _SSFX509EncDNContent(uint8_t *buf, uint32_t bufSize, const void *arg
 
     /* Is countryName present and not encodable? */
     if ((name->c != NULL) &&
-        (!_SSFX509Add(&pos, _SSFX509EncDNAttr(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+        (!_SSFX509Add(&pos, _SSFX509EncDNAttr(_SSFX509At(bufOpt, pos),
+                                              _SSFX509Rem(bufOpt, bufOptSize, pos),
                                               _oidC, sizeof(_oidC), name->c, _UB_COUNTRY_NAME))))
     {
         /* Yes */
@@ -1775,7 +1783,8 @@ static bool _SSFX509EncDNContent(uint8_t *buf, uint32_t bufSize, const void *arg
     }
     /* Is stateOrProvinceName present and not encodable? */
     if ((name->st != NULL) &&
-        (!_SSFX509Add(&pos, _SSFX509EncDNAttr(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+        (!_SSFX509Add(&pos, _SSFX509EncDNAttr(_SSFX509At(bufOpt, pos),
+                                              _SSFX509Rem(bufOpt, bufOptSize, pos),
                                               _oidST, sizeof(_oidST), name->st, _UB_STATE_NAME))))
     {
         /* Yes */
@@ -1783,7 +1792,8 @@ static bool _SSFX509EncDNContent(uint8_t *buf, uint32_t bufSize, const void *arg
     }
     /* Is localityName present and not encodable? */
     if ((name->l != NULL) &&
-        (!_SSFX509Add(&pos, _SSFX509EncDNAttr(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+        (!_SSFX509Add(&pos, _SSFX509EncDNAttr(_SSFX509At(bufOpt, pos),
+                                              _SSFX509Rem(bufOpt, bufOptSize, pos),
                                               _oidL, sizeof(_oidL), name->l, _UB_LOCALITY_NAME))))
     {
         /* Yes */
@@ -1791,7 +1801,8 @@ static bool _SSFX509EncDNContent(uint8_t *buf, uint32_t bufSize, const void *arg
     }
     /* Is organizationName present and not encodable? */
     if ((name->o != NULL) &&
-        (!_SSFX509Add(&pos, _SSFX509EncDNAttr(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+        (!_SSFX509Add(&pos, _SSFX509EncDNAttr(_SSFX509At(bufOpt, pos),
+                                              _SSFX509Rem(bufOpt, bufOptSize, pos),
                                               _oidO, sizeof(_oidO), name->o,
                                               _UB_ORGANIZATION_NAME))))
     {
@@ -1800,7 +1811,8 @@ static bool _SSFX509EncDNContent(uint8_t *buf, uint32_t bufSize, const void *arg
     }
     /* Is organizationalUnitName present and not encodable? */
     if ((name->ou != NULL) &&
-        (!_SSFX509Add(&pos, _SSFX509EncDNAttr(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+        (!_SSFX509Add(&pos, _SSFX509EncDNAttr(_SSFX509At(bufOpt, pos),
+                                              _SSFX509Rem(bufOpt, bufOptSize, pos),
                                               _oidOU, sizeof(_oidOU), name->ou,
                                               _UB_ORGANIZATIONAL_UNIT))))
     {
@@ -1809,7 +1821,8 @@ static bool _SSFX509EncDNContent(uint8_t *buf, uint32_t bufSize, const void *arg
     }
     /* Is commonName present and not encodable? */
     if ((name->cn != NULL) &&
-        (!_SSFX509Add(&pos, _SSFX509EncDNAttr(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+        (!_SSFX509Add(&pos, _SSFX509EncDNAttr(_SSFX509At(bufOpt, pos),
+                                              _SSFX509Rem(bufOpt, bufOptSize, pos),
                                               _oidCN, sizeof(_oidCN), name->cn, _UB_COMMON_NAME))))
     {
         /* Yes */
@@ -1822,33 +1835,35 @@ static bool _SSFX509EncDNContent(uint8_t *buf, uint32_t bufSize, const void *arg
 /* --------------------------------------------------------------------------------------------- */
 /* Returns bytes for a Name SEQUENCE, else 0 on failure.                                         */
 /* --------------------------------------------------------------------------------------------- */
-static uint32_t _SSFX509EncDN(uint8_t *buf, uint32_t bufSize, const SSFX509GenName_t *name)
+static uint32_t _SSFX509EncDN(uint8_t *bufOpt, uint32_t bufOptSize, const SSFX509GenName_t *name)
 {
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(name != NULL);
 
-    return _SSFX509EncConstructed(buf, bufSize, SSF_ASN1_TAG_SEQUENCE, _SSFX509EncDNContent, name);
+    return _SSFX509EncConstructed(bufOpt, bufOptSize, SSF_ASN1_TAG_SEQUENCE,
+                                  _SSFX509EncDNContent, name);
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Content: AlgorithmIdentifier { OID, params } with optional raw DER parameters.                */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFX509EncAlgIdContent(uint8_t *buf, uint32_t bufSize, const void *arg,
+static bool _SSFX509EncAlgIdContent(uint8_t *bufOpt, uint32_t bufOptSize, const void *arg,
                                     uint32_t *lenOut)
 {
     const _EncAlgId_t *a = (const _EncAlgId_t *)arg;
     uint32_t pos = 0;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(a != NULL);
     SSF_REQUIRE(a->oid != NULL);
     SSF_REQUIRE((a->params != NULL) || (a->paramsLen == 0u));
     SSF_REQUIRE(lenOut != NULL);
 
-    if (!_SSFX509Add(&pos, _SSFX509EncOIDRaw(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+    if (!_SSFX509Add(&pos, _SSFX509EncOIDRaw(_SSFX509At(bufOpt, pos),
+                                             _SSFX509Rem(bufOpt, bufOptSize, pos),
                                              a->oid, a->oidLen)))
         return false;
-    if (!_SSFX509AddBytes(buf, bufSize, &pos, a->params, a->paramsLen)) return false;
+    if (!_SSFX509AddBytes(bufOpt, bufOptSize, &pos, a->params, a->paramsLen)) return false;
     *lenOut = pos;
     return true;
 }
@@ -1856,48 +1871,50 @@ static bool _SSFX509EncAlgIdContent(uint8_t *buf, uint32_t bufSize, const void *
 /* --------------------------------------------------------------------------------------------- */
 /* Returns bytes for AlgorithmIdentifier SEQUENCE { OID, params }, else 0 on failure.            */
 /* --------------------------------------------------------------------------------------------- */
-static uint32_t _SSFX509EncAlgIdWithParams(uint8_t *buf, uint32_t bufSize, const uint8_t *algOidRaw,
-                                           uint32_t algOidRawLen, const uint8_t *paramsOpt,
-                                           uint32_t paramsLen)
+static uint32_t _SSFX509EncAlgIdWithParams(uint8_t *bufOpt, uint32_t bufOptSize,
+                                           const uint8_t *algOidRaw, uint32_t algOidRawLen,
+                                           const uint8_t *paramsOpt, uint32_t paramsLen)
 {
     _EncAlgId_t a;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(algOidRaw != NULL);
 
     a.oid = algOidRaw;
     a.oidLen = algOidRawLen;
     a.params = paramsOpt;
     a.paramsLen = (paramsOpt == NULL) ? 0u : paramsLen;
-    return _SSFX509EncConstructed(buf, bufSize, SSF_ASN1_TAG_SEQUENCE, _SSFX509EncAlgIdContent, &a);
+    return _SSFX509EncConstructed(bufOpt, bufOptSize, SSF_ASN1_TAG_SEQUENCE,
+                                  _SSFX509EncAlgIdContent, &a);
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns bytes for AlgorithmIdentifier SEQUENCE { OID }, else 0 on failure.                    */
 /* --------------------------------------------------------------------------------------------- */
-static uint32_t _SSFX509EncAlgId(uint8_t *buf, uint32_t bufSize, const uint8_t *algOidRaw,
+static uint32_t _SSFX509EncAlgId(uint8_t *bufOpt, uint32_t bufOptSize, const uint8_t *algOidRaw,
                                  uint32_t algOidRawLen)
 {
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(algOidRaw != NULL);
 
-    return _SSFX509EncAlgIdWithParams(buf, bufSize, algOidRaw, algOidRawLen, NULL, 0u);
+    return _SSFX509EncAlgIdWithParams(bufOpt, bufOptSize, algOidRaw, algOidRawLen, NULL, 0u);
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Content: [0] EXPLICIT Version INTEGER.                                                        */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFX509EncVersionContent(uint8_t *buf, uint32_t bufSize, const void *arg,
+static bool _SSFX509EncVersionContent(uint8_t *bufOpt, uint32_t bufOptSize, const void *arg,
                                       uint32_t *lenOut)
 {
     const SSFX509GenParams_t *p = (const SSFX509GenParams_t *)arg;
     uint32_t pos = 0;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(p != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
-    if (!_SSFX509Add(&pos, _SSFX509EncIntU64(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+    if (!_SSFX509Add(&pos, _SSFX509EncIntU64(_SSFX509At(bufOpt, pos),
+                                             _SSFX509Rem(bufOpt, bufOptSize, pos),
                                              p->version))) return false;
     *lenOut = pos;
     return true;
@@ -1906,20 +1923,22 @@ static bool _SSFX509EncVersionContent(uint8_t *buf, uint32_t bufSize, const void
 /* --------------------------------------------------------------------------------------------- */
 /* Content: Validity { notBefore UTCTime, notAfter UTCTime }.                                    */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFX509EncValidityContent(uint8_t *buf, uint32_t bufSize, const void *arg,
+static bool _SSFX509EncValidityContent(uint8_t *bufOpt, uint32_t bufOptSize, const void *arg,
                                        uint32_t *lenOut)
 {
     const SSFX509GenParams_t *p = (const SSFX509GenParams_t *)arg;
     uint32_t pos = 0;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(p != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
-    if (!_SSFX509Add(&pos, _SSFX509EncUTCTime(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+    if (!_SSFX509Add(&pos, _SSFX509EncUTCTime(_SSFX509At(bufOpt, pos),
+                                              _SSFX509Rem(bufOpt, bufOptSize, pos),
                                               p->notBefore)))
         return false;
-    if (!_SSFX509Add(&pos, _SSFX509EncUTCTime(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+    if (!_SSFX509Add(&pos, _SSFX509EncUTCTime(_SSFX509At(bufOpt, pos),
+                                              _SSFX509Rem(bufOpt, bufOptSize, pos),
                                               p->notAfter)))
         return false;
     *lenOut = pos;
@@ -1929,20 +1948,22 @@ static bool _SSFX509EncValidityContent(uint8_t *buf, uint32_t bufSize, const voi
 /* --------------------------------------------------------------------------------------------- */
 /* Content: EC AlgorithmIdentifier { OID id-ecPublicKey, OID namedCurve }.                       */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFX509EncECAlgContent(uint8_t *buf, uint32_t bufSize, const void *arg,
+static bool _SSFX509EncECAlgContent(uint8_t *bufOpt, uint32_t bufOptSize, const void *arg,
                                     uint32_t *lenOut)
 {
     const SSFX509GenParams_t *p = (const SSFX509GenParams_t *)arg;
     uint32_t pos = 0;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(p != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
-    if (!_SSFX509Add(&pos, _SSFX509EncOIDRaw(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+    if (!_SSFX509Add(&pos, _SSFX509EncOIDRaw(_SSFX509At(bufOpt, pos),
+                                             _SSFX509Rem(bufOpt, bufOptSize, pos),
                                              p->pubKeyAlgOidRaw, p->pubKeyAlgOidRawLen)))
         return false;
-    if (!_SSFX509Add(&pos, _SSFX509EncOIDRaw(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+    if (!_SSFX509Add(&pos, _SSFX509EncOIDRaw(_SSFX509At(bufOpt, pos),
+                                             _SSFX509Rem(bufOpt, bufOptSize, pos),
                                              p->ecCurveOidRaw, p->ecCurveOidRawLen)))
         return false;
     *lenOut = pos;
@@ -1952,14 +1973,14 @@ static bool _SSFX509EncECAlgContent(uint8_t *buf, uint32_t bufSize, const void *
 /* --------------------------------------------------------------------------------------------- */
 /* Content: SubjectPublicKeyInfo { algorithm, subjectPublicKey BIT STRING }.                     */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFX509EncSPKIContent(uint8_t *buf, uint32_t bufSize, const void *arg,
+static bool _SSFX509EncSPKIContent(uint8_t *bufOpt, uint32_t bufOptSize, const void *arg,
                                    uint32_t *lenOut)
 {
     const SSFX509GenParams_t *p = (const SSFX509GenParams_t *)arg;
     uint32_t pos = 0;
     uint32_t n;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(p != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
@@ -1967,18 +1988,18 @@ static bool _SSFX509EncSPKIContent(uint8_t *buf, uint32_t bufSize, const void *a
     if (p->ecCurveOidRaw != NULL)
     {
         /* Yes, the algorithm carries the named curve as its parameter */
-        n = _SSFX509EncConstructed(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+        n = _SSFX509EncConstructed(_SSFX509At(bufOpt, pos), _SSFX509Rem(bufOpt, bufOptSize, pos),
                                    SSF_ASN1_TAG_SEQUENCE, _SSFX509EncECAlgContent, p);
     }
     else
     {
         /* No, bare algorithm identifier */
-        n = _SSFX509EncAlgId(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+        n = _SSFX509EncAlgId(_SSFX509At(bufOpt, pos), _SSFX509Rem(bufOpt, bufOptSize, pos),
                              p->pubKeyAlgOidRaw, p->pubKeyAlgOidRawLen);
     }
     if (!_SSFX509Add(&pos, n)) return false;
-    if (!_SSFX509Add(&pos, _SSFX509EncBitString(_SSFX509At(buf, pos),
-                                                _SSFX509Rem(buf, bufSize, pos), p->pubKey,
+    if (!_SSFX509Add(&pos, _SSFX509EncBitString(_SSFX509At(bufOpt, pos),
+                                                _SSFX509Rem(bufOpt, bufOptSize, pos), p->pubKey,
                                                 p->pubKeyLen, 0u))) return false;
     *lenOut = pos;
     return true;
@@ -1987,30 +2008,33 @@ static bool _SSFX509EncSPKIContent(uint8_t *buf, uint32_t bufSize, const void *a
 /* --------------------------------------------------------------------------------------------- */
 /* Content: Extension { OID, critical BOOLEAN OPTIONAL, extnValue OCTET STRING }.                */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFX509EncExtContent(uint8_t *buf, uint32_t bufSize, const void *arg, uint32_t *lenOut)
+static bool _SSFX509EncExtContent(uint8_t *bufOpt, uint32_t bufOptSize, const void *arg,
+                                  uint32_t *lenOut)
 {
     const _EncExt_t *e = (const _EncExt_t *)arg;
     uint32_t pos = 0;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(e != NULL);
     SSF_REQUIRE(e->oid != NULL);
     SSF_REQUIRE(e->valueFn != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
-    if (!_SSFX509Add(&pos, _SSFX509EncOIDRaw(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+    if (!_SSFX509Add(&pos, _SSFX509EncOIDRaw(_SSFX509At(bufOpt, pos),
+                                             _SSFX509Rem(bufOpt, bufOptSize, pos),
                                              e->oid, e->oidLen)))
         return false;
     /* Is the extension critical and its BOOLEAN not encodable? */
     if ((e->critical) &&
-        (!_SSFX509Add(&pos, _SSFX509EncBool(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+        (!_SSFX509Add(&pos, _SSFX509EncBool(_SSFX509At(bufOpt, pos),
+                                            _SSFX509Rem(bufOpt, bufOptSize, pos),
                                             true))))
     {
         /* Yes */
         return false;
     }
-    if (!_SSFX509Add(&pos, _SSFX509EncConstructed(_SSFX509At(buf, pos),
-                                                  _SSFX509Rem(buf, bufSize, pos),
+    if (!_SSFX509Add(&pos, _SSFX509EncConstructed(_SSFX509At(bufOpt, pos),
+                                                  _SSFX509Rem(bufOpt, bufOptSize, pos),
                                                   SSF_ASN1_TAG_OCTET_STRING, e->valueFn,
                                                   e->valueArg)))
         return false;
@@ -2021,31 +2045,33 @@ static bool _SSFX509EncExtContent(uint8_t *buf, uint32_t bufSize, const void *ar
 /* --------------------------------------------------------------------------------------------- */
 /* Returns bytes for one Extension SEQUENCE, else 0 on failure.                                  */
 /* --------------------------------------------------------------------------------------------- */
-static uint32_t _SSFX509EncExtension(uint8_t *buf, uint32_t bufSize, const _EncExt_t *e)
+static uint32_t _SSFX509EncExtension(uint8_t *bufOpt, uint32_t bufOptSize, const _EncExt_t *e)
 {
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(e != NULL);
 
-    return _SSFX509EncConstructed(buf, bufSize, SSF_ASN1_TAG_SEQUENCE, _SSFX509EncExtContent, e);
+    return _SSFX509EncConstructed(bufOpt, bufOptSize, SSF_ASN1_TAG_SEQUENCE,
+                                  _SSFX509EncExtContent, e);
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Content: BasicConstraints { cA BOOLEAN DEFAULT FALSE, pathLenConstraint INTEGER OPTIONAL }.   */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFX509EncBCSeqContent(uint8_t *buf, uint32_t bufSize, const void *arg,
+static bool _SSFX509EncBCSeqContent(uint8_t *bufOpt, uint32_t bufOptSize, const void *arg,
                                     uint32_t *lenOut)
 {
     const SSFX509GenParams_t *p = (const SSFX509GenParams_t *)arg;
     uint32_t pos = 0;
     uint8_t plVal;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(p != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
     /* Is it a CA and its cA BOOLEAN not encodable? */
     if ((p->isCA) &&
-        (!_SSFX509Add(&pos, _SSFX509EncBool(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+        (!_SSFX509Add(&pos, _SSFX509EncBool(_SSFX509At(bufOpt, pos),
+                                            _SSFX509Rem(bufOpt, bufOptSize, pos),
                                             true))))
     {
         /* Yes */
@@ -2057,7 +2083,8 @@ static bool _SSFX509EncBCSeqContent(uint8_t *buf, uint32_t bufSize, const void *
     {
         /* Yes, single octet INTEGER */
         plVal = (uint8_t)p->pathLenConstraint;
-        if (!_SSFX509Add(&pos, _SSFX509EncInt(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+        if (!_SSFX509Add(&pos, _SSFX509EncInt(_SSFX509At(bufOpt, pos),
+                                              _SSFX509Rem(bufOpt, bufOptSize, pos),
                                               &plVal, 1u))) return false;
     }
     *lenOut = pos;
@@ -2067,7 +2094,7 @@ static bool _SSFX509EncBCSeqContent(uint8_t *buf, uint32_t bufSize, const void *
 /* --------------------------------------------------------------------------------------------- */
 /* Content: KeyUsage BIT STRING as a DER named bit list, trailing zero bits trimmed.             */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFX509EncKUValueContent(uint8_t *buf, uint32_t bufSize, const void *arg,
+static bool _SSFX509EncKUValueContent(uint8_t *bufOpt, uint32_t bufOptSize, const void *arg,
                                       uint32_t *lenOut)
 {
     const SSFX509GenParams_t *p = (const SSFX509GenParams_t *)arg;
@@ -2077,7 +2104,7 @@ static bool _SSFX509EncKUValueContent(uint8_t *buf, uint32_t bufSize, const void
     uint8_t lastByte;
     uint8_t unused = 0;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(p != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
@@ -2097,9 +2124,9 @@ static bool _SSFX509EncKUValueContent(uint8_t *buf, uint32_t bufSize, const void
             unused++;
         }
     }
-    if (!_SSFX509Add(&pos, _SSFX509EncBitString(_SSFX509At(buf, pos),
-                                                _SSFX509Rem(buf, bufSize, pos), kuBytes, kuLen,
-                                                unused)))
+    if (!_SSFX509Add(&pos, _SSFX509EncBitString(_SSFX509At(bufOpt, pos),
+                                                _SSFX509Rem(bufOpt, bufOptSize, pos), kuBytes,
+                                                kuLen, unused)))
         return false;
     *lenOut = pos;
     return true;
@@ -2108,19 +2135,20 @@ static bool _SSFX509EncKUValueContent(uint8_t *buf, uint32_t bufSize, const void
 /* --------------------------------------------------------------------------------------------- */
 /* Content: ExtKeyUsageSyntax SEQUENCE OF KeyPurposeId.                                          */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFX509EncEKUSeqContent(uint8_t *buf, uint32_t bufSize, const void *arg,
+static bool _SSFX509EncEKUSeqContent(uint8_t *bufOpt, uint32_t bufOptSize, const void *arg,
                                      uint32_t *lenOut)
 {
     const SSFX509GenParams_t *p = (const SSFX509GenParams_t *)arg;
     uint32_t pos = 0;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(p != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
     /* Is serverAuth requested and not encodable? */
     if ((p->ekuServerAuth) &&
-        (!_SSFX509Add(&pos, _SSFX509EncOIDRaw(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+        (!_SSFX509Add(&pos, _SSFX509EncOIDRaw(_SSFX509At(bufOpt, pos),
+                                              _SSFX509Rem(bufOpt, bufOptSize, pos),
                                               _oidEkuServerAuth, sizeof(_oidEkuServerAuth)))))
     {
         /* Yes */
@@ -2128,7 +2156,8 @@ static bool _SSFX509EncEKUSeqContent(uint8_t *buf, uint32_t bufSize, const void 
     }
     /* Is clientAuth requested and not encodable? */
     if ((p->ekuClientAuth) &&
-        (!_SSFX509Add(&pos, _SSFX509EncOIDRaw(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+        (!_SSFX509Add(&pos, _SSFX509EncOIDRaw(_SSFX509At(bufOpt, pos),
+                                              _SSFX509Rem(bufOpt, bufOptSize, pos),
                                               _oidEkuClientAuth, sizeof(_oidEkuClientAuth)))))
     {
         /* Yes */
@@ -2136,7 +2165,8 @@ static bool _SSFX509EncEKUSeqContent(uint8_t *buf, uint32_t bufSize, const void 
     }
     /* Is codeSigning requested and not encodable? */
     if ((p->ekuCodeSigning) &&
-        (!_SSFX509Add(&pos, _SSFX509EncOIDRaw(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+        (!_SSFX509Add(&pos, _SSFX509EncOIDRaw(_SSFX509At(bufOpt, pos),
+                                              _SSFX509Rem(bufOpt, bufOptSize, pos),
                                               _oidEkuCodeSigning, sizeof(_oidEkuCodeSigning)))))
     {
         /* Yes */
@@ -2149,7 +2179,7 @@ static bool _SSFX509EncEKUSeqContent(uint8_t *buf, uint32_t bufSize, const void 
 /* --------------------------------------------------------------------------------------------- */
 /* Content: GeneralNames with [2] dNSName and [7] iPAddress entries.                             */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFX509EncSANSeqContent(uint8_t *buf, uint32_t bufSize, const void *arg,
+static bool _SSFX509EncSANSeqContent(uint8_t *bufOpt, uint32_t bufOptSize, const void *arg,
                                      uint32_t *lenOut)
 {
     const SSFX509GenParams_t *p = (const SSFX509GenParams_t *)arg;
@@ -2158,7 +2188,7 @@ static bool _SSFX509EncSANSeqContent(uint8_t *buf, uint32_t bufSize, const void 
     uint32_t pos = 0;
     size_t dnsLen;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(p != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
@@ -2174,7 +2204,8 @@ static bool _SSFX509EncSANSeqContent(uint8_t *buf, uint32_t bufSize, const void 
             /* No, refuse to emit it */
             return false;
         }
-        if (!_SSFX509Add(&pos, _SSFX509EncWrap(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+        if (!_SSFX509Add(&pos, _SSFX509EncWrap(_SSFX509At(bufOpt, pos),
+                                               _SSFX509Rem(bufOpt, bufOptSize, pos),
                                                0x82u, (const uint8_t *)*dns, (uint32_t)dnsLen)))
             return false;
         dns++;
@@ -2183,7 +2214,8 @@ static bool _SSFX509EncSANSeqContent(uint8_t *buf, uint32_t bufSize, const void 
     while ((ip != NULL) && (*ip != NULL))
     {
         /* Yes */
-        if (!_SSFX509Add(&pos, _SSFX509EncWrap(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+        if (!_SSFX509Add(&pos, _SSFX509EncWrap(_SSFX509At(bufOpt, pos),
+                                               _SSFX509Rem(bufOpt, bufOptSize, pos),
                                                0x87u, *ip, 4u)))
             return false;
         ip++;
@@ -2195,13 +2227,13 @@ static bool _SSFX509EncSANSeqContent(uint8_t *buf, uint32_t bufSize, const void 
 /* --------------------------------------------------------------------------------------------- */
 /* Content: SubjectKeyIdentifier OCTET STRING.                                                   */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFX509EncSKIDValueContent(uint8_t *buf, uint32_t bufSize, const void *arg,
+static bool _SSFX509EncSKIDValueContent(uint8_t *bufOpt, uint32_t bufOptSize, const void *arg,
                                         uint32_t *lenOut)
 {
     const SSFX509GenParams_t *p = (const SSFX509GenParams_t *)arg;
     uint32_t pos = 0;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(p != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
@@ -2211,8 +2243,8 @@ static bool _SSFX509EncSKIDValueContent(uint8_t *buf, uint32_t bufSize, const vo
         /* Yes, refuse to emit it */
         return false;
     }
-    if (!_SSFX509Add(&pos, _SSFX509EncOctetString(_SSFX509At(buf, pos),
-                                                  _SSFX509Rem(buf, bufSize, pos), p->skid,
+    if (!_SSFX509Add(&pos, _SSFX509EncOctetString(_SSFX509At(bufOpt, pos),
+                                                  _SSFX509Rem(bufOpt, bufOptSize, pos), p->skid,
                                                   p->skidLen)))
         return false;
     *lenOut = pos;
@@ -2222,13 +2254,13 @@ static bool _SSFX509EncSKIDValueContent(uint8_t *buf, uint32_t bufSize, const vo
 /* --------------------------------------------------------------------------------------------- */
 /* Content: AuthorityKeyIdentifier { keyIdentifier [0] IMPLICIT OCTET STRING }.                  */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFX509EncAKIDSeqContent(uint8_t *buf, uint32_t bufSize, const void *arg,
+static bool _SSFX509EncAKIDSeqContent(uint8_t *bufOpt, uint32_t bufOptSize, const void *arg,
                                       uint32_t *lenOut)
 {
     const SSFX509GenParams_t *p = (const SSFX509GenParams_t *)arg;
     uint32_t pos = 0;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(p != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
@@ -2238,7 +2270,8 @@ static bool _SSFX509EncAKIDSeqContent(uint8_t *buf, uint32_t bufSize, const void
         /* Yes, refuse to emit it */
         return false;
     }
-    if (!_SSFX509Add(&pos, _SSFX509EncWrap(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+    if (!_SSFX509Add(&pos, _SSFX509EncWrap(_SSFX509At(bufOpt, pos),
+                                           _SSFX509Rem(bufOpt, bufOptSize, pos),
                                            0x80u, p->akid, p->akidLen)))
         return false;
     *lenOut = pos;
@@ -2248,7 +2281,7 @@ static bool _SSFX509EncAKIDSeqContent(uint8_t *buf, uint32_t bufSize, const void
 /* --------------------------------------------------------------------------------------------- */
 /* Content: GeneralSubtrees, each SEQUENCE { base GeneralName }, for the DNS and IP lists.       */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFX509EncSubtreesContent(uint8_t *buf, uint32_t bufSize, const void *arg,
+static bool _SSFX509EncSubtreesContent(uint8_t *bufOpt, uint32_t bufOptSize, const void *arg,
                                        uint32_t *lenOut)
 {
     const _EncSubtrees_t *s = (const _EncSubtrees_t *)arg;
@@ -2258,7 +2291,7 @@ static bool _SSFX509EncSubtreesContent(uint8_t *buf, uint32_t bufSize, const voi
     uint32_t pos = 0;
     size_t dnsLen;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(s != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
@@ -2277,8 +2310,8 @@ static bool _SSFX509EncSubtreesContent(uint8_t *buf, uint32_t bufSize, const voi
         gn.tag = 0x82u;
         gn.data = (const uint8_t *)*dns;
         gn.len = (uint32_t)dnsLen;
-        if (!_SSFX509Add(&pos, _SSFX509EncConstructed(_SSFX509At(buf, pos),
-                                                      _SSFX509Rem(buf, bufSize, pos),
+        if (!_SSFX509Add(&pos, _SSFX509EncConstructed(_SSFX509At(bufOpt, pos),
+                                                      _SSFX509Rem(bufOpt, bufOptSize, pos),
                                                       SSF_ASN1_TAG_SEQUENCE,
                                                       _SSFX509EncTaggedContent, &gn)))
             return false;
@@ -2291,8 +2324,8 @@ static bool _SSFX509EncSubtreesContent(uint8_t *buf, uint32_t bufSize, const voi
         gn.tag = 0x87u;
         gn.data = *ips;
         gn.len = 8u;
-        if (!_SSFX509Add(&pos, _SSFX509EncConstructed(_SSFX509At(buf, pos),
-                                                      _SSFX509Rem(buf, bufSize, pos),
+        if (!_SSFX509Add(&pos, _SSFX509EncConstructed(_SSFX509At(bufOpt, pos),
+                                                      _SSFX509Rem(bufOpt, bufOptSize, pos),
                                                       SSF_ASN1_TAG_SEQUENCE,
                                                       _SSFX509EncTaggedContent, &gn)))
             return false;
@@ -2305,7 +2338,7 @@ static bool _SSFX509EncSubtreesContent(uint8_t *buf, uint32_t bufSize, const voi
 /* --------------------------------------------------------------------------------------------- */
 /* Content: NameConstraints { permittedSubtrees [0] OPTIONAL, excludedSubtrees [1] OPTIONAL }.   */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFX509EncNCSeqContent(uint8_t *buf, uint32_t bufSize, const void *arg,
+static bool _SSFX509EncNCSeqContent(uint8_t *bufOpt, uint32_t bufOptSize, const void *arg,
                                     uint32_t *lenOut)
 {
     const SSFX509GenParams_t *p = (const SSFX509GenParams_t *)arg;
@@ -2314,7 +2347,7 @@ static bool _SSFX509EncNCSeqContent(uint8_t *buf, uint32_t bufSize, const void *
     uint8_t idx;
     uint16_t tag;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(p != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
@@ -2328,8 +2361,8 @@ static bool _SSFX509EncNCSeqContent(uint8_t *buf, uint32_t bufSize, const void *
         if (((sub.dns != NULL) && (*sub.dns != NULL)) || ((sub.ips != NULL) && (*sub.ips != NULL)))
         {
             /* Yes, emit the [n] IMPLICIT GeneralSubtrees */
-            if (!_SSFX509Add(&pos, _SSFX509EncConstructed(_SSFX509At(buf, pos),
-                                                          _SSFX509Rem(buf, bufSize, pos), tag,
+            if (!_SSFX509Add(&pos, _SSFX509EncConstructed(_SSFX509At(bufOpt, pos),
+                                                          _SSFX509Rem(bufOpt, bufOptSize, pos), tag,
                                                           _SSFX509EncSubtreesContent, &sub)))
                 return false;
         }
@@ -2341,7 +2374,7 @@ static bool _SSFX509EncNCSeqContent(uint8_t *buf, uint32_t bufSize, const void *
 /* --------------------------------------------------------------------------------------------- */
 /* Content: the Extensions SEQUENCE OF Extension in BC, KU, EKU, raw, SAN, SKID, AKID, NC order. */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFX509EncExtListContent(uint8_t *buf, uint32_t bufSize, const void *arg,
+static bool _SSFX509EncExtListContent(uint8_t *bufOpt, uint32_t bufOptSize, const void *arg,
                                       uint32_t *lenOut)
 {
     const SSFX509GenParams_t *p = (const SSFX509GenParams_t *)arg;
@@ -2350,7 +2383,7 @@ static bool _SSFX509EncExtListContent(uint8_t *buf, uint32_t bufSize, const void
     _EncExt_t e;
     uint32_t pos = 0;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(p != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
@@ -2364,8 +2397,9 @@ static bool _SSFX509EncExtListContent(uint8_t *buf, uint32_t bufSize, const void
         seq.fn = _SSFX509EncBCSeqContent;
         e.oid = _oidBasicConstraints; e.oidLen = sizeof(_oidBasicConstraints);
         e.critical = true; e.valueFn = _SSFX509EncNestedContent; e.valueArg = &seq;
-        if (!_SSFX509Add(&pos, _SSFX509EncExtension(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize,
-            pos), &e))) return false;
+        if (!_SSFX509Add(&pos, _SSFX509EncExtension(_SSFX509At(bufOpt, pos),
+                                                    _SSFX509Rem(bufOpt, bufOptSize, pos),
+                                                    &e))) return false;
     }
     /* Is a Key Usage extension requested? */
     if (p->addKeyUsage)
@@ -2373,8 +2407,9 @@ static bool _SSFX509EncExtListContent(uint8_t *buf, uint32_t bufSize, const void
         /* Yes */
         e.oid = _oidKeyUsage; e.oidLen = sizeof(_oidKeyUsage);
         e.critical = true; e.valueFn = _SSFX509EncKUValueContent; e.valueArg = p;
-        if (!_SSFX509Add(&pos, _SSFX509EncExtension(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize,
-            pos), &e))) return false;
+        if (!_SSFX509Add(&pos, _SSFX509EncExtension(_SSFX509At(bufOpt, pos),
+                                                    _SSFX509Rem(bufOpt, bufOptSize, pos),
+                                                    &e))) return false;
     }
     /* Is an Extended Key Usage extension requested? */
     if (p->addExtKeyUsage)
@@ -2383,8 +2418,9 @@ static bool _SSFX509EncExtListContent(uint8_t *buf, uint32_t bufSize, const void
         seq.fn = _SSFX509EncEKUSeqContent;
         e.oid = _oidEKU; e.oidLen = sizeof(_oidEKU);
         e.critical = false; e.valueFn = _SSFX509EncNestedContent; e.valueArg = &seq;
-        if (!_SSFX509Add(&pos, _SSFX509EncExtension(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize,
-            pos), &e))) return false;
+        if (!_SSFX509Add(&pos, _SSFX509EncExtension(_SSFX509At(bufOpt, pos),
+                                                    _SSFX509Rem(bufOpt, bufOptSize, pos),
+                                                    &e))) return false;
     }
     /* Is a caller-encoded raw extension requested? */
     if (p->addRawExt)
@@ -2393,8 +2429,9 @@ static bool _SSFX509EncExtListContent(uint8_t *buf, uint32_t bufSize, const void
         raw.data = p->rawExtValue; raw.len = p->rawExtValueLen;
         e.oid = p->rawExtOid; e.oidLen = p->rawExtOidLen;
         e.critical = p->rawExtCritical; e.valueFn = _SSFX509EncBytesContent; e.valueArg = &raw;
-        if (!_SSFX509Add(&pos, _SSFX509EncExtension(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize,
-            pos), &e))) return false;
+        if (!_SSFX509Add(&pos, _SSFX509EncExtension(_SSFX509At(bufOpt, pos),
+                                                    _SSFX509Rem(bufOpt, bufOptSize, pos),
+                                                    &e))) return false;
     }
     /* Is a Subject Alternative Name requested? */
     if ((p->sanDNSNames != NULL) || (p->sanIPAddrs != NULL))
@@ -2403,8 +2440,9 @@ static bool _SSFX509EncExtListContent(uint8_t *buf, uint32_t bufSize, const void
         seq.fn = _SSFX509EncSANSeqContent;
         e.oid = _oidSAN; e.oidLen = sizeof(_oidSAN);
         e.critical = false; e.valueFn = _SSFX509EncNestedContent; e.valueArg = &seq;
-        if (!_SSFX509Add(&pos, _SSFX509EncExtension(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize,
-            pos), &e))) return false;
+        if (!_SSFX509Add(&pos, _SSFX509EncExtension(_SSFX509At(bufOpt, pos),
+                                                    _SSFX509Rem(bufOpt, bufOptSize, pos),
+                                                    &e))) return false;
     }
     /* Is a Subject Key Identifier requested? */
     if ((p->skid != NULL) && (p->skidLen > 0u))
@@ -2412,8 +2450,9 @@ static bool _SSFX509EncExtListContent(uint8_t *buf, uint32_t bufSize, const void
         /* Yes */
         e.oid = _oidSKID; e.oidLen = sizeof(_oidSKID);
         e.critical = false; e.valueFn = _SSFX509EncSKIDValueContent; e.valueArg = p;
-        if (!_SSFX509Add(&pos, _SSFX509EncExtension(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize,
-            pos), &e))) return false;
+        if (!_SSFX509Add(&pos, _SSFX509EncExtension(_SSFX509At(bufOpt, pos),
+                                                    _SSFX509Rem(bufOpt, bufOptSize, pos),
+                                                    &e))) return false;
     }
     /* Is an Authority Key Identifier requested? */
     if ((p->akid != NULL) && (p->akidLen > 0u))
@@ -2422,8 +2461,9 @@ static bool _SSFX509EncExtListContent(uint8_t *buf, uint32_t bufSize, const void
         seq.fn = _SSFX509EncAKIDSeqContent;
         e.oid = _oidAKID; e.oidLen = sizeof(_oidAKID);
         e.critical = false; e.valueFn = _SSFX509EncNestedContent; e.valueArg = &seq;
-        if (!_SSFX509Add(&pos, _SSFX509EncExtension(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize,
-            pos), &e))) return false;
+        if (!_SSFX509Add(&pos, _SSFX509EncExtension(_SSFX509At(bufOpt, pos),
+                                                    _SSFX509Rem(bufOpt, bufOptSize, pos),
+                                                    &e))) return false;
     }
     /* Is a Name Constraints extension requested? */
     if (p->addNameConstraints)
@@ -2432,8 +2472,9 @@ static bool _SSFX509EncExtListContent(uint8_t *buf, uint32_t bufSize, const void
         seq.fn = _SSFX509EncNCSeqContent;
         e.oid = _oidNameConstraints; e.oidLen = sizeof(_oidNameConstraints);
         e.critical = true; e.valueFn = _SSFX509EncNestedContent; e.valueArg = &seq;
-        if (!_SSFX509Add(&pos, _SSFX509EncExtension(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize,
-            pos), &e))) return false;
+        if (!_SSFX509Add(&pos, _SSFX509EncExtension(_SSFX509At(bufOpt, pos),
+                                                    _SSFX509Rem(bufOpt, bufOptSize, pos),
+                                                    &e))) return false;
     }
     *lenOut = pos;
     return true;
@@ -2455,13 +2496,14 @@ static bool _SSFX509HasExtensions(const SSFX509GenParams_t *p)
 /* --------------------------------------------------------------------------------------------- */
 /* Content: TBSCertificate fields in RFC 5280 Section 4.1 order.                                 */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFX509EncTBSContent(uint8_t *buf, uint32_t bufSize, const void *arg, uint32_t *lenOut)
+static bool _SSFX509EncTBSContent(uint8_t *bufOpt, uint32_t bufOptSize, const void *arg,
+                                  uint32_t *lenOut)
 {
     const SSFX509GenParams_t *p = (const SSFX509GenParams_t *)arg;
     _EncNested_t exts;
     uint32_t pos = 0;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(p != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
@@ -2469,31 +2511,34 @@ static bool _SSFX509EncTBSContent(uint8_t *buf, uint32_t bufSize, const void *ar
     if (p->version >= 1u)
     {
         /* Yes, [0] EXPLICIT INTEGER */
-        if (!_SSFX509Add(&pos, _SSFX509EncConstructed(_SSFX509At(buf, pos),
-                                                      _SSFX509Rem(buf, bufSize, pos),
+        if (!_SSFX509Add(&pos, _SSFX509EncConstructed(_SSFX509At(bufOpt, pos),
+                                                      _SSFX509Rem(bufOpt, bufOptSize, pos),
                                                       SSF_ASN1_CONTEXT_EXPLICIT(0),
                                                       _SSFX509EncVersionContent, p)))
             return false;
     }
     /* The serial is an unsigned magnitude; encode it as a positive INTEGER */
-    if (!_SSFX509Add(&pos, _SSFX509EncUInt(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+    if (!_SSFX509Add(&pos, _SSFX509EncUInt(_SSFX509At(bufOpt, pos),
+                                           _SSFX509Rem(bufOpt, bufOptSize, pos),
                                            p->serial, p->serialLen)))
         return false;
-    if (!_SSFX509Add(&pos, _SSFX509EncAlgIdWithParams(_SSFX509At(buf, pos),
-                                                      _SSFX509Rem(buf, bufSize, pos),
+    if (!_SSFX509Add(&pos, _SSFX509EncAlgIdWithParams(_SSFX509At(bufOpt, pos),
+                                                      _SSFX509Rem(bufOpt, bufOptSize, pos),
                                                       p->sigAlgOidRaw, p->sigAlgOidRawLen,
                                                       p->sigAlgParams, p->sigAlgParamsLen)))
         return false;
-    if (!_SSFX509Add(&pos, _SSFX509EncDN(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+    if (!_SSFX509Add(&pos, _SSFX509EncDN(_SSFX509At(bufOpt, pos),
+                                         _SSFX509Rem(bufOpt, bufOptSize, pos),
                                          &p->issuer))) return false;
-    if (!_SSFX509Add(&pos, _SSFX509EncConstructed(_SSFX509At(buf, pos),
-                                                  _SSFX509Rem(buf, bufSize, pos),
+    if (!_SSFX509Add(&pos, _SSFX509EncConstructed(_SSFX509At(bufOpt, pos),
+                                                  _SSFX509Rem(bufOpt, bufOptSize, pos),
                                                   SSF_ASN1_TAG_SEQUENCE,
                                                   _SSFX509EncValidityContent, p))) return false;
-    if (!_SSFX509Add(&pos, _SSFX509EncDN(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+    if (!_SSFX509Add(&pos, _SSFX509EncDN(_SSFX509At(bufOpt, pos),
+                                         _SSFX509Rem(bufOpt, bufOptSize, pos),
                                          &p->subject))) return false;
-    if (!_SSFX509Add(&pos, _SSFX509EncConstructed(_SSFX509At(buf, pos),
-                                                  _SSFX509Rem(buf, bufSize, pos),
+    if (!_SSFX509Add(&pos, _SSFX509EncConstructed(_SSFX509At(bufOpt, pos),
+                                                  _SSFX509Rem(bufOpt, bufOptSize, pos),
                                                   SSF_ASN1_TAG_SEQUENCE,
                                                   _SSFX509EncSPKIContent, p))) return false;
 
@@ -2504,8 +2549,8 @@ static bool _SSFX509EncTBSContent(uint8_t *buf, uint32_t bufSize, const void *ar
         exts.tag = SSF_ASN1_TAG_SEQUENCE;
         exts.fn = _SSFX509EncExtListContent;
         exts.arg = p;
-        if (!_SSFX509Add(&pos, _SSFX509EncConstructed(_SSFX509At(buf, pos),
-                                                      _SSFX509Rem(buf, bufSize, pos),
+        if (!_SSFX509Add(&pos, _SSFX509EncConstructed(_SSFX509At(bufOpt, pos),
+                                                      _SSFX509Rem(bufOpt, bufOptSize, pos),
                                                       SSF_ASN1_CONTEXT_EXPLICIT(3),
                                                       _SSFX509EncNestedContent, &exts)))
             return false;
@@ -2581,32 +2626,32 @@ bool SSFX509EncodeTBS(uint8_t *bufOpt, uint32_t bufOptSize, const SSFX509GenPara
 /* --------------------------------------------------------------------------------------------- */
 /* Content: Certificate { tbsCertificate, signatureAlgorithm, signatureValue BIT STRING }.       */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFX509EncCertContent(uint8_t *buf, uint32_t bufSize, const void *arg,
+static bool _SSFX509EncCertContent(uint8_t *bufOpt, uint32_t bufOptSize, const void *arg,
                                    uint32_t *lenOut)
 {
     const _EncCert_t *c = (const _EncCert_t *)arg;
     uint32_t pos = 0;
     uint32_t tbsLen;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(c != NULL);
     SSF_REQUIRE(c->params != NULL);
     SSF_REQUIRE(c->sig != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
-    if (!SSFX509EncodeTBS(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos), c->params,
+    if (!SSFX509EncodeTBS(_SSFX509At(bufOpt, pos), _SSFX509Rem(bufOpt, bufOptSize, pos), c->params,
                           &tbsLen)) return false;
     pos += tbsLen;
-    if (!_SSFX509Add(&pos, _SSFX509EncAlgIdWithParams(_SSFX509At(buf, pos),
-                                                      _SSFX509Rem(buf, bufSize, pos),
+    if (!_SSFX509Add(&pos, _SSFX509EncAlgIdWithParams(_SSFX509At(bufOpt, pos),
+                                                      _SSFX509Rem(bufOpt, bufOptSize, pos),
                                                       c->params->sigAlgOidRaw,
                                                       c->params->sigAlgOidRawLen,
                                                       c->params->sigAlgParams,
                                                       c->params->sigAlgParamsLen)))
         return false;
-    if (!_SSFX509Add(&pos, _SSFX509EncBitString(_SSFX509At(buf, pos),
-                                                _SSFX509Rem(buf, bufSize, pos), c->sig, c->sigLen,
-                                                0u)))
+    if (!_SSFX509Add(&pos, _SSFX509EncBitString(_SSFX509At(bufOpt, pos),
+                                                _SSFX509Rem(bufOpt, bufOptSize, pos), c->sig,
+                                                c->sigLen, 0u)))
         return false;
     *lenOut = pos;
     return true;

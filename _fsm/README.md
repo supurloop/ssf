@@ -44,8 +44,9 @@ with `SSF_SM_SUPER()` in its `default` case, and unhandled events are forwarded 
   the handler whose code makes the call.
 - `SSFSMStartTimer()` with `interval == 0` fires the event at the next `SSFSMTask()` call,
   making it useful as a deferred self-post.
-- `SSFSMTask()` returns `true` when there are still pending events to process; call it again
-  immediately in that case rather than waiting on the wake primitive.
+- `SSFSMTask()` drains every queued event and expired timer before it returns, so it never needs
+  to be called again immediately. It returns `true` when timers are still running (a later call
+  is needed to fire them) and `false` when none are.
 - In multi-threaded builds, `SSFSMTask()` is typically run in a dedicated high-priority thread
   that blocks using `SSF_SM_THREAD_WAKE_WAIT()` between calls.
 - `SSFSMList_t` and `SSFSMEventList_t` enumerations are mandatory and must be defined in
@@ -136,7 +137,7 @@ a counting semaphore capped at 1:
 | [e.g.](#ex-deinit) | [`void SSFSMDeInit()`](#ssfsmdeinit) | De-initialize the framework and release all resources |
 | [e.g.](#ex-init-handler) | [`void SSFSMInitHandler(smid, initial)`](#ssfsminithandler) | Register a state machine and deliver `SSF_SM_EVENT_ENTRY` to the initial state |
 | [e.g.](#ex-deinit-handler) | [`void SSFSMDeInitHandler(smid)`](#ssfsmdeinithandler) | Unregister a state machine |
-| [e.g.](#ex-task) | [`bool SSFSMTask(nextTimeoutOpt)`](#ssfsmtask) | Process all pending events and expired timers; returns time until next timer |
+| [e.g.](#ex-task) | [`bool SSFSMTask(nextTimeoutOpt)`](#ssfsmtask) | Process all pending events and expired timers; returns true if timers are still running |
 | [e.g.](#ex-put-event-data) | [`void SSFSMPutEventData(smid, eid, data, dataLen)`](#ssfsmputeventdata) | Post an event with a data payload to a state machine |
 | [e.g.](#ex-put-event) | [`void SSFSMPutEvent(smid, eid)`](#ssfsmputevent) | Post an event without data (expands to `SSFSMPutEventData` with `NULL`/`0`) |
 | [e.g.](#ex-tran) | [`void SSFSMTran(next)`](#ssfsmtran) | Trigger a state transition; valid only inside a state handler |
@@ -321,11 +322,10 @@ while (true)
 SSFSMTimeout_t to;
 while (true)
 {
-    if (SSFSMTask(&to) == false)
-    {
-        /* No more pending events — block until next timer or SSFSMPutEvent() wakes us */
-        SSF_SM_THREAD_WAKE_WAIT(to);
-    }
+    to = SSF_SM_MAX_TIMEOUT;
+    SSFSMTask(&to);
+    /* All events processed — block until the next timer or SSFSMPutEvent() wakes us */
+    SSF_SM_THREAD_WAKE_WAIT(to);
 }
 ```
 

@@ -231,6 +231,7 @@ typedef struct SSFTLSTranscript
     } ctx;
     uint16_t hashLen;    /* 32 or 48 */
     SSFHMACHash_t hmac;  /* SSF_HMAC_HASH_SHA256 or SSF_HMAC_HASH_SHA384 */
+    uint32_t magic;
 } SSFTLSTranscript_t;
 
 /* Per-direction record encryption/decryption state. */
@@ -275,6 +276,7 @@ void SSFTLSComputeFinished(SSFHMACHash_t hash, const uint8_t *baseKey, size_t ba
 void SSFTLSTranscriptInit(SSFTLSTranscript_t *t, SSFHMACHash_t hash);
 void SSFTLSTranscriptUpdate(SSFTLSTranscript_t *t, const uint8_t *data, size_t dataLen);
 void SSFTLSTranscriptHash(const SSFTLSTranscript_t *t, uint8_t *out, size_t outSize);
+void SSFTLSTranscriptDeInit(SSFTLSTranscript_t *t);
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface: record layer                                                              */

@@ -42,6 +42,7 @@
 /* Module Defines                                                                                */
 /* --------------------------------------------------------------------------------------------- */
 #define SSF_TLS_RECORD_MAGIC (0x544C5352ul)
+#define SSF_TLS_TRANSCRIPT_MAGIC (0x544C5354ul)
 
 /* RFC 8446 Sec. 7.1: "tls13 " + label fills opaque label<7..255>, so label <= 249 bytes. */
 #define SSF_TLS_HKDF_LABEL_MAX_LEN (249u)
@@ -169,7 +170,10 @@ void SSFTLSComputeFinished(SSFHMACHash_t hash, const uint8_t *baseKey, size_t ba
 void SSFTLSTranscriptInit(SSFTLSTranscript_t *t, SSFHMACHash_t hash)
 {
     SSF_REQUIRE(t != NULL);
+    SSF_REQUIRE(t->magic != SSF_TLS_TRANSCRIPT_MAGIC);
+    SSF_REQUIRE((hash == SSF_HMAC_HASH_SHA256) || (hash == SSF_HMAC_HASH_SHA384));
 
+    memset(t, 0, sizeof(*t));
     t->hmac = hash;
     switch (hash)
     {
@@ -185,6 +189,18 @@ void SSFTLSTranscriptInit(SSFTLSTranscript_t *t, SSFHMACHash_t hash)
         SSF_ASSERT(false);
         break;
     }
+    t->magic = SSF_TLS_TRANSCRIPT_MAGIC;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Transcript hash: wipe the running hash so the context may be initialized again.               */
+/* --------------------------------------------------------------------------------------------- */
+void SSFTLSTranscriptDeInit(SSFTLSTranscript_t *t)
+{
+    SSF_REQUIRE(t != NULL);
+    SSF_REQUIRE(t->magic == SSF_TLS_TRANSCRIPT_MAGIC);
+
+    SSFCryptSecureZero(t, sizeof(*t));
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -193,6 +209,7 @@ void SSFTLSTranscriptInit(SSFTLSTranscript_t *t, SSFHMACHash_t hash)
 void SSFTLSTranscriptUpdate(SSFTLSTranscript_t *t, const uint8_t *data, size_t dataLen)
 {
     SSF_REQUIRE(t != NULL);
+    SSF_REQUIRE(t->magic == SSF_TLS_TRANSCRIPT_MAGIC);
     SSF_REQUIRE((data != NULL) || (dataLen == 0u));
 #if SIZE_MAX > UINT32_MAX
     SSF_REQUIRE(dataLen <= (size_t)UINT32_MAX);
@@ -218,6 +235,7 @@ void SSFTLSTranscriptUpdate(SSFTLSTranscript_t *t, const uint8_t *data, size_t d
 void SSFTLSTranscriptHash(const SSFTLSTranscript_t *t, uint8_t *out, size_t outSize)
 {
     SSF_REQUIRE(t != NULL);
+    SSF_REQUIRE(t->magic == SSF_TLS_TRANSCRIPT_MAGIC);
     SSF_REQUIRE(out != NULL);
     SSF_REQUIRE(outSize >= t->hashLen);
 

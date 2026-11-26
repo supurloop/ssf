@@ -89,6 +89,15 @@
 #error SSF_TLS_CONFIG_MAX_ALPN_LEN must be at most 219: a larger ALPN list may not fit the ClientHello.
 #endif
 
+/* Which curves and RSA paddings this build has. A group or signature scheme is advertised,     */
+/* accepted and used only when its primitive is compiled in, so a reduced configuration offers  */
+/* less instead of failing at run time.                                                         */
+#define _SSF_TLSC_P256 (SSF_EC_CONFIG_ENABLE_P256 == 1)
+#define _SSF_TLSC_P384 (SSF_EC_CONFIG_ENABLE_P384 == 1)
+#define _SSF_TLSC_ECDSA_SIGN (SSF_ECDSA_CONFIG_ENABLE_SIGN == 1)
+#define _SSF_TLSC_PSS ((SSF_RSA_ANY_ENABLED == 1) && (SSF_RSA_CONFIG_ENABLE_PSS == 1))
+#define _SSF_TLSC_PKCS1 ((SSF_RSA_ANY_ENABLED == 1) && (SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1))
+
 /* Secret scrubbing. _SSF_TLSC_SCRUB wipes a secret at the end of its life; unit-test builds     */
 /* then report the buffer to _SSFTLSCScrubTestHook so a test can confirm the wipe happened.      */
 #if SSF_CONFIG_TLSC_UNIT_TEST == 1
@@ -642,16 +651,38 @@ static bool _IsIPLiteral(const char *host)
 static bool _SchemeMatchesKey(uint16_t scheme, SSFTLSCLeafKey_t key)
 {
     /* RFC 8446 4.2.3: the ECDSA schemes also fix the curve; rsa_pss_rsae_* need an           */
-    /* rsaEncryption key.                                                                       */
+    /* rsaEncryption key. A scheme whose primitive is compiled out matches no key.             */
     switch (scheme)
     {
+#if _SSF_TLSC_P256
     case SSF_TLS_SIG_ECDSA_SECP256R1_SHA256: return (key == SSF_TLSC_LEAF_KEY_P256);
+#endif
+#if _SSF_TLSC_P384
     case SSF_TLS_SIG_ECDSA_SECP384R1_SHA384: return (key == SSF_TLSC_LEAF_KEY_P384);
+#endif
+#if _SSF_TLSC_PSS
     case SSF_TLS_SIG_RSA_PSS_RSAE_SHA256:
     case SSF_TLS_SIG_RSA_PSS_RSAE_SHA384:    return (key == SSF_TLSC_LEAF_KEY_RSA);
+#endif
     case SSF_TLS_SIG_ED25519:                return (key == SSF_TLSC_LEAF_KEY_ED25519);
     default:                                 return false;
     }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: returns true if the client can sign a CertificateVerify with scheme and key type.   */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SchemeCanSign(uint16_t scheme, SSFTLSCLeafKey_t key)
+{
+    /* Is it an ECDSA scheme in a build without ECDSA signing? */
+    if (((scheme == SSF_TLS_SIG_ECDSA_SECP256R1_SHA256) ||
+         (scheme == SSF_TLS_SIG_ECDSA_SECP384R1_SHA384)) && (!_SSF_TLSC_ECDSA_SIGN))
+    {
+        /* Yes, the client can verify it but not produce it */
+        return false;
+    }
+    /* No */
+    return _SchemeMatchesKey(scheme, key);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -791,22 +822,42 @@ static bool _BuildClientHello(SSFTLSCSession_t *s, const uint8_t random[32], con
     _W16(&w, SSF_TLS_EXT_SUPPORTED_VERSIONS);                /* TLS 1.3 only */
     _W16(&w, 3); _W8(&w, 2); _W16(&w, SSF_TLS_VERSION_13);
 
+    /* Only groups and schemes this build can compute are offered (counts fixed at build time) */
+#define _SSF_TLSC_NGROUPS (1u + (_SSF_TLSC_P256 ? 1u : 0u) + (_SSF_TLSC_P384 ? 1u : 0u))
+#define _SSF_TLSC_NSIGALGS ((_SSF_TLSC_P256 ? 1u : 0u) + (_SSF_TLSC_P384 ? 1u : 0u) + \
+                            (_SSF_TLSC_PSS ? 2u : 0u) + (_SSF_TLSC_PKCS1 ? 2u : 0u) + 1u)
     _W16(&w, SSF_TLS_EXT_SUPPORTED_GROUPS);
-    _W16(&w, 8); _W16(&w, 6);
+    _W16(&w, (uint16_t)(2u + (2u * _SSF_TLSC_NGROUPS)));
+    _W16(&w, (uint16_t)(2u * _SSF_TLSC_NGROUPS));
     _W16(&w, SSF_TLS_GROUP_X25519);
+#if _SSF_TLSC_P256
     _W16(&w, SSF_TLS_GROUP_SECP256R1);
+#endif
+#if _SSF_TLSC_P384
     _W16(&w, SSF_TLS_GROUP_SECP384R1);
+#endif
 
     _W16(&w, SSF_TLS_EXT_SIGNATURE_ALGS);
-    _W16(&w, 16); _W16(&w, 14);
+    _W16(&w, (uint16_t)(2u + (2u * _SSF_TLSC_NSIGALGS)));
+    _W16(&w, (uint16_t)(2u * _SSF_TLSC_NSIGALGS));
+#if _SSF_TLSC_P256
     _W16(&w, SSF_TLS_SIG_ECDSA_SECP256R1_SHA256);
+#endif
+#if _SSF_TLSC_P384
     _W16(&w, SSF_TLS_SIG_ECDSA_SECP384R1_SHA384);
+#endif
+#if _SSF_TLSC_PSS
     _W16(&w, SSF_TLS_SIG_RSA_PSS_RSAE_SHA256);
     _W16(&w, SSF_TLS_SIG_RSA_PSS_RSAE_SHA384);
+#endif
+#if _SSF_TLSC_PKCS1
     /* rsa_pkcs1_*: certificate signatures only, never accepted in CertificateVerify */
     _W16(&w, SSF_TLS_SIG_RSA_PKCS1_SHA256);
     _W16(&w, SSF_TLS_SIG_RSA_PKCS1_SHA384);
+#endif
     _W16(&w, SSF_TLS_SIG_ED25519);
+#undef _SSF_TLSC_NGROUPS
+#undef _SSF_TLSC_NSIGALGS
 
     _W16(&w, SSF_TLS_EXT_KEY_SHARE);
     _W16(&w, (uint16_t)(2u + ksLen)); _W16(&w, (uint16_t)ksLen);
@@ -880,12 +931,17 @@ static uint16_t _KeyShareLen(uint16_t group)
 
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: returns true if the latest ClientHello carried a key share for group.               */
-/* ClientHello1 carries X25519 and secp384r1; ClientHello2 only the group the HRR selected.      */
+/* ClientHello1 carries X25519 and, when built, secp384r1; ClientHello2 only the group the HRR   */
+/* selected.                                                                                     */
 /* --------------------------------------------------------------------------------------------- */
 static bool _KeyShareOffered(const SSFTLSCSession_t *s, uint16_t group)
 {
     if (s->hrrDone) return (group == s->hrrGroup);
-    return (group == SSF_TLS_GROUP_X25519) || (group == SSF_TLS_GROUP_SECP384R1);
+    if (group == SSF_TLS_GROUP_X25519) return true;
+#if _SSF_TLSC_P384
+    if (group == SSF_TLS_GROUP_SECP384R1) return true;
+#endif
+    return false;
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -893,8 +949,14 @@ static bool _KeyShareOffered(const SSFTLSCSession_t *s, uint16_t group)
 /* --------------------------------------------------------------------------------------------- */
 static bool _GroupSupported(uint16_t group)
 {
-    return (group == SSF_TLS_GROUP_X25519) || (group == SSF_TLS_GROUP_SECP256R1) ||
-           (group == SSF_TLS_GROUP_SECP384R1);
+    if (group == SSF_TLS_GROUP_X25519) return true;
+#if _SSF_TLSC_P256
+    if (group == SSF_TLS_GROUP_SECP256R1) return true;
+#endif
+#if _SSF_TLSC_P384
+    if (group == SSF_TLS_GROUP_SECP384R1) return true;
+#endif
+    return false;
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -1430,16 +1492,32 @@ static void _TLSCVerifySigWork(void *ctx)
     SSFTLSCCryptoWork_t *w = (SSFTLSCCryptoWork_t *)ctx;
     bool verified = false;
 
-    if (w->sigScheme == SSF_TLS_SIG_ECDSA_SECP256R1_SHA256)
+    /* A scheme compiled out of this build is never verified (_SchemeMatchesKey refuses it) */
+    if (w->sigScheme == SSF_TLS_SIG_ED25519)
+    {
+        /* Ed25519 verifies over the raw sign content stored in contentHash.                    */
+        if (w->leafPubKeyLen == SSF_ED25519_PUB_KEY_SIZE &&
+            w->sigDataLen == SSF_ED25519_SIG_SIZE)
+        {
+            verified = SSFEd25519Verify(w->leafPubKey, w->contentHash, w->contentHashLen,
+                                         w->sigData);
+        }
+    }
+#if _SSF_TLSC_P256
+    else if (w->sigScheme == SSF_TLS_SIG_ECDSA_SECP256R1_SHA256)
     {
         verified = SSFECDSAVerify(SSF_EC_CURVE_P256, w->leafPubKey, (size_t)w->leafPubKeyLen,
                                   w->contentHash, 32, w->sigData, (size_t)w->sigDataLen);
     }
+#endif
+#if _SSF_TLSC_P384
     else if (w->sigScheme == SSF_TLS_SIG_ECDSA_SECP384R1_SHA384)
     {
         verified = SSFECDSAVerify(SSF_EC_CURVE_P384, w->leafPubKey, (size_t)w->leafPubKeyLen,
                                   w->contentHash, 48, w->sigData, (size_t)w->sigDataLen);
     }
+#endif
+#if _SSF_TLSC_PSS
     else if (w->sigScheme == SSF_TLS_SIG_RSA_PSS_RSAE_SHA256)
     {
         verified = SSFRSAVerifyPSS(w->leafPubKey, (size_t)w->leafPubKeyLen,
@@ -1454,17 +1532,8 @@ static void _TLSCVerifySigWork(void *ctx)
                                    w->contentHash, 48, 48u, /* salt = hash length (RFC 8446) */
                                    w->sigData, (size_t)w->sigDataLen);
     }
+#endif
     /* rsa_pkcs1_* is never verified here: not a TLS 1.3 handshake signature (RFC 8446 4.2.3) */
-    else if (w->sigScheme == SSF_TLS_SIG_ED25519)
-    {
-        /* Ed25519 verifies over the raw sign content stored in contentHash.                    */
-        if (w->leafPubKeyLen == SSF_ED25519_PUB_KEY_SIZE &&
-            w->sigDataLen == SSF_ED25519_SIG_SIZE)
-        {
-            verified = SSFEd25519Verify(w->leafPubKey, w->contentHash, w->contentHashLen,
-                                         w->sigData);
-        }
-    }
     w->sigVerifyOk = verified;
 }
 
@@ -1539,30 +1608,37 @@ static SSFTLSIOResult_t _TlscHandleSendCH(SSFTLSCSession_t *session)
             uint8_t random[32];
             uint8_t sid[32];
             uint8_t x25519Pub[32];
+#if _SSF_TLSC_P384
             uint8_t ecPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
             uint8_t ecPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
             size_t ecPubLen;
+#endif
             SSFTLSCKeyShare_t shares[2];
+            uint8_t shareCount = 1u;
 
             SSF_TLS_TRACE_HS_INFO(&session->trace, "Sending ClientHello to %.200s", session->host);
             if (!_GetEntropy(random, sizeof(random)) || !_GetEntropy(sid, sizeof(sid)) ||
                 !_GetEntropy(session->ephemeralPrivKey, 32))
             { return SSF_TLS_IO_ERROR; }
             SSFX25519PubKeyFromPrivKey(session->ephemeralPrivKey, x25519Pub);
+
+            /* X25519 and, when built, secp384r1 shares: avoids a HelloRetryRequest from most   */
+            /* servers. Without P-384 the client offers X25519 alone (supported_groups agrees). */
+            shares[0].group = SSF_TLS_GROUP_X25519;
+            shares[0].pub = x25519Pub;
+            shares[0].len = 32u;
+#if _SSF_TLSC_P384
             if (!SSFECDSAKeyGen(SSF_EC_CURVE_P384, ecPriv, sizeof(ecPriv),
                                 ecPub, sizeof(ecPub), &ecPubLen))
             { return SSF_TLS_IO_ERROR; }
             memcpy(&session->ephemeralPrivKey[32], ecPriv, 48);
             _SSF_TLSC_SCRUB(ecPriv);
-
-            /* X25519 and secp384r1 shares: avoids a HelloRetryRequest from most servers */
-            shares[0].group = SSF_TLS_GROUP_X25519;
-            shares[0].pub = x25519Pub;
-            shares[0].len = 32u;
             shares[1].group = SSF_TLS_GROUP_SECP384R1;
             shares[1].pub = ecPub;
             shares[1].len = (uint16_t)ecPubLen;
-            if (!_BuildClientHello(session, random, sid, (uint8_t)sizeof(sid), shares, 2u,
+            shareCount = 2u;
+#endif
+            if (!_BuildClientHello(session, random, sid, (uint8_t)sizeof(sid), shares, shareCount,
                                    NULL, 0u))
             {
                 SSF_TLS_TRACE_HS_ERROR(&session->trace, "ClientHello does not fit hsScratch.clientHello");
@@ -2039,7 +2115,7 @@ static bool _ParseCertificateRequest(const uint8_t *body, size_t bodyLen, SSFPKe
 
                 for (k = 0; (k < sigAlgsLen) && (chosen == 0u); k += 2u)
                 {
-                    if (_SchemeMatchesKey(_Get16(&sigAlgs[k]), _PKeyLeafType(keyType)))
+                    if (_SchemeCanSign(_Get16(&sigAlgs[k]), _PKeyLeafType(keyType)))
                     {
                         chosen = _Get16(&sigAlgs[k]);
                     }
@@ -2189,7 +2265,7 @@ static SSF_NOINLINE bool _SignClientCV(const SSFTLSCSession_t *s, uint16_t schem
     bool ok = false;
 
     if ((k == NULL) || (thLen > SSF_TLS_MAX_HASH_SIZE) || (outSize < 8u) ||
-        !_SchemeMatchesKey(scheme, _PKeyLeafType(k->type))) return false;
+        !_SchemeCanSign(scheme, _PKeyLeafType(k->type))) return false;
     sigSize = outSize - 8u;
     memset(content, 0x20, 64);
     memcpy(&content[64], ctx, sizeof(ctx));                   /* Includes the 0x00 separator */
@@ -2202,6 +2278,7 @@ static SSF_NOINLINE bool _SignClientCV(const SSFTLSCSession_t *s, uint16_t schem
         ok = SSFEd25519Sign(k->priv, k->pub, content, contentLen, sig);
         sigLen = SSF_ED25519_SIG_SIZE;
         break;
+#if _SSF_TLSC_ECDSA_SIGN
     case SSF_TLS_SIG_ECDSA_SECP256R1_SHA256:
     case SSF_TLS_SIG_ECDSA_SECP384R1_SHA384:
     {
@@ -2215,7 +2292,10 @@ static SSF_NOINLINE bool _SignClientCV(const SSFTLSCSession_t *s, uint16_t schem
                           &sigLen);
         break;
     }
-    default:                            /* rsa_pss_rsae_sha256 / _sha384 (_SchemeMatchesKey) */
+#endif /* _SSF_TLSC_ECDSA_SIGN */
+#if _SSF_TLSC_PSS
+    case SSF_TLS_SIG_RSA_PSS_RSAE_SHA256:
+    case SSF_TLS_SIG_RSA_PSS_RSAE_SHA384:
     {
         bool s256 = (scheme == SSF_TLS_SIG_RSA_PSS_RSAE_SHA256);
 
@@ -2228,6 +2308,9 @@ static SSF_NOINLINE bool _SignClientCV(const SSFTLSCSession_t *s, uint16_t schem
                            &sigLen);
         break;
     }
+#endif /* _SSF_TLSC_PSS */
+    default:                            /* Unreachable: _SchemeCanSign admitted the scheme */
+        return false;
     }
     if (!ok || (sigLen > 0xFFFFu)) return false;
     out[0] = SSF_TLS_HS_CERTIFICATE_VERIFY;

@@ -531,6 +531,45 @@ void SSFECDSAUnitTest(void)
 
 #if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
+    /* ---- COV-8: a digest length that is not SHA-1/SHA-2 drives RFC 6979 with the curve's ---- */
+    /* hash (HMAC-SHA-256 on P-256). h = first 28 bytes of SHA-256("sample"), RFC 6979 A.2.5   */
+    /* key; expected r, s computed independently (pure-Python RFC 6979 + P-256, checked       */
+    /* against the A.2.5 SHA-256 vector first).                                               */
+    {
+        static const uint8_t privKey[] = {
+            0xC9u, 0xAFu, 0xA9u, 0xD8u, 0x45u, 0xBAu, 0x75u, 0x16u,
+            0x6Bu, 0x5Cu, 0x21u, 0x57u, 0x67u, 0xB1u, 0xD6u, 0x93u,
+            0x4Eu, 0x50u, 0xC3u, 0xDBu, 0x36u, 0xE8u, 0x9Bu, 0x12u,
+            0x7Bu, 0x8Au, 0x62u, 0x2Bu, 0x12u, 0x0Fu, 0x67u, 0x21u
+        };
+        static const uint8_t expSig[] = {
+            0x30u, 0x45u, 0x02u, 0x20u,
+            0x59u, 0x16u, 0x23u, 0x57u, 0x0Au, 0xCDu, 0xC4u, 0x8Fu,
+            0xE3u, 0xE7u, 0xF7u, 0xA6u, 0x79u, 0xBFu, 0x86u, 0x92u,
+            0xBFu, 0x48u, 0x24u, 0x80u, 0x1Bu, 0x61u, 0xD3u, 0x0Cu,
+            0x1Bu, 0x48u, 0xEBu, 0x77u, 0xECu, 0x19u, 0x57u, 0x2Cu,
+            0x02u, 0x21u, 0x00u,
+            0x94u, 0xA3u, 0xBCu, 0xA4u, 0xAFu, 0x99u, 0x58u, 0x8Bu,
+            0x07u, 0xFAu, 0x5Eu, 0x9Bu, 0x8Fu, 0xC0u, 0x37u, 0x59u,
+            0x1Cu, 0xBEu, 0xDBu, 0xEDu, 0xEAu, 0x1Eu, 0x81u, 0x91u,
+            0x6Bu, 0xD9u, 0x5Au, 0x82u, 0xC5u, 0x21u, 0x07u, 0x27u
+        };
+        uint8_t hash[32];
+        uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        size_t pubKeyLen;
+        uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+        size_t sigLen;
+
+        SSFSHA256((const uint8_t *)"sample", 6, hash, sizeof(hash));
+        SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, privKey, sizeof(privKey), hash, 28u, sig,
+                                sizeof(sig), &sigLen) == true);
+        SSF_ASSERT((sigLen == sizeof(expSig)) && (memcmp(sig, expSig, sigLen) == 0));
+        SSF_ASSERT(SSFECDSAPubKeyFromPrivKey(SSF_EC_CURVE_P256, privKey, sizeof(privKey), pubKey,
+                                             sizeof(pubKey), &pubKeyLen) == true);
+        SSF_ASSERT(SSFECDSAVerify(SSF_EC_CURVE_P256, pubKey, pubKeyLen, hash, 28u, sig,
+                                  sigLen) == true);
+    }
+
     /* ---- Zeroization audit: Sign success path leaves no secret-derived limbs on stack ---- */
     {
         static const uint8_t privKey[] = {

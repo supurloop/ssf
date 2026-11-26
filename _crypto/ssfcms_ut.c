@@ -2338,6 +2338,40 @@ void SSFCMSUnitTest(void)
                              _utOidEcdsaSha256, sizeof(_utOidEcdsaSha256)) == true);
         SSF_ASSERT(_VERIFY256() == true);
 
+        /* COV-9b: each structural element's tag swapped for a wrong one fails the parse */
+        {
+            const SSFCMSSignerInfo_t *si0 = &sd.signers[0];
+            const uint8_t *tagAt[9];
+            uint32_t pos[9];
+            uint8_t orig;
+            uint32_t i;
+
+            tagAt[0] = si0->apDigestAlgOidRaw - 4;   /* AlgProtection digestAlgorithm SEQUENCE */
+            tagAt[1] = si0->apSigAlgOidRaw - 2;      /* AlgProtection signatureAlgorithm OID */
+            tagAt[2] = si0->contentTypeOidRaw - 2;   /* content-type attribute value OID */
+            tagAt[3] = si0->messageDigest - 2;       /* message-digest attribute OCTET STRING */
+            tagAt[4] = si0->sidIssuerRaw;            /* issuerAndSerialNumber issuer Name */
+            tagAt[5] = si0->digestAlgOidRaw - 4;     /* SignerInfo digestAlgorithm SEQUENCE */
+            tagAt[6] = si0->sigAlgOidRaw - 4;        /* SignerInfo signatureAlgorithm SEQUENCE */
+            tagAt[7] = sd.digestAlgOidRaw[0] - 4;    /* SignedData digestAlgorithms entry */
+            tagAt[8] = sd.eContentTypeOidRaw - 2;    /* eContentType OID */
+            for (i = 0; i < 9u; i++)
+            {
+                SSF_ASSERT((tagAt[i] >= msg) && (tagAt[i] < &msg[len]));
+                pos[i] = (uint32_t)(tagAt[i] - msg);
+            }
+            for (i = 0; i < 9u; i++)
+            {
+                orig = msg[pos[i]];
+                SSF_ASSERT((orig == 0x30u) || (orig == 0x06u) || (orig == 0x04u));
+                msg[pos[i]] = (orig == 0x30u) ? 0x31u : ((orig == 0x06u) ? 0x04u : 0x06u);
+                SSF_ASSERT(SSFCMSParse(msg, len, &sd) == false);
+                msg[pos[i]] = orig;
+            }
+            SSF_ASSERT(SSFCMSParse(msg, len, &sd) == true);
+            SSF_ASSERT(_VERIFY256() == true);
+        }
+
         /* Its signatureAlgorithm params may be absent or NULL vs absent; else must match exactly */
         s.apSigParams = _utDerNull;
         s.apSigParamsLen = sizeof(_utDerNull);

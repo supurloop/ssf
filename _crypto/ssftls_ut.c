@@ -421,6 +421,68 @@ void SSFTLSUnitTest(void)
         SSF_ASSERT(memcmp(decrypted, plaintext, ptLen) == 0);
     }
 
+    /* ---- COV-4: zero padding after the inner content type is stripped (RFC 8446 5.4) ---- */
+    {
+        static const uint8_t content[] = { 'h', 'e', 'l', 'l', 'o' };
+        static const size_t pads[] = { 1u, 16u, 255u };
+        uint8_t key[16];
+        uint8_t iv[12];
+        SSFTLSRecordState_t decState;
+        static uint8_t inner[sizeof(content) + 1u + 255u];
+        static uint8_t frag[sizeof(inner) + SSF_TLS_AEAD_TAG_SIZE];
+        static uint8_t decrypted[sizeof(inner)];
+        uint8_t hdr[SSF_TLS_RECORD_HEADER_SIZE];
+        size_t innerLen;
+        size_t decLen;
+        uint8_t ct;
+        uint8_t i;
+        uint8_t k;
+
+        for (i = 0; i < 16u; i++) key[i] = (uint8_t)(i + 1u);
+        for (i = 0; i < 12u; i++) iv[i] = (uint8_t)(i + 0x10u);
+
+        /* k < 3: content || application type || pads[k] zeros; k == 3: all zero, no type */
+        for (k = 0; k < 4u; k++)
+        {
+            memset(inner, 0, sizeof(inner));
+            if (k < 3u)
+            {
+                memcpy(inner, content, sizeof(content));
+                inner[sizeof(content)] = SSF_TLS_CT_APPLICATION;
+                innerLen = sizeof(content) + 1u + pads[k];
+            }
+            else { innerLen = 8u; }
+
+            hdr[0] = SSF_TLS_CT_APPLICATION;
+            hdr[1] = 0x03u;
+            hdr[2] = 0x03u;
+            hdr[3] = (uint8_t)((innerLen + SSF_TLS_AEAD_TAG_SIZE) >> 8);
+            hdr[4] = (uint8_t)(innerLen + SSF_TLS_AEAD_TAG_SIZE);
+
+            /* seqNum 0: the per-record nonce is the static IV itself */
+            SSFAESGCMEncrypt(inner, innerLen, iv, sizeof(iv), hdr, sizeof(hdr), key, sizeof(key),
+                             &frag[innerLen], SSF_TLS_AEAD_TAG_SIZE, frag, innerLen);
+            memset(&decState, 0, sizeof(decState));
+            SSFTLSRecordStateInit(&decState, SSF_TLS_CS_AES_128_GCM_SHA256,
+                                  key, sizeof(key), iv, sizeof(iv));
+            if (k < 3u)
+            {
+                SSF_ASSERT(SSFTLSRecordDecrypt(&decState, hdr, frag,
+                                               innerLen + SSF_TLS_AEAD_TAG_SIZE, decrypted,
+                                               sizeof(decrypted), &decLen, &ct) == true);
+                SSF_ASSERT(decLen == sizeof(content));
+                SSF_ASSERT(ct == SSF_TLS_CT_APPLICATION);
+                SSF_ASSERT(memcmp(decrypted, content, sizeof(content)) == 0);
+            }
+            else
+            {
+                SSF_ASSERT(SSFTLSRecordDecrypt(&decState, hdr, frag,
+                                               innerLen + SSF_TLS_AEAD_TAG_SIZE, decrypted,
+                                               sizeof(decrypted), &decLen, &ct) == false);
+            }
+        }
+    }
+
     /* ---- Record: corrupted ciphertext fails decryption ---- */
     {
         SSFTLSRecordState_t encState = {0};

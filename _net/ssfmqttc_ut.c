@@ -47,6 +47,7 @@
 #include "ssfstr.h"
 #include "ssfnet.h"
 #include "ssfnetsock.h"
+#include "ssfnetws.h"
 #include "ssfmqttc.h"
 
 #if SSF_CONFIG_MQTTC_UNIT_TEST == 1
@@ -2128,6 +2129,10 @@ static void _SSFMQTTCUTScenarioGracefulClose(void)
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_CONFIG_MQTTC_UNIT_TEST_BROKER == 1
 #define SSF_MQTTC_UT_BROKER_STEP_TICKS   (SSF_TICKS_PER_SEC * 20u)   /* Per phase */
+#define SSF_MQTTC_UT_BROKER_WS_PORT      (8080u)                     /* ws:// listener */
+#define SSF_MQTTC_UT_BROKER_WS_PATH      "/mqtt"
+
+static SSFNetWSSession_t _utBrokerWS;
 
 /* --------------------------------------------------------------------------------------------- */
 /* Runs both tasks once, yielding briefly when idle.                                             */
@@ -2156,9 +2161,11 @@ static SSFMQTTCEvent_t _SSFMQTTCUTLastEvent(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Tests a QoS 1 publish echoed back by a public broker; skipped if unreachable.                 */
+/* Tests a QoS 1 publish echoed back by a public broker over transport. Returns false if it was  */
+/* skipped because the broker was unreachable, which isRequired turns into a failure.            */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFMQTTCUTBrokerEcho(void)
+static bool _SSFMQTTCUTBrokerEchoOver(SSFNetTransport_t *transport, uint16_t port,
+                                      const char *label, bool isRequired)
 {
     static char clientId[32];
     static char topic[64];
@@ -2173,15 +2180,14 @@ static void _SSFMQTTCUTBrokerEcho(void)
     (void)snprintf(payload, sizeof(payload), "echo %lu", (unsigned long)(now & 0xFFFFFFFFul));
 
     SSFSMInit(SSF_SM_MAX_ACTIVE_EVENTS, SSF_SM_MAX_ACTIVE_TIMERS);
-    SSFNetSockInit(&_utSock);
     _SSFMQTTCUTRecordReset();
-    SSFMQTTCInit(&_utSock.transport, SSF_MQTTC_UT_TX_BLOCKS, SSF_MQTTC_UT_TX_BLOCK_SIZE,
+    SSFMQTTCInit(transport, SSF_MQTTC_UT_TX_BLOCKS, SSF_MQTTC_UT_TX_BLOCK_SIZE,
                  SSF_MQTTC_UT_RX_BLOCK_SIZE, _SSFMQTTCUTRxPublish, &_utRxPublishCtx,
                  _SSFMQTTCUTEvent, &_utEventCtx);
 
     memset(&opts, 0, sizeof(opts));
     opts.host = SSF_MQTTC_UT_BROKER_HOST;
-    opts.port = SSF_MQTTC_UT_BROKER_PORT;
+    opts.port = port;
     opts.clientId = clientId;
     opts.subsOpt = subs;
     opts.subCount = 1;
@@ -2209,17 +2215,17 @@ static void _SSFMQTTCUTBrokerEcho(void)
                              (reason == SSF_MQTTC_REASON_CONNACK_SERVER_UNAVAILABLE) ||
                              (_utEventCount == 0);
         SSF_ASSERT(isUnreachable);                  /* Anything else is a real failure */
-        printf("ssfmqttc: %s unreachable (reason %d); broker round trip skipped\r\n",
-               SSF_MQTTC_UT_BROKER_HOST, (int)reason);
+        SSF_ASSERT(isRequired == false);
+        printf("ssfmqttc: %s:%u (%s) unreachable (reason %d); broker round trip skipped\r\n",
+               SSF_MQTTC_UT_BROKER_HOST, (unsigned)port, label, (int)reason);
         SSFMQTTCStop();
         end = SSFPortGetTick64() + SSF_MQTTC_UT_BROKER_STEP_TICKS;
         while ((SSFMQTTCGetState() != SSF_MQTTC_STATE_STOPPED) && (SSFPortGetTick64() < end))
         { _SSFMQTTCUTBrokerStep(); }
         SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_STOPPED);
         SSFMQTTCDeInit();
-        SSFNetSockDeInit(&_utSock);
         SSFSMDeInit();
-        return;
+        return false;
     }
     SSF_ASSERT(_utEventCount == 2);
     SSF_ASSERT(_utEvents[0].event == SSF_MQTTC_EVENT_CONNECTED);
@@ -2256,8 +2262,30 @@ static void _SSFMQTTCUTBrokerEcho(void)
     SSF_ASSERT(_utEvents[0].event == SSF_MQTTC_EVENT_STOPPED);
 
     SSFMQTTCDeInit();
-    SSFNetSockDeInit(&_utSock);
     SSFSMDeInit();
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Tests the broker round trip over plain TCP, then over WebSocket on the same TCP transport.    */
+/* A WebSocket handshake failure looks like TRANSPORT_ERROR, so once TCP has reached the broker  */
+/* the WebSocket leg may not be skipped.                                                         */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTBrokerEcho(void)
+{
+    bool isReached;
+
+    SSFNetSockInit(&_utSock);
+    isReached = _SSFMQTTCUTBrokerEchoOver(&_utSock.transport, SSF_MQTTC_UT_BROKER_PORT, "tcp",
+                                          false);
+    SSFNetSockDeInit(&_utSock);
+
+    SSFNetSockInit(&_utSock);
+    SSFNetWSInit(&_utBrokerWS, &_utSock.transport, SSF_MQTTC_UT_BROKER_WS_PATH, NULL, 0);
+    (void)_SSFMQTTCUTBrokerEchoOver(&_utBrokerWS.transport, SSF_MQTTC_UT_BROKER_WS_PORT, "ws",
+                                    isReached);
+    SSFNetWSDeInit(&_utBrokerWS);
+    SSFNetSockDeInit(&_utSock);
 }
 #endif /* SSF_CONFIG_MQTTC_UNIT_TEST_BROKER */
 

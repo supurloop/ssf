@@ -24,7 +24,9 @@ the application run in `SSFMQTTCTask()`. Both are driven from one application lo
 - [`_struct/ssfmpool.h`](../_struct/ssfmpool.h), [`_struct/ssfll.h`](../_struct/ssfll.h) — packet pools and queues
 - [`_codec/ssfstr.h`](../_codec/ssfstr.h) — bounded string length checks
 - [`ssfmqttpkt.h`](ssfmqttpkt.h) — packet codec; also defines `SSFMQTTCQoS_t` and `SSFMQTTPktSub_t`
-- [`ssfnet.h`](ssfnet.h) — transport interface; [`ssfnetsock.h`](ssfnetsock.h) is the hosted TCP implementation
+- [`ssfnet.h`](ssfnet.h) — transport interface; [`ssfnetsock.h`](ssfnetsock.h) is the hosted TCP implementation,
+  [`ssftlsc.h`](ssftlsc.h) adds TLS, and [`ssfnetws.h`](ssfnetws.md) carries MQTT over WebSockets
+  (MQTT 3.1.1 section 6) on either
 - [`_opt/ssfmqttc_opt.h`](../_opt/ssfmqttc_opt.h) (aggregated through `ssfoptions.h`)
 
 <a id="design"></a>

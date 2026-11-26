@@ -47,9 +47,11 @@
 #include "ssfbfifo.h"
 #include "ssfll.h"
 #include "ssfsm.h"
+#include "ssfhttphdr.h"
 #include "ssfmqttpkt.h"
 #include "ssfmqttc.h"
 #include "ssfnetsock.h"
+#include "ssfnetws.h"
 #include "ssftlsc.h"
 #include "ssfmpool.h"
 #include "ssfsll.h"
@@ -268,6 +270,9 @@ SSFUnitTest_t unitTests[] =
 #endif /* SSF_CONFIG_SM_UNIT_TEST */
 
     /* _net */
+#if SSF_CONFIG_HTTPHDR_UNIT_TEST == 1
+    { "ssfhttphdr", "HTTP/1.1 Message Head Codec", SSFHTTPHdrUnitTest },
+#endif /* SSF_CONFIG_HTTPHDR_UNIT_TEST */
 #if SSF_CONFIG_MQTTC_UNIT_TEST == 1
     { "ssfmqttc", "MQTT 3.1.1 Client", SSFMQTTCUnitTest },
 #endif /* SSF_CONFIG_MQTTC_UNIT_TEST */
@@ -277,6 +282,9 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_NETSOCK_UNIT_TEST == 1
     { "ssfnetsock", "TCP Socket Transport", SSFNetSockUnitTest },
 #endif /* SSF_CONFIG_NETSOCK_UNIT_TEST */
+#if SSF_CONFIG_NETWS_UNIT_TEST == 1
+    { "ssfnetws", "WebSocket Client Transport", SSFNetWSUnitTest },
+#endif /* SSF_CONFIG_NETWS_UNIT_TEST */
 #if SSF_CONFIG_TLSC_UNIT_TEST == 1
     { "ssftlsc", "TLS 1.3 Client Transport", SSFTLSCUnitTest },
 #endif /* SSF_CONFIG_TLSC_UNIT_TEST */

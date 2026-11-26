@@ -168,6 +168,7 @@ typedef bool (*SSFMQTTCRxPublishFn_t)(void *ctx, const SSFMQTTCRxPublish_t *rxPu
 
 /* Pointed-to memory is app owned and must stay valid from Start() until the STOPPED event. */
 typedef SSFMQTTPktSub_t SSFMQTTCSub_t;   /* Topic filter + requested QoS (0 or 1) */
+typedef SSFMQTTPktWill_t SSFMQTTCWill_t; /* Last Will: topic, message, QoS (0 or 1), retain */
 
 typedef struct
 {
@@ -190,6 +191,8 @@ typedef struct
                                      /* pending txPublish callback fires false                 */
     SSFPortTick_t reconnectMinWait;  /* > 0. First backoff; doubles per consecutive failure    */
     SSFPortTick_t reconnectMaxWait;  /* >= reconnectMinWait. Backoff cap; no jitter is added   */
+    const SSFMQTTCWill_t *willOpt;   /* Last Will, app owned; NULL => none. Topic valid, no '+'  */
+                                     /* or '#', < SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE; QoS 0 or 1   */
 } SSFMQTTCOpts_t;
 
 /* --------------------------------------------------------------------------------------------- */

@@ -182,6 +182,11 @@ static void _SSFMQTTPktUTEncodeConnect(void)
     static const char id[] = "abc";
     static const char user[] = "u";
     static const uint8_t pass[] = { 0x01, 0x02 };
+    static const char willTopic[] = "w/t";
+    static const uint8_t willMsg[] = { 'x', 'y' };
+    static const SSFMQTTPktWill_t will1R = { willTopic, willMsg, sizeof(willMsg), SSF_MQTTC_QOS_1,
+                                             true };
+    static const SSFMQTTPktWill_t will0 = { willTopic, NULL, 0, SSF_MQTTC_QOS_0, false };
     static const uint8_t noAuth[] = {
         0x10, 0x0F, 0x00, 0x04, 'M', 'Q', 'T', 'T', 0x04, 0x02, 0x00, 0x3C, 0x00, 0x03, 'a', 'b',
         'c' };
@@ -193,46 +198,125 @@ static void _SSFMQTTPktUTEncodeConnect(void)
         'c', 0x00, 0x01, 'u', 0x00, 0x02, 0x01, 0x02 };
     static const uint8_t emptyId[] = {
         0x10, 0x0C, 0x00, 0x04, 'M', 'Q', 'T', 'T', 0x04, 0x02, 0x00, 0x3C, 0x00, 0x00 };
+    /* Will QoS 1 + retain: flags 0x02 | 0x04 | (1 << 3) | 0x20 = 0x2E; will after client id */
+    static const uint8_t will1RNoAuth[] = {
+        0x10, 0x18, 0x00, 0x04, 'M', 'Q', 'T', 'T', 0x04, 0x2E, 0x00, 0x3C, 0x00, 0x03, 'a', 'b',
+        'c', 0x00, 0x03, 'w', '/', 't', 0x00, 0x02, 'x', 'y' };
+    /* Will before username and password (3.1.3) */
+    static const uint8_t will1RUserPass[] = {
+        0x10, 0x1F, 0x00, 0x04, 'M', 'Q', 'T', 'T', 0x04, 0xEE, 0x00, 0x3C, 0x00, 0x03, 'a', 'b',
+        'c', 0x00, 0x03, 'w', '/', 't', 0x00, 0x02, 'x', 'y', 0x00, 0x01, 'u', 0x00, 0x02, 0x01,
+        0x02 };
+    /* Will QoS 0, no retain, empty message: flags 0x06, message field 00 00 */
+    static const uint8_t will0NoAuth[] = {
+        0x10, 0x16, 0x00, 0x04, 'M', 'Q', 'T', 'T', 0x04, 0x06, 0x00, 0x3C, 0x00, 0x03, 'a', 'b',
+        'c', 0x00, 0x03, 'w', '/', 't', 0x00, 0x00 };
+    SSFMQTTPktWill_t bad;
 
-    SSF_ASSERT_TEST(SSFMQTTPktEncodeConnect(NULL, sizeof(_utBuf), &_utLen, id, sizeof(id), NULL, 0,
-                                            NULL, 0, 60));
+    SSF_ASSERT_TEST(SSFMQTTPktEncodeConnect(NULL, sizeof(_utBuf), &_utLen, id, sizeof(id), NULL,
+                                            0, NULL, 0, NULL, 0, 60));
     SSF_ASSERT_TEST(SSFMQTTPktEncodeConnect(_utBuf, 0, &_utLen, id, sizeof(id), NULL, 0, NULL, 0,
-                                            60));
-    SSF_ASSERT_TEST(SSFMQTTPktEncodeConnect(_utBuf, sizeof(_utBuf), NULL, id, sizeof(id), NULL, 0,
                                             NULL, 0, 60));
-    SSF_ASSERT_TEST(SSFMQTTPktEncodeConnect(_utBuf, sizeof(_utBuf), &_utLen, NULL, sizeof(id), NULL,
-                                            0, NULL, 0, 60));
+    SSF_ASSERT_TEST(SSFMQTTPktEncodeConnect(_utBuf, sizeof(_utBuf), NULL, id, sizeof(id), NULL, 0,
+                                            NULL, 0, NULL, 0, 60));
+    SSF_ASSERT_TEST(SSFMQTTPktEncodeConnect(_utBuf, sizeof(_utBuf), &_utLen, NULL, sizeof(id),
+                                            NULL, 0, NULL, 0, NULL, 0, 60));
     /* Password without username */
     SSF_ASSERT_TEST(SSFMQTTPktEncodeConnect(_utBuf, sizeof(_utBuf), &_utLen, id, sizeof(id), NULL,
-                                            0, pass, sizeof(pass), 60));
+                                            0, NULL, 0, pass, sizeof(pass), 60));
     /* Password length without password */
-    SSF_ASSERT_TEST(SSFMQTTPktEncodeConnect(_utBuf, sizeof(_utBuf), &_utLen, id, sizeof(id), user,
-                                            sizeof(user), NULL, sizeof(pass), 60));
+    SSF_ASSERT_TEST(SSFMQTTPktEncodeConnect(_utBuf, sizeof(_utBuf), &_utLen, id, sizeof(id), NULL,
+                                            0, user, sizeof(user), NULL, sizeof(pass), 60));
     /* Password too long for a field */
-    SSF_ASSERT_TEST(SSFMQTTPktEncodeConnect(_utBuf, sizeof(_utBuf), &_utLen, id, sizeof(id), user,
-                                            sizeof(user), pass, SSF_MQTT_PKT_MAX_STRING_LEN + 1,
-                                            60));
+    SSF_ASSERT_TEST(SSFMQTTPktEncodeConnect(_utBuf, sizeof(_utBuf), &_utLen, id, sizeof(id), NULL,
+                                            0, user, sizeof(user), pass,
+                                            SSF_MQTT_PKT_MAX_STRING_LEN + 1, 60));
     /* Unterminated client id and username */
     SSF_ASSERT_TEST(SSFMQTTPktEncodeConnect(_utBuf, sizeof(_utBuf), &_utLen, id, sizeof(id) - 1,
-                                            NULL, 0, NULL, 0, 60));
-    SSF_ASSERT_TEST(SSFMQTTPktEncodeConnect(_utBuf, sizeof(_utBuf), &_utLen, id, sizeof(id), user,
-                                            sizeof(user) - 1, NULL, 0, 60));
+                                            NULL, 0, NULL, 0, NULL, 0, 60));
+    SSF_ASSERT_TEST(SSFMQTTPktEncodeConnect(_utBuf, sizeof(_utBuf), &_utLen, id, sizeof(id), NULL,
+                                            0, user, sizeof(user) - 1, NULL, 0, 60));
     /* Does not fit by one byte */
     SSF_ASSERT_TEST(SSFMQTTPktEncodeConnect(_utBuf, sizeof(noAuth) - 1, &_utLen, id, sizeof(id),
-                                            NULL, 0, NULL, 0, 60));
+                                            NULL, 0, NULL, 0, NULL, 0, 60));
 
-    SSFMQTTPktEncodeConnect(_utBuf, sizeof(noAuth), &_utLen, id, sizeof(id), NULL, 0, NULL, 0, 60);
-    SSF_ASSERT(_SSFMQTTPktUTIsPacket(_utBuf, _utLen, noAuth, sizeof(noAuth)));
-    SSFMQTTPktEncodeConnect(_utBuf, sizeof(_utBuf), &_utLen, id, sizeof(id), NULL, 0, NULL, 0, 60);
-    SSF_ASSERT(_SSFMQTTPktUTIsPacket(_utBuf, _utLen, noAuth, sizeof(noAuth)));
-    SSFMQTTPktEncodeConnect(_utBuf, sizeof(_utBuf), &_utLen, id, sizeof(id), user, sizeof(user),
+    /* Will arguments: unterminated or empty topic, NULL topic, QoS 2, length without message */
+    SSF_ASSERT_TEST(SSFMQTTPktEncodeConnect(_utBuf, sizeof(_utBuf), &_utLen, id, sizeof(id),
+                                            &will1R, sizeof(willTopic) - 1, NULL, 0, NULL, 0, 60));
+    bad = will1R; bad.topic = "";
+    SSF_ASSERT_TEST(SSFMQTTPktEncodeConnect(_utBuf, sizeof(_utBuf), &_utLen, id, sizeof(id), &bad,
+                                            sizeof(willTopic), NULL, 0, NULL, 0, 60));
+    bad = will1R; bad.topic = NULL;
+    SSF_ASSERT_TEST(SSFMQTTPktEncodeConnect(_utBuf, sizeof(_utBuf), &_utLen, id, sizeof(id), &bad,
+                                            sizeof(willTopic), NULL, 0, NULL, 0, 60));
+    bad = will1R; bad.qos = SSF_MQTTC_QOS_2;
+    SSF_ASSERT_TEST(SSFMQTTPktEncodeConnect(_utBuf, sizeof(_utBuf), &_utLen, id, sizeof(id), &bad,
+                                            sizeof(willTopic), NULL, 0, NULL, 0, 60));
+    bad = will1R; bad.payloadOpt = NULL;
+    SSF_ASSERT_TEST(SSFMQTTPktEncodeConnect(_utBuf, sizeof(_utBuf), &_utLen, id, sizeof(id), &bad,
+                                            sizeof(willTopic), NULL, 0, NULL, 0, 60));
+    /* A will that does not fit by one byte */
+    SSF_ASSERT_TEST(SSFMQTTPktEncodeConnect(_utBuf, sizeof(will1RNoAuth) - 1, &_utLen, id,
+                                            sizeof(id), &will1R, sizeof(willTopic), NULL, 0, NULL,
+                                            0, 60));
+
+    SSFMQTTPktEncodeConnect(_utBuf, sizeof(noAuth), &_utLen, id, sizeof(id), NULL, 0, NULL, 0,
                             NULL, 0, 60);
+    SSF_ASSERT(_SSFMQTTPktUTIsPacket(_utBuf, _utLen, noAuth, sizeof(noAuth)));
+    SSF_ASSERT(SSFMQTTPktConnectLen(id, sizeof(id), NULL, 0, NULL, 0, NULL, 0) == _utLen);
+    SSFMQTTPktEncodeConnect(_utBuf, sizeof(_utBuf), &_utLen, id, sizeof(id), NULL, 0, NULL, 0,
+                            NULL, 0, 60);
+    SSF_ASSERT(_SSFMQTTPktUTIsPacket(_utBuf, _utLen, noAuth, sizeof(noAuth)));
+    SSFMQTTPktEncodeConnect(_utBuf, sizeof(_utBuf), &_utLen, id, sizeof(id), NULL, 0, user,
+                            sizeof(user), NULL, 0, 60);
     SSF_ASSERT(_SSFMQTTPktUTIsPacket(_utBuf, _utLen, userOnly, sizeof(userOnly)));
-    SSFMQTTPktEncodeConnect(_utBuf, sizeof(_utBuf), &_utLen, id, sizeof(id), user, sizeof(user),
-                            pass, sizeof(pass), 0xFFFF);
+    SSF_ASSERT(SSFMQTTPktConnectLen(id, sizeof(id), NULL, 0, user, sizeof(user), NULL, 0) ==
+               _utLen);
+    SSFMQTTPktEncodeConnect(_utBuf, sizeof(_utBuf), &_utLen, id, sizeof(id), NULL, 0, user,
+                            sizeof(user), pass, sizeof(pass), 0xFFFF);
     SSF_ASSERT(_SSFMQTTPktUTIsPacket(_utBuf, _utLen, userPass, sizeof(userPass)));
-    SSFMQTTPktEncodeConnect(_utBuf, sizeof(_utBuf), &_utLen, "", 1, NULL, 0, NULL, 0, 60);
+    SSF_ASSERT(SSFMQTTPktConnectLen(id, sizeof(id), NULL, 0, user, sizeof(user), pass,
+                                    sizeof(pass)) == _utLen);
+    SSFMQTTPktEncodeConnect(_utBuf, sizeof(_utBuf), &_utLen, "", 1, NULL, 0, NULL, 0, NULL, 0,
+                            60);
     SSF_ASSERT(_SSFMQTTPktUTIsPacket(_utBuf, _utLen, emptyId, sizeof(emptyId)));
+    SSF_ASSERT(SSFMQTTPktConnectLen("", 1, NULL, 0, NULL, 0, NULL, 0) == _utLen);
+
+    /* With a will */
+    SSFMQTTPktEncodeConnect(_utBuf, sizeof(will1RNoAuth), &_utLen, id, sizeof(id), &will1R,
+                            sizeof(willTopic), NULL, 0, NULL, 0, 60);
+    SSF_ASSERT(_SSFMQTTPktUTIsPacket(_utBuf, _utLen, will1RNoAuth, sizeof(will1RNoAuth)));
+    SSF_ASSERT(SSFMQTTPktConnectLen(id, sizeof(id), &will1R, sizeof(willTopic), NULL, 0, NULL,
+                                    0) == _utLen);
+    SSFMQTTPktEncodeConnect(_utBuf, sizeof(_utBuf), &_utLen, id, sizeof(id), &will1R,
+                            sizeof(willTopic), user, sizeof(user), pass, sizeof(pass), 60);
+    SSF_ASSERT(_SSFMQTTPktUTIsPacket(_utBuf, _utLen, will1RUserPass, sizeof(will1RUserPass)));
+    SSF_ASSERT(SSFMQTTPktConnectLen(id, sizeof(id), &will1R, sizeof(willTopic), user,
+                                    sizeof(user), pass, sizeof(pass)) == _utLen);
+    SSFMQTTPktEncodeConnect(_utBuf, sizeof(_utBuf), &_utLen, id, sizeof(id), &will0,
+                            sizeof(willTopic), NULL, 0, NULL, 0, 60);
+    SSF_ASSERT(_SSFMQTTPktUTIsPacket(_utBuf, _utLen, will0NoAuth, sizeof(will0NoAuth)));
+    SSF_ASSERT(SSFMQTTPktConnectLen(id, sizeof(id), &will0, sizeof(willTopic), NULL, 0, NULL,
+                                    0) == _utLen);
+
+    /* The largest will message */
+    {
+        static uint8_t bigMsg[SSF_MQTT_PKT_MAX_STRING_LEN];
+        SSFMQTTPktWill_t big = { willTopic, bigMsg, SSF_MQTT_PKT_MAX_STRING_LEN,
+                                 SSF_MQTTC_QOS_0, false };
+        SSF_ASSERT(SSFMQTTPktConnectLen(id, sizeof(id), &big, sizeof(willTopic), NULL, 0, NULL,
+                                        0) == (1u + 3u + 10u + 5u + 5u + 2u +
+                                               SSF_MQTT_PKT_MAX_STRING_LEN));   /* 3-byte length */
+    }
+
+    /* ConnectLen requires what the encoder requires */
+    SSF_ASSERT_TEST(SSFMQTTPktConnectLen(NULL, sizeof(id), NULL, 0, NULL, 0, NULL, 0));
+    SSF_ASSERT_TEST(SSFMQTTPktConnectLen(id, sizeof(id), NULL, 0, NULL, 0, pass, sizeof(pass)));
+    SSF_ASSERT_TEST(SSFMQTTPktConnectLen(id, sizeof(id), &will1R, sizeof(willTopic) - 1, NULL, 0,
+                                         NULL, 0));
+    bad = will1R; bad.qos = SSF_MQTTC_QOS_2;
+    SSF_ASSERT_TEST(SSFMQTTPktConnectLen(id, sizeof(id), &bad, sizeof(willTopic), NULL, 0, NULL,
+                                         0));
 }
 
 /* --------------------------------------------------------------------------------------------- */

@@ -508,7 +508,7 @@ void SSFPKeyUnitTest(void)
     n = _UTPem(pem, sizeof(pem), "RSA PRIVATE KEY", _pkP256SEC1Der, sizeof(_pkP256SEC1Der));
     _UTRefusePEM(pem, n);                                               /* label says PKCS#1 */
     n = _UTPem(pem, sizeof(pem), "PRIVATE KEY", _pkP256PKCS8Der, sizeof(_pkP256PKCS8Der));
-    SSF_ASSERT(SSFPKeyDecodePEM(pem, n, buf, sizeof(buf), &key));       /* control */
+    SSF_ASSERT(SSFPKeyDecodePEM(pem, n, buf, sizeof(buf), &key) == _UT_P256); /* control */
     {
         /* DER buffer too small: refused, buffer wiped */
         uint8_t small[64];

@@ -85,6 +85,17 @@
 /* 1 if the option is compiled out, else 0 (sizes the ClientHello for a reduced build) */
 #define _UT_TLSC_NO(opt) (((opt) == 1) ? 0u : 1u)
 
+/* Fixture needs. In a build without one, the sub-tests that need it are skipped:          */
+/* the RFC 8448 traces authenticate the server with RSA-PSS, and the client-certificate    */
+/* tests sign with P-256 / P-384 client keys.                                              */
+#define _UT_TLSC_TRACES ((SSF_RSA_CONFIG_ENABLE_PSS == 1) && (SSF_EC_CONFIG_ENABLE_P256 == 1) && \
+                         (SSF_EC_CONFIG_ENABLE_P384 == 1))  /* Fixed ClientHellos offer both */
+#define _UT_TLSC_P256_CLIENT ((SSF_EC_CONFIG_ENABLE_P256 == 1) && \
+                              (SSF_ECDSA_CONFIG_ENABLE_SIGN == 1))
+#define _UT_TLSC_EC_CLIENT (_UT_TLSC_P256_CLIENT && (SSF_EC_CONFIG_ENABLE_P384 == 1))
+/* ServerHello / HRR harnesses select secp256r1 and secp384r1 groups */
+#define _UT_TLSC_EC_GROUPS ((SSF_EC_CONFIG_ENABLE_P256 == 1) && (SSF_EC_CONFIG_ENABLE_P384 == 1))
+
 /* --------------------------------------------------------------------------------------------- */
 /* Test-side loopback listener. No TLS server is involved; handshakes against a real server are   */
 /* exercised by interop testing (see ssftlsc_punchlist.md).                                      */
@@ -3487,7 +3498,7 @@ static void _SSFTLSCUTRfc8448Hrr(void)
     _UTR8Close(s, _utR8s5ClientAlertRecord, _utR8s5ServerAlertRecord);
 }
 
-#if SSF_RSA_CONFIG_ENABLE_PSS == 1
+#if _UT_TLSC_TRACES
 /* RFC 8448 6: the server (ECDSA P-256) asks for a client certificate. The trace's client key   */
 /* is not published, so the client answers with its own RSA-2048 certificate: everything to the */
 /* server Finished, and the application keys, still match the trace; the client's Certificate, */
@@ -5231,25 +5242,37 @@ void SSFTLSCUnitTest(void)
         SSF_ASSERT(_SSFTLSCUTConnectArrives(l) == false);
         SSFTLSCDeInit(&_utSession2);
     }
+#if _UT_TLSC_EC_CLIENT
     _SSFTLSCUTClientCert();
+#endif
+#if _UT_TLSC_P256_CLIENT
     _SSFTLSCUTSendFlight();
+#endif
+#if _UT_TLSC_EC_GROUPS
     _SSFTLSCUTServerHelloExts();
+#endif
     _SSFTLSCUTServerHelloVersion();
+#if _UT_TLSC_EC_GROUPS
     _SSFTLSCUTServerHelloChecks();
+#endif
     _SSFTLSCUTPlainOverflow();
     _SSFTLSCUTRecordTypeFirst();
     _SSFTLSCUTMidHandshakeRecords();
+#if _UT_TLSC_TRACES
     _SSFTLSCUTRfc8448Simple();
     _SSFTLSCUTRfc8448Compat();
     _SSFTLSCUTRfc8448Hrr();
-#if SSF_RSA_CONFIG_ENABLE_PSS == 1
     _SSFTLSCUTRfc8448ClientAuth();
-#endif /* SSF_RSA_CONFIG_ENABLE_PSS */
     _SSFTLSCUTServerFlightNegative();
     _SSFTLSCUTOneRecvBuffer();
-    _SSFTLSCUTClientChain();
+#endif /* _UT_TLSC_TRACES */
+#if _UT_TLSC_P256_CLIENT && (SSF_RSA_CONFIG_ENABLE_PSS == 1)
+    _SSFTLSCUTClientChain();                           /* Also chooses RSA-PSS for an RSA key */
+#endif
     _SSFTLSCUTAlpn();
+#if _UT_TLSC_P256_CLIENT
     _SSFTLSCUTTrustFromPEM();
+#endif
 
     /* ---- Explicit opt-in to an unauthenticated connection, and back out ---- */
     SSFTLSCSetUnauthenticated(&_utSession, true);
@@ -5345,7 +5368,7 @@ void SSFTLSCUnitTest(void)
                 }
                 p += 4u + kl;
             }
-            SSF_ASSERT(gotX && gotP);
+            SSF_ASSERT(gotX && (gotP == (SSF_EC_CONFIG_ENABLE_P384 == 1))); /* P-384 if built */
         }
     }
     (void)SSF_TLSC_UT_CLOSE(peer);
@@ -5386,13 +5409,17 @@ void SSFTLSCUnitTest(void)
     (void)SSF_TLSC_UT_CLOSE(peer);
 
     /* ---- HelloRetryRequest: ClientHello2 rules ---- */
+#if _UT_TLSC_EC_GROUPS                            /* HRR selects secp256r1, full lists */
     _SSFTLSCUTClientHelloRetry(l, port);
+#endif
 
     /* ---- No SNI for a literal IP address ---- */
     _SSFTLSCUTNoSniForIP(l, port);
 
     /* ---- Handshake messages spanning records ---- */
+#if SSF_EC_CONFIG_ENABLE_P256 == 1                /* Its HelloRetryRequest selects secp256r1 */
     _SSFTLSCUTFragmentedHandshake(l, port);
+#endif
 
     /* ---- A peer that answers with something other than TLS ends the handshake with ERROR ---- */
     SSF_ASSERT(t->open(t, "localhost", sizeof("localhost"), port));

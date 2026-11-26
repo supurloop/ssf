@@ -33,6 +33,7 @@
 #include "ssfx509.h"
 #include "ssfasn1.h"
 #include "ssfecdsa.h"
+#include "ssfecdsa_ut_sign.h"                 /* SSF signer, or OpenSSL with signing off */
 #include "ssfrsa.h"
 #include "ssfed25519.h"
 #include "ssfsha2.h"
@@ -252,8 +253,8 @@ static bool _GenTestCert(const char *cn, uint64_t notBefore, uint64_t notAfter,
     if (tbsLen == 0u) return false;
 
     SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
-    if (!SSFECDSASign(_UT_CURVE, privKey, _UT_PRIV_LEN, tbsHash, 32,
-                      sig, sizeof(sig), &sigLen)) return false;
+    if (!_SSFECDSAUTSign(_UT_CURVE, privKey, _UT_PRIV_LEN, tbsHash, 32, sig, sizeof(sig),
+                         &sigLen)) return false;
 
     (void)SSFX509EncodeCert(certDer, certDerSize, &params, sig, (uint32_t)sigLen, certDerLen);
     return (*certDerLen > 0u);
@@ -309,8 +310,8 @@ static bool _GenSignedLeafCert(const char *leafCN, const char *issuerCN,
     if (tbsLen == 0u) return false;
 
     SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
-    if (!SSFECDSASign(_UT_CURVE, caPrivKey, _UT_PRIV_LEN, tbsHash, 32,
-                      sig, sizeof(sig), &sigLen)) return false;
+    if (!_SSFECDSAUTSign(_UT_CURVE, caPrivKey, _UT_PRIV_LEN, tbsHash, 32, sig, sizeof(sig),
+                         &sigLen)) return false;
 
     (void)SSFX509EncodeCert(certDer, certDerSize, &params, sig, (uint32_t)sigLen, certDerLen);
     return (*certDerLen > 0u);
@@ -386,7 +387,7 @@ static uint32_t _utSelfSign(SSFX509GenParams_t *p, uint8_t *pubKey, size_t pubKe
     (void)SSFX509EncodeTBS(tbs, sizeof(tbs), p, &tbsLen);
     if (tbsLen == 0u) return 0;
     SSFSHA256(tbs, tbsLen, hash, sizeof(hash));
-    if (!SSFECDSASign(_UT_CURVE, privKey, _UT_PRIV_LEN, hash, 32u, sig, sizeof(sig), &sigLen))
+    if (!_SSFECDSAUTSign(_UT_CURVE, privKey, _UT_PRIV_LEN, hash, 32u, sig, sizeof(sig), &sigLen))
         return 0;
     if (!SSFX509EncodeCert(out, outSize, p, sig, (uint32_t)sigLen, &certLen)) return 0;
     return certLen;
@@ -571,7 +572,7 @@ static uint32_t _utSignCert(const SSFX509GenParams_t *p, const uint8_t *privKey,
     (void)SSFX509EncodeTBS(tbs, sizeof(tbs), p, &tbsLen);
     if (tbsLen == 0u) return 0;
     SSFSHA256(tbs, tbsLen, hash, sizeof(hash));
-    if (!SSFECDSASign(_UT_CURVE, privKey, _UT_PRIV_LEN, hash, 32u, sig, sizeof(sig), &sigLen))
+    if (!_SSFECDSAUTSign(_UT_CURVE, privKey, _UT_PRIV_LEN, hash, 32u, sig, sizeof(sig), &sigLen))
         return 0;
     if (!SSFX509EncodeCert(out, outSize, p, sig, (uint32_t)sigLen, &certLen)) return 0;
     return certLen;
@@ -897,6 +898,12 @@ static uint32_t _utAppendJunk(const uint8_t *in, uint32_t inLen, const uint8_t *
 void SSFX509UnitTest(void)
 {
     static SSFX509Cert_t cert;
+
+#if SSF_ECDSA_UT_CAN_SIGN == 0
+    /* Signing compiled out and no OpenSSL: the generated-input tests below cannot be built */
+    SSF_UT_PRINTF("%s skipped: needs SSF_ECDSA_CONFIG_ENABLE_SIGN or OpenSSL\n", __func__);
+    return;
+#endif
 
     /* ---- Parse the test certificate ---- */
     SSF_ASSERT(SSFX509Parse(_utTestCertDER, sizeof(_utTestCertDER), &cert) == true);
@@ -1901,8 +1908,8 @@ void SSFX509UnitTest(void)
             (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &lp, &tbsLen);
             SSF_ASSERT(tbsLen > 0u);
             SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
-            SSF_ASSERT(SSFECDSASign(_UT_CURVE, caPriv, _UT_PRIV_LEN,
-                       tbsHash, 32, sig, sizeof(sig), &sigLen) == true);
+            SSF_ASSERT(_SSFECDSAUTSign(_UT_CURVE, caPriv, _UT_PRIV_LEN, tbsHash, 32, sig,
+                                       sizeof(sig), &sigLen) == true);
             (void)SSFX509EncodeCert(leafCert, sizeof(leafCert), &lp,
                                              sig, (uint32_t)sigLen, &leafCertLen);
             SSF_ASSERT(leafCertLen > 0u);
@@ -2021,8 +2028,8 @@ void SSFX509UnitTest(void)
             (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p, &tbsLen);
             SSF_ASSERT(tbsLen > 0u);
             SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
-            SSF_ASSERT(SSFECDSASign(_UT_CURVE, v1Priv, _UT_PRIV_LEN,
-                       tbsHash, 32, sig, sizeof(sig), &sigLen) == true);
+            SSF_ASSERT(_SSFECDSAUTSign(_UT_CURVE, v1Priv, _UT_PRIV_LEN, tbsHash, 32, sig,
+                                       sizeof(sig), &sigLen) == true);
             (void)SSFX509EncodeCert(v1Cert, sizeof(v1Cert), &p,
                                            sig, (uint32_t)sigLen, &v1CertLen);
             SSF_ASSERT(v1CertLen > 0u);
@@ -2296,8 +2303,8 @@ void SSFX509UnitTest(void)
             (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &ip, &tbsLen);
             SSF_ASSERT(tbsLen > 0u);
             SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
-            SSF_ASSERT(SSFECDSASign(_UT_CURVE, rootPriv, _UT_PRIV_LEN,
-                       tbsHash, 32, sig, sizeof(sig), &sigLen) == true);
+            SSF_ASSERT(_SSFECDSAUTSign(_UT_CURVE, rootPriv, _UT_PRIV_LEN, tbsHash, 32, sig,
+                                       sizeof(sig), &sigLen) == true);
             (void)SSFX509EncodeCert(intCert, sizeof(intCert), &ip,
                                             sig, (uint32_t)sigLen, &intCertLen);
             SSF_ASSERT(intCertLen > 0u);
@@ -2388,8 +2395,8 @@ void SSFX509UnitTest(void)
             (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p, &tbsLen);
             SSF_ASSERT(tbsLen > 0u);
             SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
-            SSF_ASSERT(SSFECDSASign(_UT_CURVE, caPriv, _UT_PRIV_LEN,
-                       tbsHash, 32, sig, sizeof(sig), &sigLen) == true);
+            SSF_ASSERT(_SSFECDSAUTSign(_UT_CURVE, caPriv, _UT_PRIV_LEN, tbsHash, 32, sig,
+                                       sizeof(sig), &sigLen) == true);
             (void)SSFX509EncodeCert(caCert, sizeof(caCert), &p,
                                            sig, (uint32_t)sigLen, &caCertLen);
             SSF_ASSERT(caCertLen > 0u);
@@ -2494,8 +2501,8 @@ void SSFX509UnitTest(void)
             (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &rp, &tbsLen);
             SSF_ASSERT(tbsLen > 0u);
             SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
-            SSF_ASSERT(SSFECDSASign(_UT_CURVE, rootPriv, _UT_PRIV_LEN,
-                       tbsHash, 32, sig, sizeof(sig), &sigLen) == true);
+            SSF_ASSERT(_SSFECDSAUTSign(_UT_CURVE, rootPriv, _UT_PRIV_LEN, tbsHash, 32, sig,
+                                       sizeof(sig), &sigLen) == true);
             (void)SSFX509EncodeCert(rootCert, sizeof(rootCert), &rp,
                                              sig, (uint32_t)sigLen, &rootCertLen);
             SSF_ASSERT(rootCertLen > 0u);
@@ -2537,8 +2544,8 @@ void SSFX509UnitTest(void)
             (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &ip, &tbsLen);
             SSF_ASSERT(tbsLen > 0u);
             SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
-            SSF_ASSERT(SSFECDSASign(_UT_CURVE, rootPriv, _UT_PRIV_LEN,
-                       tbsHash, 32, sig, sizeof(sig), &sigLen) == true);
+            SSF_ASSERT(_SSFECDSAUTSign(_UT_CURVE, rootPriv, _UT_PRIV_LEN, tbsHash, 32, sig,
+                                       sizeof(sig), &sigLen) == true);
             (void)SSFX509EncodeCert(intCert, sizeof(intCert), &ip,
                                             sig, (uint32_t)sigLen, &intCertLen);
             SSF_ASSERT(intCertLen > 0u);
@@ -2620,8 +2627,8 @@ void SSFX509UnitTest(void)
             (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &rp, &tbsLen);
             SSF_ASSERT(tbsLen > 0u);
             SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
-            SSF_ASSERT(SSFECDSASign(_UT_CURVE, rootPriv, _UT_PRIV_LEN,
-                       tbsHash, 32, sig, sizeof(sig), &sigLen) == true);
+            SSF_ASSERT(_SSFECDSAUTSign(_UT_CURVE, rootPriv, _UT_PRIV_LEN, tbsHash, 32, sig,
+                                       sizeof(sig), &sigLen) == true);
             (void)SSFX509EncodeCert(rootCert, sizeof(rootCert), &rp,
                                              sig, (uint32_t)sigLen, &rootCertLen);
             SSF_ASSERT(rootCertLen > 0u);
@@ -2663,8 +2670,8 @@ void SSFX509UnitTest(void)
             (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &ip, &tbsLen);
             SSF_ASSERT(tbsLen > 0u);
             SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
-            SSF_ASSERT(SSFECDSASign(_UT_CURVE, rootPriv, _UT_PRIV_LEN,
-                       tbsHash, 32, sig, sizeof(sig), &sigLen) == true);
+            SSF_ASSERT(_SSFECDSAUTSign(_UT_CURVE, rootPriv, _UT_PRIV_LEN, tbsHash, 32, sig,
+                                       sizeof(sig), &sigLen) == true);
             (void)SSFX509EncodeCert(intCert, sizeof(intCert), &ip,
                                             sig, (uint32_t)sigLen, &intCertLen);
             SSF_ASSERT(intCertLen > 0u);
@@ -3427,8 +3434,8 @@ void SSFX509UnitTest(void)
         (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p, &tbsLen);
         SSF_ASSERT(tbsLen > 0u);
         SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
-        SSF_ASSERT(SSFECDSASign(_UT_CURVE, privKey, _UT_PRIV_LEN, tbsHash, 32,
-                                sig, sizeof(sig), &sigLen) == true);
+        SSF_ASSERT(_SSFECDSAUTSign(_UT_CURVE, privKey, _UT_PRIV_LEN, tbsHash, 32, sig, sizeof(sig),
+                                   &sigLen) == true);
         (void)SSFX509EncodeCert(certDer, sizeof(certDer), &p, sig, (uint32_t)sigLen, &certDerLen);
         SSF_ASSERT(certDerLen > 0u);
 
@@ -3518,8 +3525,8 @@ void SSFX509UnitTest(void)
         (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &cp, &tbsLen);
         SSF_ASSERT(tbsLen > 0u);
         SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
-        SSF_ASSERT(SSFECDSASign(_UT_CURVE, caPrivKey, _UT_PRIV_LEN, tbsHash, 32,
-                                sig, sizeof(sig), &sigLen) == true);
+        SSF_ASSERT(_SSFECDSAUTSign(_UT_CURVE, caPrivKey, _UT_PRIV_LEN, tbsHash, 32, sig,
+                                   sizeof(sig), &sigLen) == true);
         (void)SSFX509EncodeCert(caCertDer, sizeof(caCertDer), &cp, sig, (uint32_t)sigLen,
          &caCertDerLen);
         SSF_ASSERT(caCertDerLen > 0u);
@@ -3563,8 +3570,8 @@ void SSFX509UnitTest(void)
         (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &lp, &tbsLen);
         SSF_ASSERT(tbsLen > 0u);
         SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
-        SSF_ASSERT(SSFECDSASign(_UT_CURVE, caPrivKey, _UT_PRIV_LEN, tbsHash, 32,
-                                sig, sizeof(sig), &sigLen) == true);
+        SSF_ASSERT(_SSFECDSAUTSign(_UT_CURVE, caPrivKey, _UT_PRIV_LEN, tbsHash, 32, sig,
+                                   sizeof(sig), &sigLen) == true);
         (void)SSFX509EncodeCert(leafCertDer, sizeof(leafCertDer), &lp,
                                            sig, (uint32_t)sigLen, &leafCertDerLen);
         SSF_ASSERT(leafCertDerLen > 0u);
@@ -3786,8 +3793,8 @@ void SSFX509UnitTest(void)
         (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p, &tbsLen);
         SSF_ASSERT(tbsLen > 0u);
         SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
-        SSF_ASSERT(SSFECDSASign(_UT_CURVE, privKey, _UT_PRIV_LEN, tbsHash, 32,
-                                sig, sizeof(sig), &sigLen) == true);
+        SSF_ASSERT(_SSFECDSAUTSign(_UT_CURVE, privKey, _UT_PRIV_LEN, tbsHash, 32, sig, sizeof(sig),
+                                   &sigLen) == true);
         (void)SSFX509EncodeCert(certDer, sizeof(certDer), &p, sig, (uint32_t)sigLen, &certDerLen);
         SSF_ASSERT(certDerLen > 0u);
 
@@ -3889,8 +3896,8 @@ void SSFX509UnitTest(void)
             (void)SSFX509EncodeTBS(caTbs, sizeof(caTbs), &cp, &caTbsLen);
             SSF_ASSERT(caTbsLen > 0u);
             SSFSHA256(caTbs, caTbsLen, caTbsHash, sizeof(caTbsHash));
-            SSF_ASSERT(SSFECDSASign(_UT_CURVE, caPrivKey, _UT_PRIV_LEN,
-                                     caTbsHash, 32, caSig, sizeof(caSig), &caSigLen) == true);
+            SSF_ASSERT(_SSFECDSAUTSign(_UT_CURVE, caPrivKey, _UT_PRIV_LEN, caTbsHash, 32, caSig,
+                                       sizeof(caSig), &caSigLen) == true);
             (void)SSFX509EncodeCert(caDer, sizeof(caDer), &cp, caSig, (uint32_t)caSigLen,
              &caDerLen);
             SSF_ASSERT(caDerLen > 0u);
@@ -3944,9 +3951,9 @@ void SSFX509UnitTest(void)
             (void)SSFX509EncodeTBS(leafTbs, sizeof(leafTbs), &lp, &leafTbsLen); \
             SSF_ASSERT(leafTbsLen > 0u); \
             SSFSHA256(leafTbs, leafTbsLen, leafTbsHash, sizeof(leafTbsHash)); \
-            SSF_ASSERT(SSFECDSASign(_UT_CURVE, caPrivKey, _UT_PRIV_LEN, \
-                                     leafTbsHash, 32, leafSig, sizeof(leafSig), \
-                                     &leafSigLen) == true); \
+            SSF_ASSERT(_SSFECDSAUTSign(_UT_CURVE, caPrivKey, _UT_PRIV_LEN, \
+                                        leafTbsHash, 32, leafSig, sizeof(leafSig), \
+                                        &leafSigLen) == true); \
             (void)SSFX509EncodeCert((_leafDer), SSF_X509_CONFIG_MAX_CERT_SIZE, &lp, \
                                                leafSig, (uint32_t)leafSigLen, &(_leafDerLen)); \
             SSF_ASSERT((_leafDerLen) > 0u); \
@@ -4153,8 +4160,8 @@ void SSFX509UnitTest(void)
             (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p, &tbsLen); \
             SSF_ASSERT(tbsLen > 0u); \
             SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash)); \
-            SSF_ASSERT(SSFECDSASign(_UT_CURVE, privKey, _UT_PRIV_LEN, tbsHash, 32, \
-                                     sig, sizeof(sig), &sigLen) == true); \
+            SSF_ASSERT(_SSFECDSAUTSign(_UT_CURVE, privKey, _UT_PRIV_LEN, tbsHash, 32, \
+                                        sig, sizeof(sig), &sigLen) == true); \
             (void)SSFX509EncodeCert(certDer, sizeof(certDer), &p, sig, \
                                             (uint32_t)sigLen, &certDerLen); \
             SSF_ASSERT(certDerLen > 0u); \
@@ -4243,8 +4250,8 @@ void SSFX509UnitTest(void)
             (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p, &tbsLen);
             SSF_ASSERT(tbsLen > 0u);
             SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
-            SSF_ASSERT(SSFECDSASign(_UT_CURVE, privKey, _UT_PRIV_LEN, tbsHash, 32,
-                                     sig, sizeof(sig), &sigLen) == true);
+            SSF_ASSERT(_SSFECDSAUTSign(_UT_CURVE, privKey, _UT_PRIV_LEN, tbsHash, 32, sig,
+                                       sizeof(sig), &sigLen) == true);
             (void)SSFX509EncodeCert(certDer, sizeof(certDer), &p, sig, (uint32_t)sigLen,
              &certDerLen);
             SSF_ASSERT(certDerLen > 0u);
@@ -4298,8 +4305,8 @@ void SSFX509UnitTest(void)
             (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p, &tbsLen); \
             SSF_ASSERT(tbsLen > 0u); \
             SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash)); \
-            SSF_ASSERT(SSFECDSASign(_UT_CURVE, privKey, _UT_PRIV_LEN, tbsHash, 32, \
-                                     sig, sizeof(sig), &sigLen) == true); \
+            SSF_ASSERT(_SSFECDSAUTSign(_UT_CURVE, privKey, _UT_PRIV_LEN, tbsHash, 32, \
+                                        sig, sizeof(sig), &sigLen) == true); \
             (void)SSFX509EncodeCert(certDer, sizeof(certDer), &p, sig, \
                                             (uint32_t)sigLen, &certDerLen); \
             SSF_ASSERT(certDerLen > 0u); \
@@ -4437,8 +4444,8 @@ void SSFX509UnitTest(void)
             (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p, &tbsLen); \
             SSF_ASSERT(tbsLen > 0u); \
             SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash)); \
-            SSF_ASSERT(SSFECDSASign(_UT_CURVE, privKey, _UT_PRIV_LEN, tbsHash, 32, \
-                                     sig, sizeof(sig), &sigLen) == true); \
+            SSF_ASSERT(_SSFECDSAUTSign(_UT_CURVE, privKey, _UT_PRIV_LEN, tbsHash, 32, \
+                                        sig, sizeof(sig), &sigLen) == true); \
             (void)SSFX509EncodeCert(certDer, sizeof(certDer), &p, sig, \
                                             (uint32_t)sigLen, &certDerLen); \
             SSF_ASSERT(certDerLen > 0u); \
@@ -4544,8 +4551,8 @@ void SSFX509UnitTest(void)
             (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p, &tbsLen); \
             SSF_ASSERT(tbsLen > 0u); \
             SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash)); \
-            SSF_ASSERT(SSFECDSASign(_UT_CURVE, privKey, _UT_PRIV_LEN, tbsHash, 32, \
-                                     sig, sizeof(sig), &sigLen) == true); \
+            SSF_ASSERT(_SSFECDSAUTSign(_UT_CURVE, privKey, _UT_PRIV_LEN, tbsHash, 32, \
+                                        sig, sizeof(sig), &sigLen) == true); \
             (void)SSFX509EncodeCert(certDer, sizeof(certDer), &p, sig, \
                                             (uint32_t)sigLen, &certDerLen); \
             SSF_ASSERT(certDerLen > 0u); \
@@ -6366,8 +6373,8 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(_utFind(tbsDer, tbsLen, rdnCN, sizeof(rdnCN), &at) == true);
         memcpy(&tbsDer[at], rdnEmail, sizeof(rdnEmail));
         SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
-        SSF_ASSERT(SSFECDSASign(_UT_CURVE, caPriv, _UT_PRIV_LEN, tbsHash, sizeof(tbsHash), sig,
-                                sizeof(sig), &sigLen) == true);
+        SSF_ASSERT(_SSFECDSAUTSign(_UT_CURVE, caPriv, _UT_PRIV_LEN, tbsHash, sizeof(tbsHash), sig,
+                                   sizeof(sig), &sigLen) == true);
         SSF_ASSERT(SSFASN1EncOIDRaw(tbsHash, sizeof(tbsHash), ecdsaSha256Oid,
                                     sizeof(ecdsaSha256Oid), &w) == true);
         SSF_ASSERT(SSFASN1EncWrap(algId, sizeof(algId), SSF_ASN1_TAG_SEQUENCE, tbsHash, w,
@@ -8522,8 +8529,8 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(n != 0u);
         SSF_ASSERT(SSFX509Parse(certDer, n, &c) == true);
         SSFSHA256(data, sizeof(data), hash, SSF_SHA2_256_BYTE_SIZE);
-        SSF_ASSERT(SSFECDSASign(_UT_CURVE, ecPriv, _UT_PRIV_LEN, hash, SSF_SHA2_256_BYTE_SIZE, sig,
-                                sizeof(sig), &sigLen) == true);
+        SSF_ASSERT(_SSFECDSAUTSign(_UT_CURVE, ecPriv, _UT_PRIV_LEN, hash, SSF_SHA2_256_BYTE_SIZE,
+                                   sig, sizeof(sig), &sigLen) == true);
         SSF_ASSERT(SSFX509VerifySignature(&c, _utSigAlgOid, sizeof(_utSigAlgOid), NULL, 0u, NULL,
                                           0u, data, sizeof(data), sig, (uint32_t)sigLen) == true);
         SSF_ASSERT(SSFX509VerifySignature(&c, _utSigAlgOid, sizeof(_utSigAlgOid), NULL, 0u,
@@ -8566,8 +8573,9 @@ void SSFX509UnitTest(void)
                                               NULL, 0u, data, sizeof(data), sig,
                                               (uint32_t)sigLen) == false);
             SSFSHA384(data, sizeof(data), hash, SSF_SHA2_384_BYTE_SIZE);
-            SSF_ASSERT(SSFECDSASign(_UT_CURVE, ecPriv, _UT_PRIV_LEN, hash, SSF_SHA2_384_BYTE_SIZE,
-                                    sig384, sizeof(sig384), &sig384Len) == true);
+            SSF_ASSERT(_SSFECDSAUTSign(_UT_CURVE, ecPriv, _UT_PRIV_LEN, hash,
+                                       SSF_SHA2_384_BYTE_SIZE, sig384, sizeof(sig384),
+                                       &sig384Len) == true);
             SSF_ASSERT(SSFX509VerifySignature(&c, ecdsaSha384Oid, sizeof(ecdsaSha384Oid), NULL, 0u,
                                               NULL, 0u, data, sizeof(data), sig384,
                                               (uint32_t)sig384Len) == true);
@@ -9223,8 +9231,8 @@ void SSFX509UnitTest(void)
         p.sanIPAddrs = ipSans;
         SSF_ASSERT(SSFX509EncodeTBS(tbs, sizeof(tbs), &p, &tbsLen) == true);
         SSFSHA256(tbs, tbsLen, hash, sizeof(hash));
-        SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, priv, 32u, hash, sizeof(hash), sig,
-                                sizeof(sig), &sigLen) == true);
+        SSF_ASSERT(_SSFECDSAUTSign(SSF_EC_CURVE_P256, priv, 32u, hash, sizeof(hash), sig,
+                                   sizeof(sig), &sigLen) == true);
         SSF_ASSERT(SSFX509EncodeCert(der, sizeof(der), &p, sig, (uint32_t)sigLen, &derLen) == true);
         ch[0] = der;
         chLen[0] = derLen;

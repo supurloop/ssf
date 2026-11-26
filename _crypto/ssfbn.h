@@ -305,6 +305,12 @@ extern void (*_SSFBNScrubTestHook)(const void *buf, size_t len);
 /* Test-only: the 16-bit-step remainder 32-bit targets' trial division uses (d < 2^16). */
 uint32_t _SSFBNModUint16Test(const SSFBN_t *a, uint32_t d);
 
+/* Test-only: SSFBNGenPrime's trial division; true if no odd prime 3..1613 divides p. */
+bool _SSFBNTrialDivPassTest(const SSFBN_t *p);
+
+/* Test-only count of SSFBNGenPrime candidates rejected by trial division. */
+extern uint32_t _SSFBNTrialDivRejects;
+
 /* Test-only counters: Karatsuba propagation iterations, exporter scans. */
 extern uint32_t _SSFBNKaratsubaPropIters;
 extern uint32_t _SSFBNToBytesScans;

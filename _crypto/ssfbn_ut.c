@@ -4792,6 +4792,76 @@ void SSFBNUnitTest(void)
         }
     }
 
+    /* ---- BN-16: trial division walks exactly the odd primes 3..1613 ---- */
+    {
+        /* Odd primes by a sieve here, independent of ssfbn.c; 2^31 - 1 is prime, above 1613 */
+        static uint8_t composite[1622];
+        static SSFBNLimb_t tdL[8];
+        static SSFBNLimb_t tmpL[8];
+        SSFBN_t td = { tdL, 0u, 8u };
+        SSFBN_t tmp = { tmpL, 0u, 8u };
+        const uint32_t big = 0x7FFFFFFFu;
+        uint32_t q;
+        uint32_t m;
+        uint16_t nOdd = 0u;
+
+        memset(composite, 0, sizeof(composite));
+        for (q = 2u; q < sizeof(composite); q++)
+        {
+            if (composite[q] != 0u) continue;
+            for (m = q * q; m < sizeof(composite); m += q) composite[m] = 1u;
+        }
+        for (q = 3u; q < sizeof(composite); q += 2u)
+        {
+            if (composite[q] != 0u) continue;
+            /* q * (2^31 - 1)^3 (4 limbs): its only factor up to 1613 is q */
+            SSFBNSetUint32(&td, q, 1u);
+            SSFBNMulUint32(&tmp, &td, big);
+            SSFBNMulUint32(&td, &tmp, big);
+            SSFBNMulUint32(&tmp, &td, big);
+            /* Rejected for every odd prime up to 1613, passed for the primes just above */
+            SSF_ASSERT(_SSFBNTrialDivPassTest(&tmp) == (q > 1613u));
+            if (q <= 1613u) nOdd++;
+        }
+        SSF_ASSERT(nOdd == 254u);
+
+        /* No factor up to 1613: (2^31 - 1)^4 and 1619 * 1621 * (2^31 - 1)^2 pass */
+        SSFBNSetUint32(&td, big, 1u);
+        SSFBNMulUint32(&tmp, &td, big);
+        SSFBNMulUint32(&td, &tmp, big);
+        SSFBNMulUint32(&tmp, &td, big);
+        SSF_ASSERT(_SSFBNTrialDivPassTest(&tmp) == true);
+        SSFBNSetUint32(&td, 1619u * 1621u, 1u);
+        SSFBNMulUint32(&tmp, &td, big);
+        SSFBNMulUint32(&td, &tmp, big);
+        SSF_ASSERT(_SSFBNTrialDivPassTest(&td) == true);
+
+        /* One-limb odd values: 1, 1619^2 pass; 3 * 5 * 7 * 1613 and 1613^2 do not */
+        SSFBNSetUint32(&td, 1u, 1u);
+        SSF_ASSERT(_SSFBNTrialDivPassTest(&td) == true);
+        SSFBNSetUint32(&td, 1619u * 1619u, 1u);
+        SSF_ASSERT(_SSFBNTrialDivPassTest(&td) == true);
+        SSFBNSetUint32(&td, 3u * 5u * 7u * 1613u, 1u);
+        SSF_ASSERT(_SSFBNTrialDivPassTest(&td) == false);
+        SSFBNSetUint32(&td, 1613u * 1613u, 1u);
+        SSF_ASSERT(_SSFBNTrialDivPassTest(&td) == false);
+
+        /* SSFBNGenPrime screens by trial division: with a fixed seed, about 85% of odd       */
+        /* candidates have a factor up to 1613, so some are rejected before Miller-Rabin.      */
+        {
+            uint8_t tdSeed[SSF_PRNG_ENTROPY_SIZE];
+            SSFPRNGContext_t tdPrng;
+            SSFBN_DEFINE(tdP, SSF_BN_MAX_MOD_LIMBS);
+
+            memset(tdSeed, 0x16, sizeof(tdSeed));
+            SSFPRNGInitContext(&tdPrng, tdSeed, sizeof(tdSeed));
+            _SSFBNTrialDivRejects = 0u;
+            SSF_ASSERT(SSFBNGenPrime(&tdP, 256u, 5u, &tdPrng) == true);
+            SSF_ASSERT(_SSFBNTrialDivRejects > 0u);
+            SSF_ASSERT(_SSFBNTrialDivPassTest(&tdP) == true);
+        }
+    }
+
     /* ---- BN-13: 32-bit targets' trial-division remainder, every d < 2^16 ---- */
     {
         static SSFBNLimb_t tdL[SSF_BN_MAX_LIMBS];

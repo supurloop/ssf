@@ -51,11 +51,15 @@
 #if (SSF_BN_MODEXP_WIN_K < 1u) || (SSF_BN_MODEXP_WIN_K > 8u)
 #error SSF_BN_MODEXP_WIN_K must be 1 to 8 (a 2^k-entry table on the stack)
 #endif
-#define SSF_BN_NUM_SMALL_PRIMES    (sizeof(_ssfBNSmallPrimes) / sizeof(_ssfBNSmallPrimes[0]))
+#define SSF_BN_NUM_SMALL_PRIMES \
+    (sizeof(_ssfBNSmallPrimeHalfGaps) / sizeof(_ssfBNSmallPrimeHalfGaps[0]))
 
 #if SSF_CONFIG_BN_UNIT_TEST == 1
 /* Test-only count of SSFBNMod calls. */
 uint32_t _SSFBNModCallCount = 0u;
+
+/* Test-only count of SSFBNGenPrime candidates rejected by trial division. */
+uint32_t _SSFBNTrialDivRejects = 0u;
 
 /* Test-only hook fired after each secret local is wiped; NULL in production. */
 void (*_SSFBNScrubTestHook)(const void *buf, size_t len) = NULL;
@@ -121,25 +125,21 @@ const SSFBNLimb_t SSF_BN_NIST_P384_LIMBS[12] =
 const SSFBN_t SSF_BN_NIST_P384 = { (SSFBNLimb_t *)SSF_BN_NIST_P384_LIMBS, 12, 12 };
 #endif /* SSF_BN_CONFIG_MAX_BITS >= 768 */
 
-/* First 256 primes for trial division during prime-candidate screening (up to 1613). */
-static const uint16_t _ssfBNSmallPrimes[] = {
-       2,    3,    5,    7,   11,   13,   17,   19,   23,   29,   31,   37,   41,   43,   47,
-      53,   59,   61,   67,   71,   73,   79,   83,   89,   97,  101,  103,  107,  109,  113,
-     127,  131,  137,  139,  149,  151,  157,  163,  167,  173,  179,  181,  191,  193,  197,
-     199,  211,  223,  227,  229,  233,  239,  241,  251,  257,  263,  269,  271,  277,  281,
-     283,  293,  307,  311,  313,  317,  331,  337,  347,  349,  353,  359,  367,  373,  379,
-     383,  389,  397,  401,  409,  419,  421,  431,  433,  439,  443,  449,  457,  461,  463,
-     467,  479,  487,  491,  499,  503,  509,  521,  523,  541,  547,  557,  563,  569,  571,
-     577,  587,  593,  599,  601,  607,  613,  617,  619,  631,  641,  643,  647,  653,  659,
-     661,  673,  677,  683,  691,  701,  709,  719,  727,  733,  739,  743,  751,  757,  761,
-     769,  773,  787,  797,  809,  811,  821,  823,  827,  829,  839,  853,  857,  859,  863,
-     877,  881,  883,  887,  907,  911,  919,  929,  937,  941,  947,  953,  967,  971,  977,
-     983,  991,  997, 1009, 1013, 1019, 1021, 1031, 1033, 1039, 1049, 1051, 1061, 1063, 1069,
-    1087, 1091, 1093, 1097, 1103, 1109, 1117, 1123, 1129, 1151, 1153, 1163, 1171, 1181, 1187,
-    1193, 1201, 1213, 1217, 1223, 1229, 1231, 1237, 1249, 1259, 1277, 1279, 1283, 1289, 1291,
-    1297, 1301, 1303, 1307, 1319, 1321, 1327, 1361, 1367, 1373, 1381, 1399, 1409, 1423, 1427,
-    1429, 1433, 1439, 1447, 1451, 1453, 1459, 1471, 1481, 1483, 1487, 1489, 1493, 1499, 1511,
-    1523, 1531, 1543, 1549, 1553, 1559, 1567, 1571, 1579, 1583, 1597, 1601, 1607, 1609, 1613
+/* The 254 odd primes 3 to 1613 for trial division during prime-candidate screening, each    */
+/* stored as half its gap from the previous one (from 1): the largest gap below 1613 is 34,  */
+/* so every entry fits a byte, half the size of a uint16_t table (OPTIMIZE BN-16).           */
+static const uint8_t _ssfBNSmallPrimeHalfGaps[] = {
+     1,  1,  1,  2,  1,  2,  1,  2,  3,  1,  3,  2,  1,  2,  3,  3,  1,  3,  2,  1,  3,  2,  3,  4,
+     2,  1,  2,  1,  2,  7,  2,  3,  1,  5,  1,  3,  3,  2,  3,  3,  1,  5,  1,  2,  1,  6,  6,  2,
+     1,  2,  3,  1,  5,  3,  3,  3,  1,  3,  2,  1,  5,  7,  2,  1,  2,  7,  3,  5,  1,  2,  3,  4,
+     3,  3,  2,  3,  4,  2,  4,  5,  1,  5,  1,  3,  2,  3,  4,  2,  1,  2,  6,  4,  2,  4,  2,  3,
+     6,  1,  9,  3,  5,  3,  3,  1,  3,  5,  3,  3,  1,  3,  3,  2,  1,  6,  5,  1,  2,  3,  3,  1,
+     6,  2,  3,  4,  5,  4,  5,  4,  3,  3,  2,  4,  3,  2,  4,  2,  7,  5,  6,  1,  5,  1,  2,  1,
+     5,  7,  2,  1,  2,  7,  2,  1,  2, 10,  2,  4,  5,  4,  2,  3,  3,  7,  2,  3,  3,  4,  3,  6,
+     2,  3,  1,  5,  1,  3,  5,  1,  5,  1,  3,  9,  2,  1,  2,  3,  3,  4,  3,  3, 11,  1,  5,  4,
+     5,  3,  3,  4,  6,  2,  3,  3,  1,  3,  6,  5,  9,  1,  2,  3,  1,  3,  2,  1,  2,  6,  1,  3,
+    17,  3,  3,  4,  9,  5,  7,  2,  1,  2,  3,  4,  2,  1,  3,  6,  5,  1,  2,  1,  2,  3,  6,  6,
+     4,  6,  3,  2,  3,  4,  2,  4,  2,  7,  2,  3,  1,  2
 };
 
 /* --------------------------------------------------------------------------------------------- */
@@ -3366,6 +3366,38 @@ uint32_t _SSFBNModUint16Test(const SSFBN_t *a, uint32_t d)
 #endif /* SSF_CONFIG_BN_UNIT_TEST */
 
 /* --------------------------------------------------------------------------------------------- */
+/* Returns true if no odd prime 3..1613 divides p, else false (SSFBNGenPrime's trial division).  */
+/* Variable time: stops at the first divisor found.                                              */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFBNTrialDivPass(const SSFBN_t *p)
+{
+    uint32_t d = 1u;
+    uint16_t i;
+
+    for (i = 0; i < SSF_BN_NUM_SMALL_PRIMES; i++)
+    {
+        /* Does the next small prime divide p? */
+        d += 2u * (uint32_t)_ssfBNSmallPrimeHalfGaps[i];
+        if (_SSF_BN_TRIAL_MOD(p, d) == 0u)
+        {
+            /* Yes, fail */
+            return false;
+        }
+    }
+    return true;
+}
+
+#if SSF_CONFIG_BN_UNIT_TEST == 1
+/* --------------------------------------------------------------------------------------------- */
+/* Test-only entry to SSFBNGenPrime's trial division.                                            */
+/* --------------------------------------------------------------------------------------------- */
+bool _SSFBNTrialDivPassTest(const SSFBN_t *p)
+{
+    return _SSFBNTrialDivPass(p);
+}
+#endif /* SSF_CONFIG_BN_UNIT_TEST */
+
+/* --------------------------------------------------------------------------------------------- */
 /* Fills numLimbs of a with random bytes from prng; sets a->len = numLimbs.                      */
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNRandom(SSFBN_t *a, uint16_t numLimbs, SSFPRNGContext_t *prng)
@@ -3625,9 +3657,6 @@ bool SSFBNGenPrime(SSFBN_t *p, uint16_t bitLen, uint16_t rounds, SSFPRNGContext_
 
     for (attempts = 0; attempts < 50000u; attempts++)
     {
-        uint16_t i;
-        bool trialPass;
-
         /* Draw the candidate straight into p, keep bitLen bits, force the top two and the low */
         SSFBNRandom(p, limbs, prng);
         if ((bitLen % SSF_BN_LIMB_BITS) != 0u)
@@ -3639,26 +3668,17 @@ bool SSFBNGenPrime(SSFBN_t *p, uint16_t bitLen, uint16_t rounds, SSFPRNGContext_
         p->limbs[nextBit / SSF_BN_LIMB_BITS] |= (SSFBNLimb_t)1u << (nextBit % SSF_BN_LIMB_BITS);
         p->limbs[0] |= 1u;
 
-        /* Trial-divide against the small-prime table. */
-        trialPass = true;
-        for (i = 0; i < SSF_BN_NUM_SMALL_PRIMES; i++)
+        /* Trial-divide by the odd primes up to 1613 (p is far larger than any of them) */
+        if (!_SSFBNTrialDivPass(p))
         {
-            /* Does this small prime divide p? */
-            if (_SSF_BN_TRIAL_MOD(p, _ssfBNSmallPrimes[i]) == 0u)
-            {
-                /* Yes, reject (if p equals the small prime it's prime but way too small). */
-                trialPass = false;
-                break;
-            }
-        }
-        /* Did trial division pass? */
-        if (trialPass == false)
-        {
-            /* No, next candidate. */
+            /* A small prime divides p, next candidate */
+#if SSF_CONFIG_BN_UNIT_TEST == 1
+            _SSFBNTrialDivRejects++;
+#endif
             continue;
         }
 
-        /* Yes, is the candidate a probable prime by Miller-Rabin? */
+        /* Is the candidate a probable prime by Miller-Rabin? */
         if (SSFBNIsProbablePrime(p, rounds, prng))
         {
             /* Yes, accept */

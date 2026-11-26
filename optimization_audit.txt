@@ -243,6 +243,37 @@ SAFE-06  ssfrsa: a private key with an even p or q asserts in signing           
              existing, unchanged). ssfpkey tests pass with the new ssfrsa. Docs: ssfrsa.md
              (odd p, q; sign entry points return false).
 
+SAFE-07  ssftlsc: the P-384 ClientHello1 key overflows ephemeralPrivKey by 32 bytes     [V]
+  Location : _net/ssftlsc.h:298 (uint8_t ephemeralPrivKey[48]); _net/ssftlsc.c:1555
+             (memcpy(&ephemeralPrivKey[32], ecPriv, 48)) and :1226 (the ECDH reads 48 bytes
+             from [32])
+  Issue    : ClientHello1 keeps the X25519 key at [0] and the P-384 key at [32], 80 bytes
+             in a 48-byte array: the key's last 32 bytes are written into the next field,
+             savedHandshakeSecret (x86-64 offsets 730 / 778). P-384 key exchange works only
+             because nothing writes that field between key generation and the ECDH, and the
+             key schedule then overwrites it (every failure path wipes it), so no key bytes
+             are left behind; but it is an out-of-bounds write that a layout change breaks
+             (TLSC-02's ephemeralPrivKey / savedHandshakeSecret union would have spilled
+             the key into the HRR fields written while the ServerHello is processed). GCC
+             (-O2 -Warray-bounds=2 -Wstringop-overflow=4) and ASan do not see it: the write
+             stays inside the session struct. An HRR key is stored at [0], and an HRR to
+             P-384 is refused (P-384 always has a share in ClientHello1).
+  Fix      : uint8_t ephemeralPrivKey[32u + 48u].
+  Found    : 2026-11-25, while prototyping TLSC-02.
+  Status   : DONE (2026-11-25): as specified. Session +32 B (M4 26,888 -> 26,920; x86-64
+             27,080 -> 27,112); ssftlsc code -4 B (24,725 -> 24,721). The existing wipes
+             use sizeof, so all 80 bytes are wiped on every path. Test: after ClientHello1,
+             ephemeralPrivKey holds 32 + 48 bytes and the public keys computed from [0]
+             (X25519) and [32..80) (P-384) equal the key_share entries of the ClientHello
+             sent (read with _SSFTLSCUTRecvRecord: a 512-byte buffer or one recv() can
+             truncate it); red on HEAD at the size check (the key check alone passes on
+             HEAD, the spilled bytes being contiguous). SSFTLSCUnitTest passes, normal and
+             ASan; tools/tlsc-interop 158 of 158, normal and ASan. Mutants under ASan: 5 of
+             6 killed by the unit tests (48- and 79-byte array, P-384 key at [0], only 32
+             bytes copied, wipe of 48 bytes); the 6th (ECDH reading P-384 from [16])
+             survives them, since no unit test runs a P-384 exchange with the client's own
+             ClientHello1 key, and is killed by interop (40 P-384 rows fail).
+
 =====================================================================================
 ssftlsc  (TLS 1.3 client)          baseline: code 13,611 B; sizeof(SSFTLSCSession_t) 43,264 B
 =====================================================================================
@@ -285,6 +316,12 @@ TLSC-02  STRUCT  -264 B per session (26,824 -> 26,560 on top of H)              
              handshake secret.
   Risk     : medium. Every secret is still overwritten or zeroed at end of life; the
              scrub-hook unit tests need the new names. Code not prototyped.
+  Note     : (2026-11-25) prototyped on HEAD a0c8a53: needs SAFE-07 first (the union would
+             move the P-384 spill into live fields). With it: M4 session 26,920 -> 26,624
+             (-296; -264 vs before SAFE-07), cryptoWork 384 -> 184, code -24 B; the
+             ephemeral wipe must move before the save, the serverHsTrafficSecret wipe in
+             _EnterAppSendKeys must go (it would erase the app secret), and two unit-test
+             assertions change (ut:3939, ut:4028).
   Status   : OPEN
 
 TLSC-03  CODE  -185 B                                                              M

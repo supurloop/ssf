@@ -110,7 +110,25 @@ SAFE-04  ssfx509: SSF_X509_CONFIG_MAX_CHAIN_DEPTH cannot be overridden with -D
   Issue    : config hygiene, not a bug: the option cannot be set from the build line,
              unlike the other SSF options.
   Fix      : wrap it in #ifndef.
-  Status   : OPEN
+  Correction (2026-11-25): "unlike the other SSF options" is wrong: 18 of the 88 config
+             options in _opt/ are #ifndef-guarded (in this header only RSA_MIN_BITS). Also
+             unbounded: chain lengths and path indexes are uint8_t, and on HEAD a depth of
+             256 compiled with warnings only, the "no issuer" sentinel truncating to 0 (the
+             leaf's index).
+  Status   : DONE (2026-11-25): option B. #ifndef guard in ssfx509_opt.h, and ssfx509.c
+             #errors unless 1 <= depth <= 255 (next to the RSA_MIN_BITS check); ssfx509.md
+             row and header comment updated. Build checks, red on HEAD (9 of 9 fail), green
+             after: -D...=10u is applied (object holds 10, no "redefined" warning); 0, 256
+             and 1000 hit the new #error; 1 builds with -Werror; 255 builds ssfx509 / ssfcms
+             / ssftlsc with project warning flags, ssfx509 giving one harmless -Wtype-limits
+             ("chainLen <= 255 always true" in the REQUIRE). x509, CMS and TLS client unit
+             tests pass at depths 5 (CMS minimum), 10 (the x509 test's maximum) and 6, normal
+             and ASan. Mutants: 8 of 8 killed (guard removed, #ifdef, bound 256 / 254, lower
+             bound 0 / 2, && for ||, check disabled). Default build (M4 -Os): ssfcms and
+             ssftlsc .text byte-identical, ssfx509 14,436 B unchanged in size (237 bytes
+             differ: HEAD with 3 blank lines at the same spot compiles to identical .text, so
+             they are SSF_REQUIRE line numbers). No run-time or stack change unless the depth
+             is set.
 
 SAFE-05  ssfrsa: the 8 KB stack scrub does not reach the deepest freed frames      [V]
   Location : _crypto/ssfrsa.c:93 (_SSFRSAStackScrub, volatile uint8_t scratch[8192]);

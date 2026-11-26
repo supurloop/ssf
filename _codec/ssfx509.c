@@ -42,6 +42,9 @@
 #if SSF_X509_CONFIG_RSA_MIN_BITS < 1024u
 #error SSF_X509_CONFIG_RSA_MIN_BITS must be >= 1024.
 #endif
+#if (SSF_X509_CONFIG_MAX_CHAIN_DEPTH < 1u) || (SSF_X509_CONFIG_MAX_CHAIN_DEPTH > 255u)
+#error SSF_X509_CONFIG_MAX_CHAIN_DEPTH must be 1 to 255 (chain lengths are uint8_t).
+#endif
 
 /* RSA signature schemes this build verifies (each also needs an RSA key size enabled) */
 #if (SSF_RSA_ANY_ENABLED == 1) && (SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1)

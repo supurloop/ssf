@@ -173,12 +173,16 @@ build $builddir/_osal/ssflptask.o:    cc_obj _osal/ssflptask.c
 build $builddir/_osal/ssflptask_ut.o: cc_obj _osal/ssflptask_ut.c
 
 # _net
+build $builddir/_net/ssfhttphdr.o:    cc_obj _net/ssfhttphdr.c
+build $builddir/_net/ssfhttphdr_ut.o: cc_obj _net/ssfhttphdr_ut.c
 build $builddir/_net/ssfmqttc.o:      cc_obj _net/ssfmqttc.c
 build $builddir/_net/ssfmqttc_ut.o:   cc_obj _net/ssfmqttc_ut.c
 build $builddir/_net/ssfmqttpkt.o:    cc_obj _net/ssfmqttpkt.c
 build $builddir/_net/ssfmqttpkt_ut.o: cc_obj _net/ssfmqttpkt_ut.c
 build $builddir/_net/ssfnetsock.o:    cc_obj _net/ssfnetsock.c
 build $builddir/_net/ssfnetsock_ut.o: cc_obj _net/ssfnetsock_ut.c
+build $builddir/_net/ssfnetws.o:      cc_obj _net/ssfnetws.c
+build $builddir/_net/ssfnetws_ut.o:   cc_obj _net/ssfnetws_ut.c
 build $builddir/_net/ssftlsc.o:       cc_obj _net/ssftlsc.c
 build $builddir/_net/ssftlsc_ut.o:    cc_obj _net/ssftlsc_ut.c
 
@@ -240,9 +244,11 @@ build @OUTBIN@: link $builddir/main.o $builddir/ssfport.o $
     $builddir/_ui/ssfcli.o          $builddir/_ui/ssfcli_ut.o $
     $builddir/_ui/ssfvted.o         $builddir/_ui/ssfvted_ut.o $
     $builddir/_osal/ssflptask.o     $builddir/_osal/ssflptask_ut.o $
+    $builddir/_net/ssfhttphdr.o     $builddir/_net/ssfhttphdr_ut.o $
     $builddir/_net/ssfmqttc.o       $builddir/_net/ssfmqttc_ut.o $
     $builddir/_net/ssfmqttpkt.o     $builddir/_net/ssfmqttpkt_ut.o $
     $builddir/_net/ssfnetsock.o     $builddir/_net/ssfnetsock_ut.o $
+    $builddir/_net/ssfnetws.o       $builddir/_net/ssfnetws_ut.o $
     $builddir/_net/ssftlsc.o        $builddir/_net/ssftlsc_ut.o
 
 default @OUTBIN@

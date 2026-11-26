@@ -140,9 +140,11 @@ extern "C" {
 #define SSF_CONFIG_LPTASK_UNIT_TEST  (1u)
 
 /* _net */
+#define SSF_CONFIG_HTTPHDR_UNIT_TEST (1u)
 #define SSF_CONFIG_MQTTPKT_UNIT_TEST (1u)
 #define SSF_CONFIG_MQTTC_UNIT_TEST   (1u)
 #define SSF_CONFIG_NETSOCK_UNIT_TEST (1u)
+#define SSF_CONFIG_NETWS_UNIT_TEST   (1u)
 #define SSF_CONFIG_TLSC_UNIT_TEST    (1u)
 /* 1 also runs a round trip against a public broker; needs internet access. Unreachable broker  */
 /* is reported and skipped, any other failure asserts.                                         */
@@ -197,9 +199,11 @@ extern "C" {
     /* _fsm */ \
     SSF_CONFIG_SM_UNIT_TEST == 1 || \
     /* _net */ \
+    SSF_CONFIG_HTTPHDR_UNIT_TEST == 1 || \
     SSF_CONFIG_MQTTPKT_UNIT_TEST == 1 || \
     SSF_CONFIG_MQTTC_UNIT_TEST == 1 || \
     SSF_CONFIG_NETSOCK_UNIT_TEST == 1 || \
+    SSF_CONFIG_NETWS_UNIT_TEST == 1 || \
     SSF_CONFIG_TLSC_UNIT_TEST == 1 || \
     /* _storage */ \
     SSF_CONFIG_CFG_UNIT_TEST == 1 || \

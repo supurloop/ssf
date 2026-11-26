@@ -111,6 +111,12 @@
     <ClCompile Include="_fsm\ssfsm_ut.c">
       <Filter>_fsm</Filter>
     </ClCompile>
+    <ClCompile Include="_net\ssfhttphdr.c">
+      <Filter>_net</Filter>
+    </ClCompile>
+    <ClCompile Include="_net\ssfhttphdr_ut.c">
+      <Filter>_net</Filter>
+    </ClCompile>
     <ClCompile Include="_net\ssfmqttc.c">
       <Filter>_net</Filter>
     </ClCompile>
@@ -127,6 +133,12 @@
       <Filter>_net</Filter>
     </ClCompile>
     <ClCompile Include="_net\ssfnetsock_ut.c">
+      <Filter>_net</Filter>
+    </ClCompile>
+    <ClCompile Include="_net\ssfnetws.c">
+      <Filter>_net</Filter>
+    </ClCompile>
+    <ClCompile Include="_net\ssfnetws_ut.c">
       <Filter>_net</Filter>
     </ClCompile>
     <ClCompile Include="_net\ssftlsc.c">
@@ -430,6 +442,9 @@
     <ClInclude Include="_fsm\ssfsm.h">
       <Filter>_fsm</Filter>
     </ClInclude>
+    <ClInclude Include="_net\ssfhttphdr.h">
+      <Filter>_net</Filter>
+    </ClInclude>
     <ClInclude Include="_net\ssfmqttc.h">
       <Filter>_net</Filter>
     </ClInclude>
@@ -440,6 +455,9 @@
       <Filter>_net</Filter>
     </ClInclude>
     <ClInclude Include="_net\ssfnetsock.h">
+      <Filter>_net</Filter>
+    </ClInclude>
+    <ClInclude Include="_net\ssfnetws.h">
       <Filter>_net</Filter>
     </ClInclude>
     <ClInclude Include="_net\ssftlsc.h">
@@ -506,6 +524,12 @@
       <Filter>_opt</Filter>
     </ClInclude>
     <ClInclude Include="_opt\ssfmqttc_opt.h">
+      <Filter>_opt</Filter>
+    </ClInclude>
+    <ClInclude Include="_opt\ssfnetws_opt.h">
+      <Filter>_opt</Filter>
+    </ClInclude>
+    <ClInclude Include="_opt\ssfhttp_opt.h">
       <Filter>_opt</Filter>
     </ClInclude>
     <ClInclude Include="_opt\ssfnetsock_opt.h">

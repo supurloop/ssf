@@ -166,11 +166,17 @@ static bool _SSFPKeyDecodeSEC1(const uint8_t *der, size_t derLen, SSFPKeyType_t 
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFPKeyDecodePKCS1(const uint8_t *der, size_t derLen, SSFPKey_t *key)
 {
+#if SSF_RSA_ANY_ENABLED == 0
+    /* No RSA key size is built: an RSA key is refused, like a key on a compiled-out curve */
+    (void)der; (void)derLen; (void)key;
+    return false;
+#else
     if (!SSFRSAPrivKeyIsValid(der, derLen)) return false;
     key->type = SSF_PKEY_TYPE_RSA;
     key->rsaDer = der;
     key->rsaDerLen = derLen;
     return true;
+#endif /* SSF_RSA_ANY_ENABLED */
 }
 
 /* --------------------------------------------------------------------------------------------- */

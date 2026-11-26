@@ -4089,7 +4089,7 @@ void SSFBNUnitTest(void)
         uint16_t c;
         uint16_t it;
         uint16_t k;
-        uint16_t len;
+        volatile uint16_t len;     /* Read after SSF_ASSERT_TEST's setjmp (-Wclobbered) */
 
         primes[0] = &SSF_BN_NIST_P256;
         primes[1] = &SSF_BN_NIST_P256;
@@ -4908,7 +4908,7 @@ void SSFBNUnitTest(void)
         uint32_t x = 0x94D049BBu;
         uint32_t calls;
         uint16_t w;
-        uint16_t n;
+        volatile uint16_t n;       /* Read after SSF_ASSERT_TEST's setjmp (-Wclobbered) */
         uint16_t k;
         uint8_t pass;
 
@@ -5126,7 +5126,7 @@ void SSFBNUnitTest(void)
                                            SSF_BN_MAX_MOD_LIMBS };
         uint32_t s = 0x1B873593u;
         uint16_t w;
-        uint16_t n;
+        volatile uint16_t n;       /* Read after SSF_ASSERT_TEST's setjmp (-Wclobbered) */
         uint16_t k;
         uint8_t pass;
         bool ok;

@@ -644,6 +644,9 @@
     <ClInclude Include="_crypto\ssfecdsa.h">
       <Filter>_crypto</Filter>
     </ClInclude>
+    <ClInclude Include="_crypto\ssfecdsa_ut_sign.h">
+      <Filter>_crypto</Filter>
+    </ClInclude>
     <ClInclude Include="_crypto\ssfed25519.h">
       <Filter>_crypto</Filter>
     </ClInclude>

@@ -3188,7 +3188,7 @@ void SSFBNModExpMontPub(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SS
     SSFBN_DEFINE(result, SSF_BN_MAX_MOD_LIMBS); /* residues: at ctx->len, never above it */
     SSFBN_DEFINE(aM, SSF_BN_MAX_MOD_LIMBS);
     uint32_t eBits;
-    int32_t i;
+    uint32_t i;
 
     _SSF_BN_COUNT(_SSFBNFullWidthCalls);
 
@@ -3229,11 +3229,12 @@ void SSFBNModExpMontPub(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SS
     SSFBNCopy(&result, &aM);
 
     /* Left-to-right binary square-and-multiply; leaks Hamming weight of e (public-only). */
-    for (i = (int32_t)eBits - 2; i >= 0; i--)
+    /* Bits eBits - 2 down to 0; an unsigned count-down avoids -Wstrict-overflow on eBits - 2. */
+    for (i = eBits - 1u; i-- > 0u;)
     {
         SSFBNMontSquare(&result, &result, ctx);
         /* Is bit i of e set? */
-        if (SSFBNGetBit(e, (uint32_t)i) != 0u)
+        if (SSFBNGetBit(e, i) != 0u)
         {
             /* Yes, multiply the running result by the base. */
             SSFBNMontMul(&result, &result, &aM, ctx);

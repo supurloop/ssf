@@ -76,7 +76,9 @@ No filesystem access: the input is a buffer the caller supplies.
 ## [↑](#ssfpkey--private-key-decoder) Configuration
 
 No options file. The curves follow `SSF_EC_CONFIG_ENABLE_P256` / `_P384`
-([`ssfec`](../_crypto/ssfec.md)); a key on a disabled curve is refused as unknown. The
+([`ssfec`](../_crypto/ssfec.md)); a key on a disabled curve is refused as unknown. RSA
+follows the `SSF_RSA_CONFIG_ENABLE_*` key sizes ([`ssfrsa`](../_crypto/ssfrsa.md)): with none
+built, an RSA key is refused, and one of a size not built fails validation. The
 unit-test entry point is gated by `SSF_CONFIG_PKEY_UNIT_TEST` in `ssfport.h`.
 
 <a id="api-summary"></a>

@@ -112,6 +112,7 @@ static void _ECDSAOSSLCurveInfo(SSFECCurve_t curve, _ECDSAOSSLCurveInfo_t *info)
     }
 }
 
+#if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
 /* --------------------------------------------------------------------------------------------- */
 /* Random fuzz: every SSF<->OpenSSL direction on random keys and hashes per curve. */
 /* --------------------------------------------------------------------------------------------- */
@@ -219,6 +220,7 @@ static void _VerifyECDSARandomAgainstOpenSSL(SSFECCurve_t curve, uint16_t iters)
         }
     }
 }
+#endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN */
 
 /* --------------------------------------------------------------------------------------------- */
 /* ECDH cross-check: SSF and OpenSSL derive the same secret for mixed-origin keys. */
@@ -307,6 +309,7 @@ static void _VerifyECDHAgainstOpenSSL(SSFECCurve_t curve, uint16_t iters)
     }
 }
 
+#if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
 /* --------------------------------------------------------------------------------------------- */
 /* Corner cases vs OpenSSL: all-zero hash, all-0xFF hash, and the DER round-trip property. */
 /* --------------------------------------------------------------------------------------------- */
@@ -396,6 +399,7 @@ static void _VerifyECDSACornerCasesAgainstOpenSSL(SSFECCurve_t curve)
         EC_KEY_free(osslKey);
     }
 }
+#endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN */
 #endif /* SSF_ECDSA_OSSL_VERIFY */
 
 /* The audit tests that install these hooks use P-256 vectors and need signing */
@@ -530,6 +534,50 @@ void SSFECDSAUnitTest(void)
     }
 
 #if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
+#if SSF_EC_CONFIG_ENABLE_P384 == 1
+    /* ---- COV-8 (P-384): the same fallback on P-384 uses HMAC-SHA-384. h = first 28 bytes   */
+    /* of SHA-384("sample"), RFC 6979 A.2.6 key; r, s computed independently (pure-Python     */
+    /* RFC 6979 + P-384, checked against the A.2.6 SHA-384 vector first).                     */
+    {
+        static const uint8_t privKey[] = {
+            0x6Bu, 0x9Du, 0x3Du, 0xADu, 0x2Eu, 0x1Bu, 0x8Cu, 0x1Cu,
+            0x05u, 0xB1u, 0x98u, 0x75u, 0xB6u, 0x65u, 0x9Fu, 0x4Du,
+            0xE2u, 0x3Cu, 0x3Bu, 0x66u, 0x7Bu, 0xF2u, 0x97u, 0xBAu,
+            0x9Au, 0xA4u, 0x77u, 0x40u, 0x78u, 0x71u, 0x37u, 0xD8u,
+            0x96u, 0xD5u, 0x72u, 0x4Eu, 0x4Cu, 0x70u, 0xA8u, 0x25u,
+            0xF8u, 0x72u, 0xC9u, 0xEAu, 0x60u, 0xD2u, 0xEDu, 0xF5u
+        };
+        static const uint8_t expSig[] = {
+            0x30u, 0x65u, 0x02u, 0x31u, 0x00u, 0x95u, 0x3Eu, 0xE1u,
+            0xF5u, 0xA1u, 0xF3u, 0x52u, 0x3Fu, 0x62u, 0x40u, 0x42u,
+            0xAAu, 0x4Cu, 0x95u, 0xF1u, 0x73u, 0x0Cu, 0xA1u, 0xAFu,
+            0x7Fu, 0x4Cu, 0x62u, 0x3Cu, 0x98u, 0xCAu, 0x73u, 0x3Cu,
+            0x8Du, 0x94u, 0x28u, 0x06u, 0xDAu, 0xFAu, 0x2Bu, 0x8Eu,
+            0xC2u, 0x96u, 0x51u, 0xCEu, 0x21u, 0x27u, 0x44u, 0x0Fu,
+            0x17u, 0xD3u, 0xCBu, 0x85u, 0x41u, 0x02u, 0x30u, 0x29u,
+            0x13u, 0xFAu, 0x54u, 0xA3u, 0x2Eu, 0xB1u, 0x00u, 0x94u,
+            0x83u, 0xB5u, 0x30u, 0x0Fu, 0x8Au, 0xD6u, 0xFDu, 0x3Cu,
+            0x75u, 0xE7u, 0x39u, 0xC1u, 0xD7u, 0x1Au, 0x99u, 0xAAu,
+            0x4Bu, 0xE7u, 0xBAu, 0x24u, 0x6Au, 0xCAu, 0x94u, 0xD4u,
+            0x0Du, 0xE0u, 0xBBu, 0x29u, 0x0Eu, 0x8Du, 0x9Au, 0x8Cu,
+            0x56u, 0x47u, 0x66u, 0xABu, 0x04u, 0x2Eu, 0x7Bu
+        };
+        uint8_t hash[48];
+        uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        size_t pubKeyLen;
+        uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+        size_t sigLen;
+
+        SSFSHA384((const uint8_t *)"sample", 6, hash, sizeof(hash));
+        SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P384, privKey, sizeof(privKey), hash, 28u, sig,
+                                sizeof(sig), &sigLen) == true);
+        SSF_ASSERT((sigLen == sizeof(expSig)) && (memcmp(sig, expSig, sigLen) == 0));
+        SSF_ASSERT(SSFECDSAPubKeyFromPrivKey(SSF_EC_CURVE_P384, privKey, sizeof(privKey), pubKey,
+                                             sizeof(pubKey), &pubKeyLen) == true);
+        SSF_ASSERT(SSFECDSAVerify(SSF_EC_CURVE_P384, pubKey, pubKeyLen, hash, 28u, sig,
+                                  sigLen) == true);
+    }
+#endif /* SSF_EC_CONFIG_ENABLE_P384 */
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
     /* ---- COV-8: a digest length that is not SHA-1/SHA-2 drives RFC 6979 with the curve's ---- */
     /* hash (HMAC-SHA-256 on P-256). h = first 28 bytes of SHA-256("sample"), RFC 6979 A.2.5   */
@@ -2093,9 +2141,11 @@ void SSFECDSAUnitTest(void)
             privLen = (curves[ci] == SSF_EC_CURVE_P256) ? 32u : 48u;
             _SSFBNFullWidthCalls = 0u;
             SSF_ASSERT(SSFECDSAKeyGen(curves[ci], priv, privLen, pub, sizeof(pub), &pubLen));
+#if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
             SSF_ASSERT(SSFECDSASign(curves[ci], priv, privLen, hash, privLen, sig, sizeof(sig),
                                     &sigLen));
             SSF_ASSERT(SSFECDSAVerify(curves[ci], pub, pubLen, hash, privLen, sig, sigLen));
+#endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN */
             SSF_ASSERT(SSFECDHComputeSecret(curves[ci], priv, privLen, pub, pubLen, secret,
                                             sizeof(secret), &secretLen));
             SSF_ASSERT(_SSFBNFullWidthCalls == 0u);

@@ -35,6 +35,7 @@
 #include "ssfasn1.h"
 #include "ssfsha2.h"
 #include "ssfecdsa.h"
+#include "ssfecdsa_ut_sign.h"                 /* SSF signer, or OpenSSL with signing off */
 #include "ssfsha1.h"
 #include "ssfprng.h"
 #include "ssfed25519.h"
@@ -627,8 +628,8 @@ static bool _utBuildCms(const _utCmsSpec_t *s, uint8_t *out, uint32_t outSize, u
     else
     {
         SSFSHA256(signedPtr, signedLen, hash, SSF_SHA2_256_BYTE_SIZE);
-        if (!SSFECDSASign(_UT_CURVE, s->priv, _UT_PRIV_LEN, hash, SSF_SHA2_256_BYTE_SIZE, sig,
-                          sizeof(sig), &sigLen)) return false;
+        if (!_SSFECDSAUTSign(_UT_CURVE, s->priv, _UT_PRIV_LEN, hash, SSF_SHA2_256_BYTE_SIZE, sig,
+                             sizeof(sig), &sigLen)) return false;
     }
 
     /* SignerInfo */
@@ -920,8 +921,9 @@ static bool _utMakeCert(bool ed25519, bool isCA, const char *cnStr, const char *
         p.pubKeyLen = (uint32_t)pubLen;
         if (!SSFX509EncodeTBS(tbs, sizeof(tbs), &p, &tbsLen)) return false;
         SSFSHA256(tbs, tbsLen, hash, sizeof(hash));
-        if (!SSFECDSASign(_UT_CURVE, (issuerPrivOpt != NULL) ? issuerPrivOpt : priv, _UT_PRIV_LEN,
-                          hash, sizeof(hash), sig, sizeof(sig), &sigLen)) return false;
+        if (!_SSFECDSAUTSign(_UT_CURVE, (issuerPrivOpt != NULL) ? issuerPrivOpt : priv,
+                             _UT_PRIV_LEN, hash, sizeof(hash), sig, sizeof(sig),
+                             &sigLen)) return false;
     }
     return SSFX509EncodeCert(out, outSize, &p, sig, (uint32_t)sigLen, lenOut);
 }
@@ -1383,8 +1385,8 @@ static bool _utGenEncCert(_utGenCert_t *c, const _utGenCert_t *issuer)
 
     /* Certificate { tbsCertificate, signatureAlgorithm, signatureValue } */
     SSFSHA256(tbs, tbsLen, hash, sizeof(hash));
-    if (!SSFECDSASign(_UT_CURVE, issuer->priv, _UT_PRIV_LEN, hash, sizeof(hash), sig, sizeof(sig),
-                      &sigLen)) return false;
+    if (!_SSFECDSAUTSign(_UT_CURVE, issuer->priv, _UT_PRIV_LEN, hash, sizeof(hash), sig,
+                         sizeof(sig), &sigLen)) return false;
     memcpy(body, tbs, tbsLen);
     pos = tbsLen;
     if (!_utEncAlgId(&body[pos], sizeof(body) - pos, _utOidEcdsaSha256, sizeof(_utOidEcdsaSha256),
@@ -1463,8 +1465,8 @@ static bool _utGenBuildCms(SSFPRNGContext_t *prng, const _utGenCert_t *ca,
     /* The signature covers the attributes as a SET (RFC 5652 Sec. 5.4) */
     if (!SSFASN1EncWrap(a, sizeof(a), SSF_ASN1_TAG_SET, attrs, attrsLen, &w)) return false;
     SSFSHA256(a, w, hash, sizeof(hash));
-    if (!SSFECDSASign(_UT_CURVE, leaf->priv, _UT_PRIV_LEN, hash, sizeof(hash), sig, sizeof(sig),
-                      &sigLen)) return false;
+    if (!_SSFECDSAUTSign(_UT_CURVE, leaf->priv, _UT_PRIV_LEN, hash, sizeof(hash), sig, sizeof(sig),
+                         &sigLen)) return false;
 
     /* SignerInfo v1 { issuerAndSerialNumber, sha256, [0] attrs, ecdsa-with-SHA256, sig, [1] } */
     pos = 0;
@@ -1789,6 +1791,12 @@ void SSFCMSUnitTest(void)
     uint32_t at;
     uint32_t i;
     uint32_t n;
+
+#if SSF_ECDSA_UT_CAN_SIGN == 0
+    /* Signing compiled out and no OpenSSL: the generated-input tests below cannot be built */
+    SSF_UT_PRINTF("%s skipped: needs SSF_ECDSA_CONFIG_ENABLE_SIGN or OpenSSL\n", __func__);
+    return;
+#endif
 
     SSFSHA256(_utFixContent, sizeof(_utFixContent), sha256, sizeof(sha256));
     SSFSHA384(_utFixContent, sizeof(_utFixContent), sha384, sizeof(sha384));

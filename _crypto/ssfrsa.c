@@ -47,8 +47,14 @@
 void (*_SSFRSAScrubTestHook)(const void *buf, size_t len) = NULL;
 #define _SSF_RSA_SCRUB_HOOK(p, n) \
     do { if (_SSFRSAScrubTestHook != NULL) { _SSFRSAScrubTestHook((p), (n)); } } while (0)
+/* Test-only hook fired with the stack-scrub buffer after each stack scrub; NULL in production. */
+void (*_SSFRSAStackScrubTestHook)(const void *buf, size_t len) = NULL;
+#define _SSF_RSA_STACK_SCRUB_HOOK(p, n) \
+    do { if (_SSFRSAStackScrubTestHook != NULL) { _SSFRSAStackScrubTestHook((p), (n)); } } \
+    while (0)
 #else
 #define _SSF_RSA_SCRUB_HOOK(p, n) do { } while (0)
+#define _SSF_RSA_STACK_SCRUB_HOOK(p, n) do { } while (0)
 #endif /* SSF_CONFIG_RSA_UNIT_TEST */
 
 /* Largest modulus and prime the enabled key sizes allow, in limbs */
@@ -91,15 +97,31 @@ static void _SSFRSASecureWipe(void *buf, size_t len)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: scrub the deeper-stack region used by ssfbn primitives (overwrites freed frames).   */
+/* Internal: scrub the stack the ssfbn calls below a sign entry point used (freed frames, which  */
+/* hold register spills of secret limbs), to the depth they reach (SAFE-05).                     */
 /* --------------------------------------------------------------------------------------------- */
 SSF_NOINLINE
 static void _SSFRSAStackScrub(void)
 {
-    volatile uint8_t scratch[8192];
+    volatile uint8_t scratch[SSF_RSA_SIGN_STACK_SCRUB_BYTES];
     size_t i;
     for (i = 0u; i < sizeof(scratch); i++) scratch[i] = 0u;
+    _SSF_RSA_STACK_SCRUB_HOOK((const void *)scratch, sizeof(scratch));
 }
+
+#if SSF_RSA_CONFIG_ENABLE_KEYGEN == 1
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: scrub the stack the ssfbn calls below a keygen entry point used (SAFE-05).          */
+/* --------------------------------------------------------------------------------------------- */
+SSF_NOINLINE
+static void _SSFRSAStackScrubKeyGen(void)
+{
+    volatile uint8_t scratch[SSF_RSA_KEYGEN_STACK_SCRUB_BYTES];
+    size_t i;
+    for (i = 0u; i < sizeof(scratch); i++) scratch[i] = 0u;
+    _SSF_RSA_STACK_SCRUB_HOOK((const void *)scratch, sizeof(scratch));
+}
+#endif /* SSF_RSA_CONFIG_ENABLE_KEYGEN */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: convert an SSFBN-serialized magnitude into a strict-DER INTEGER body, in place.     */
@@ -1160,7 +1182,7 @@ cleanup:
     SSFBNZeroize(&pm1_div);
     SSFBNZeroize(&prod);
     SSFBNZeroize(&rem);
-    _SSFRSAStackScrub();
+    _SSFRSAStackScrubKeyGen();
     return ok;
 }
 
@@ -1276,7 +1298,7 @@ cleanup:
     SSFBNZeroize(&dp);
     SSFBNZeroize(&dq);
     SSFBNZeroize(&qInv);
-    _SSFRSAStackScrub();
+    _SSFRSAStackScrubKeyGen();
     return ok;
 }
 #endif /* SSF_RSA_CONFIG_ENABLE_KEYGEN */

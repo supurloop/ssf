@@ -149,7 +149,43 @@ SAFE-05  ssfrsa: the 8 KB stack scrub does not reach the deepest freed frames   
              R^2 (BN-09) nor SSFBNGenPrime of its candidates (BN-11). (Corrected the same day:
              this note first listed SSFBNIsProbablePrime as unwiped, from reading only part of
              the function, and missed SSFBNGcd.)
-  Status   : OPEN
+  Status   : DONE (2026-11-25): option (1), sized exactly (no margin by default). Re-measured
+             on bb8bee5 (after BN-01..16), depth below the entry point's frame (M4 -Os):
+                 cap    sign (PKCS#1, PSS)   keygen    (8 KB scrub: covers at 2048, short
+                 4096   14,792 B             14,352 B   6.6 / 6.2 KB at 4096, 3.1 / 2.7 KB
+                 3072   11,272 B             10,896 B   at 3072; at 2048 the scrub itself
+                 2048    7,752 B              7,440 B   set the peak, +440 / +752 B)
+             What remained below the scrub was register spills and saved registers, not
+             buffers (MontMul / MontSquare / the window table / the contexts / Miller-Rabin
+             already wipe theirs), so option (2) could not reach it. Host probe (sign twice on
+             a painted stack with two keys, words left behind that differ): HEAD left 8
+             key-dependent words below the scrub, limbs of q among them, ~2 KB past its end.
+             Change: SSF_RSA_SIGN_STACK_SCRUB_BYTES / SSF_RSA_KEYGEN_STACK_SCRUB_BYTES in
+             ssfrsa.h, from L = SSF_BN_MAX_MOD_LIMBS and T = 2^k: sign L(78 + 2T) + 584 + 8T
+             (T floored at 4), keygen L(44 + 4T) + 400 + 8T, +8 at T >= 32, +
+             SSF_RSA_CONFIG_STACK_SCRUB_MARGIN (ssfrsa_opt.h, default 0); a second scrub,
+             _SSFRSAStackScrubKeyGen, for KeyGen and its derive step. Fit to the measured depth:
+             exact for k = 2..7 at each cap, over by 8-48 B at k = 1 and 8 (k = 1's deepest
+             sign chain is the public fault-check verify). Peaks (M4 -Os, scrub included):
+             none higher in any profile or cap; 2048 sign / PSS / keygen -440 / -440 / -752 B
+             (k = 4), -1,528 / -1,528 / -2,864 B (MIN_MEMORY, k = 3), MIN_MEMORY keygen 3072
+             -432 B; MAX_PERF unchanged; M0+ 2048 -352 / -352 / -648 B, 3072 / 4096
+             unchanged. M4 -O2 and M0+ -Os frames go 64-80 / 96-112 B deeper than the fit:
+             margin 128u covers them (documented; +128 B peak). Code: sign +4 / +8 B, keygen
+             +36 / +44 B (M4 / M0+); time: host sign within noise. Host probe after: 0
+             key-dependent words below the scrub for PKCS#1 / PSS at 2048 / 3072 / 4096 and keygen
+             at 2048 / 3072; all that remains above it is public (limbs of n, and n's DER bytes in
+             keygen).
+             Tests: the scrubs report through a new _SSFRSAStackScrubTestHook: one sign-size
+             scrub per PKCS#1 / PSS sign (success and failure), two keygen-size scrubs per
+             KeyGen, buffers zero; the sizes pinned to the measured depths at k = 4 (red on
+             HEAD: no hook, no sizes); before the failing signs the test paints the stack
+             below, so a scrub that skips part of its buffer is seen. Mutants: 10 of 10 killed
+             (keygen using the sign size, derive / PKCS#1 / PSS scrub removed, either size back
+             to 8 KB, two formula coefficients and one constant changed, half the buffer
+             wiped); the half-wipe mutant is killed in the plain test build only, since under
+             ASan the paint and the scrub land on separate fake-stack frames. Re-measure
+             (stk/peak.py) when a frame on the chain changes.
 
 SAFE-06  ssfrsa: a private key with an even p or q asserts in signing                [V]
   Location : _crypto/ssfrsa.c:453-544 (_SSFRSAPrivKeyDecode); reached from SSFRSASignPKCS1 /

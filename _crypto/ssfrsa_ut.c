@@ -703,6 +703,51 @@ static void _ScrubCheck(const void *buf, size_t len)
         }
     }
 }
+
+/* --------------------------------------------------------------------------------------------- */
+/* SAFE-05: stack-scrub hook callback; counts calls, keeps the size, counts non-zero buffers.    */
+/* --------------------------------------------------------------------------------------------- */
+static uint32_t _stackScrubCalls;
+static size_t _stackScrubLen;
+static uint32_t _stackScrubSizes;
+static uint32_t _stackScrubDirty;
+static void _StackScrubCheck(const void *buf, size_t len)
+{
+    const uint8_t *b = (const uint8_t *)buf;
+    size_t i;
+
+    SSF_ASSERT(buf != NULL);
+    if ((_stackScrubCalls == 0u) || (len != _stackScrubLen)) _stackScrubSizes++;
+    _stackScrubCalls++;
+    _stackScrubLen = len;
+    for (i = 0; i < len; i++)
+    {
+        if (b[i] != 0u)
+        {
+            _stackScrubDirty++;
+            break;
+        }
+    }
+}
+
+/* Fills the stack below the caller with a non-zero pattern, deeper than any scrub reaches, so */
+/* a scrub that leaves part of its buffer unwritten shows up as a dirty buffer.                 */
+SSF_NOINLINE
+static void _StackScrubPaint(void)
+{
+    volatile uint8_t paint[(2u * SSF_RSA_SIGN_STACK_SCRUB_BYTES) + 16384u];
+    size_t i;
+
+    for (i = 0; i < sizeof(paint); i++) paint[i] = 0xA5u;
+}
+
+static void _StackScrubReset(void)
+{
+    _stackScrubCalls = 0u;
+    _stackScrubLen = 0u;
+    _stackScrubSizes = 0u;
+    _stackScrubDirty = 0u;
+}
 #endif /* SSF_RSA_ANY_ENABLED == 1 */
 
 void SSFRSAUnitTest(void)
@@ -712,6 +757,58 @@ void SSFRSAUnitTest(void)
     SSF_UT_PRINTF("(skipped: no SSF_RSA_CONFIG_ENABLE_2048 / 3072 / 4096 enabled)\n");
     return;
 #else
+
+    /* ---- SAFE-05: stack-scrub sizes, measured (Cortex-M4 GCC -Os) for k = 4, no margin ---- */
+    /* The depth the ssfbn calls below a sign / keygen entry point reach, from the static call  */
+    /* graph at each RSA cap; the derived sizes must match it (re-measure if a frame changes).  */
+#if (SSF_BN_MODEXP_WIN_K == 4u) && (SSF_RSA_CONFIG_STACK_SCRUB_MARGIN == 0u)
+#if SSF_BN_MAX_MOD_LIMBS == 128u
+    SSF_ASSERT(SSF_RSA_SIGN_STACK_SCRUB_BYTES == 14792u);
+#if SSF_RSA_CONFIG_ENABLE_KEYGEN == 1
+    SSF_ASSERT(SSF_RSA_KEYGEN_STACK_SCRUB_BYTES == 14352u);
+#endif
+#elif SSF_BN_MAX_MOD_LIMBS == 96u
+    SSF_ASSERT(SSF_RSA_SIGN_STACK_SCRUB_BYTES == 11272u);
+#if SSF_RSA_CONFIG_ENABLE_KEYGEN == 1
+    SSF_ASSERT(SSF_RSA_KEYGEN_STACK_SCRUB_BYTES == 10896u);
+#endif
+#elif SSF_BN_MAX_MOD_LIMBS == 64u
+    SSF_ASSERT(SSF_RSA_SIGN_STACK_SCRUB_BYTES == 7752u);
+#if SSF_RSA_CONFIG_ENABLE_KEYGEN == 1
+    SSF_ASSERT(SSF_RSA_KEYGEN_STACK_SCRUB_BYTES == 7440u);
+#endif
+#endif /* SSF_BN_MAX_MOD_LIMBS */
+#endif /* k = 4, no margin */
+
+    /* ---- SAFE-05: a failed sign still scrubs, once, at the sign size ---- */
+    {
+        static const uint8_t badDer[] = { 0x30u, 0x00u };
+        uint8_t hash[32];
+        uint8_t sig[SSF_RSA_MAX_KEY_BYTES];
+        size_t sigLen;
+
+        memset(hash, 0x5Au, sizeof(hash));
+        _SSFRSAStackScrubTestHook = _StackScrubCheck;
+#if SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1
+        _StackScrubReset();
+        _StackScrubPaint();
+        SSF_ASSERT(SSFRSASignPKCS1(badDer, sizeof(badDer), SSF_RSA_HASH_SHA256,
+                                   hash, sizeof(hash), sig, sizeof(sig), &sigLen) == false);
+        SSF_ASSERT(_stackScrubCalls == 1u);
+        SSF_ASSERT(_stackScrubLen == SSF_RSA_SIGN_STACK_SCRUB_BYTES);
+        SSF_ASSERT(_stackScrubDirty == 0u);
+#endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1 */
+#if SSF_RSA_CONFIG_ENABLE_PSS == 1
+        _StackScrubReset();
+        _StackScrubPaint();
+        SSF_ASSERT(SSFRSASignPSS(badDer, sizeof(badDer), SSF_RSA_HASH_SHA256,
+                                 hash, sizeof(hash), sig, sizeof(sig), &sigLen) == false);
+        SSF_ASSERT(_stackScrubCalls == 1u);
+        SSF_ASSERT(_stackScrubLen == SSF_RSA_SIGN_STACK_SCRUB_BYTES);
+        SSF_ASSERT(_stackScrubDirty == 0u);
+#endif /* SSF_RSA_CONFIG_ENABLE_PSS == 1 */
+        _SSFRSAStackScrubTestHook = NULL;
+    }
 
     /* ---- (Hardening) DER pubkey with n wider than SSF_BN_MAX_BYTES returns false ---- */
     {
@@ -818,11 +915,19 @@ void SSFRSAUnitTest(void)
         _scrubCalls = 0u;
         _scrubDirty = 0u;
         _SSFRSAScrubTestHook = _ScrubCheck;
+        _StackScrubReset();
+        _SSFRSAStackScrubTestHook = _StackScrubCheck;
         SSF_ASSERT(SSFRSAKeyGen(2048u, privDer, sizeof(privDer), &privLen, pubDer, sizeof(pubDer),
                                 &pubLen) == true);
         _SSFRSAScrubTestHook = NULL;
+        _SSFRSAStackScrubTestHook = NULL;
         SSF_ASSERT(_scrubCalls == 1u);
         SSF_ASSERT(_scrubDirty == 0u);
+        /* SAFE-05: the derive step and KeyGen each scrub, at the keygen size */
+        SSF_ASSERT(_stackScrubCalls == 2u);
+        SSF_ASSERT(_stackScrubSizes == 1u);
+        SSF_ASSERT(_stackScrubLen == SSF_RSA_KEYGEN_STACK_SCRUB_BYTES);
+        SSF_ASSERT(_stackScrubDirty == 0u);
         SSF_ASSERT(SSFRSAPrivKeyIsValid(privDer, privLen) == true);
     }
 #endif /* SSF_RSA_CONFIG_ENABLE_KEYGEN && SSF_RSA_CONFIG_ENABLE_2048 */
@@ -1508,11 +1613,31 @@ void SSFRSAUnitTest(void)
                    foreignSig, sizeof(foreignSig)) == true);
 
         /* Sign with the foreign private key: deterministic, so it must match openssl's sig. */
+        /* SAFE-05: a successful sign scrubs once, at the sign size.                          */
+        _StackScrubReset();
+        _SSFRSAStackScrubTestHook = _StackScrubCheck;
         SSF_ASSERT(SSFRSASignPKCS1(foreignPriv, sizeof(foreignPriv),
                    SSF_RSA_HASH_SHA256, hashVal, sizeof(hashVal),
                    sig, sizeof(sig), &sigLen) == true);
+        _SSFRSAStackScrubTestHook = NULL;
+        SSF_ASSERT(_stackScrubCalls == 1u);
+        SSF_ASSERT(_stackScrubLen == SSF_RSA_SIGN_STACK_SCRUB_BYTES);
+        SSF_ASSERT(_stackScrubDirty == 0u);
         SSF_ASSERT(sigLen == sizeof(foreignSig));
         SSF_ASSERT(memcmp(sig, foreignSig, sigLen) == 0);
+#if SSF_RSA_CONFIG_ENABLE_PSS == 1
+        _StackScrubReset();
+        _SSFRSAStackScrubTestHook = _StackScrubCheck;
+        SSF_ASSERT(SSFRSASignPSS(foreignPriv, sizeof(foreignPriv),
+                   SSF_RSA_HASH_SHA256, hashVal, sizeof(hashVal),
+                   sig, sizeof(sig), &sigLen) == true);
+        _SSFRSAStackScrubTestHook = NULL;
+        SSF_ASSERT(_stackScrubCalls == 1u);
+        SSF_ASSERT(_stackScrubLen == SSF_RSA_SIGN_STACK_SCRUB_BYTES);
+        SSF_ASSERT(_stackScrubDirty == 0u);
+        SSF_ASSERT(SSFRSAVerifyPSS(foreignPub, sizeof(foreignPub), SSF_RSA_HASH_SHA256,
+                   hashVal, sizeof(hashVal), sizeof(hashVal), sig, sigLen) == true);
+#endif /* SSF_RSA_CONFIG_ENABLE_PSS == 1 */
 
         /* ---- Stricter SSFRSAPubKeyIsValid: small public exponent (e = 3) ---- */
         {

@@ -198,9 +198,15 @@ comparable security.
   every return path.** Failure paths get the same wipe as success paths; the CRT helper
   zeroes its CRT intermediates (`cp`, `cq`, `m1`, `m2`, `h`, expanded full-width copies
   and the `h*q` product) before returning. A `noinline` stack-scrub helper at the end of
-  each entry point overwrites the freed frames left by the underlying `ssfbn` primitives
-  (`SSFBNGcd`, `SSFBNDivMod`, `SSFBNModInv`, `SSFBNModInvOdd`) which `ssfrsa` cannot
-  reach into directly.
+  each entry point then zeroes the freed frames the underlying `ssfbn` calls left below it:
+  their buffers are wiped by `ssfbn` itself, but register spills and saved registers (limbs
+  of `p`, `q` and the CRT intermediates) are not. The scrub is sized to the depth those
+  calls reach ([`SSF_RSA_SIGN_STACK_SCRUB_BYTES`](#ssf-rsa-stack-scrub-bytes) for signing,
+  [`SSF_RSA_KEYGEN_STACK_SCRUB_BYTES`](#ssf-rsa-stack-scrub-bytes) for keygen), measured
+  with Cortex-M4 GCC `-Os`, so it covers them without raising the peak stack (SAFE-05).
+  Other compilers and flags can go slightly deeper (M4 `-O2`: 64–80 B, Cortex-M0+ `-Os`:
+  96–112 B); set [`SSF_RSA_CONFIG_STACK_SCRUB_MARGIN`](#configuration) to `128u` there to
+  cover that too, at the cost of as much more peak stack.
 - **Keys are not parsed lazily on every call.** Each sign / verify / key-validate entry
   point re-parses the DER blob on entry. If you're signing many messages under the same
   key, this is a few hundred microseconds per call that could in principle be
@@ -221,6 +227,7 @@ need — each compiles its entry points out of the build, reclaiming flash.
 | `SSF_RSA_CONFIG_ENABLE_KEYGEN` | `1` | Enable `SSFRSAKeyGen`. Disabling removes ~3 KB of code (Miller-Rabin, prime generation, CRT parameter setup) and drops peak stack significantly — sign/verify are much lighter than keygen. |
 | `SSF_RSA_CONFIG_ENABLE_PKCS1_V15` | `1` | Enable `SSFRSASignPKCS1` / `SSFRSAVerifyPKCS1`. |
 | `SSF_RSA_CONFIG_ENABLE_PSS` | `1` | Enable `SSFRSASignPSS` / `SSFRSAVerifyPSS`. |
+| `SSF_RSA_CONFIG_STACK_SCRUB_MARGIN` | `0` | Bytes added to the end-of-call stack scrub of the sign and keygen entry points (see [Notes](#notes)). The scrub sizes are measured for Cortex-M4 GCC `-Os`; set `128u` for other compilers or flags (M4 `-O2`, Cortex-M0+) to scrub their slightly deeper frames too. Each byte also adds a byte of peak stack. Can be set with `-D`. |
 | `SSF_RSA_CONFIG_MILLER_RABIN_ROUNDS` | `5` | Number of Miller-Rabin witnesses per prime candidate in keygen. Five rounds gives a false-positive probability ≤ 2⁻¹⁰⁰ for random inputs and meets the FIPS 186-4 Table C.3 minimum for every supported size (the required count falls as the primes grow, so RSA-2048's 1024-bit primes are the most demanding). Higher values slow keygen proportionally with marginal security gain. |
 
 Disabling unused sizes shrinks the public-key validator's accept set and lets the test
@@ -249,6 +256,7 @@ the hash of every signature scheme) and `SSFRSAUnitTest` (main.c references it u
 | <a id="ssf-rsa-max-sig-size"></a>`SSF_RSA_MAX_SIG_SIZE` | Constant | Same as `SSF_RSA_MAX_KEY_BYTES`. RSA signatures are always exactly `keyBytes` long. |
 | <a id="ssf-rsa-max-pub-key-der-size"></a>`SSF_RSA_MAX_PUB_KEY_DER_SIZE` | Constant | `SSF_RSA_MAX_KEY_BYTES + 40` — maximum DER size of a PKCS#1 `RSAPublicKey`. |
 | <a id="ssf-rsa-max-priv-key-der-size"></a>`SSF_RSA_MAX_PRIV_KEY_DER_SIZE` | Constant | `5 × SSF_RSA_MAX_KEY_BYTES + 200` — maximum DER size of a PKCS#1 `RSAPrivateKey` (holds `n, e, d, p, q, dp, dq, qInv`). |
+| <a id="ssf-rsa-stack-scrub-bytes"></a>`SSF_RSA_SIGN_STACK_SCRUB_BYTES`, `SSF_RSA_KEYGEN_STACK_SCRUB_BYTES` | Constant | Bytes of stack zeroed below the sign / keygen entry points' frames on return: the depth their `ssfbn` calls reach (Cortex-M4 GCC `-Os`), from `SSF_BN_MAX_MOD_LIMBS` and the window size `SSF_BN_MODEXP_WIN_K`, plus `SSF_RSA_CONFIG_STACK_SCRUB_MARGIN`. 14,792 / 14,352 at the RSA-4096 cap with the default window (11,272 / 10,896 at 3072, 7,752 / 7,440 at 2048). |
 | <a id="ssfrsahash-t"></a>`SSFRSAHash_t` | Enum | Hash selector: `SSF_RSA_HASH_SHA256`, `SSF_RSA_HASH_SHA384`, `SSF_RSA_HASH_SHA512` (plus `MIN` / `MAX` sentinels). |
 
 <a id="functions"></a>

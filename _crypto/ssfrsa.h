@@ -107,6 +107,26 @@ typedef enum
 /* Maximum DER-encoded private key size. */
 #define SSF_RSA_MAX_PRIV_KEY_DER_SIZE ((5u * SSF_RSA_MAX_KEY_BYTES) + 200u)
 
+/* Stack scrubbed below each sign / keygen entry point's frame on return, in bytes (SAFE-05):   */
+/* the depth the ssfbn calls beneath it reach, from the Cortex-M4 GCC -Os call graph. L is the  */
+/* modulus width in limbs and T the 2^k window entries: the window table (half-width for the    */
+/* CRT exponentiations, full width for keygen's Miller-Rabin), T SSFBN_t headers, and the other  */
+/* frames on the deepest secret-bearing chain. Exact for k = 2 to 7 at each cap (T is floored at */
+/* 4 for signing, over by 8 to 48 B at k = 1 and 8); the scrub never raises the peak while it    */
+/* stays within that depth. Re-measure if a frame on the chain changes.                          */
+#define SSF_RSA_STACK_SCRUB_L      ((size_t)SSF_BN_MAX_MOD_LIMBS)
+#define SSF_RSA_STACK_SCRUB_T      ((size_t)1u << SSF_BN_MODEXP_WIN_K)
+#define SSF_RSA_STACK_SCRUB_TS     ((SSF_RSA_STACK_SCRUB_T < 4u) ? 4u : SSF_RSA_STACK_SCRUB_T)
+#define SSF_RSA_STACK_SCRUB_ALIGN  ((SSF_RSA_STACK_SCRUB_T >= 32u) ? 8u : 0u)
+#define SSF_RSA_SIGN_STACK_SCRUB_BYTES \
+    ((SSF_RSA_STACK_SCRUB_L * (78u + (2u * SSF_RSA_STACK_SCRUB_TS))) + 584u + \
+     (8u * SSF_RSA_STACK_SCRUB_TS) + SSF_RSA_STACK_SCRUB_ALIGN + \
+     (size_t)SSF_RSA_CONFIG_STACK_SCRUB_MARGIN)
+#define SSF_RSA_KEYGEN_STACK_SCRUB_BYTES \
+    ((SSF_RSA_STACK_SCRUB_L * (44u + (4u * SSF_RSA_STACK_SCRUB_T))) + 400u + \
+     (8u * SSF_RSA_STACK_SCRUB_T) + SSF_RSA_STACK_SCRUB_ALIGN + \
+     (size_t)SSF_RSA_CONFIG_STACK_SCRUB_MARGIN)
+
 /* --------------------------------------------------------------------------------------------- */
 /* External interface: key generation                                                            */
 /* --------------------------------------------------------------------------------------------- */
@@ -166,6 +186,9 @@ extern void *_SSFRSASignBlindTestHookCtx;
 
 /* Test-only hook fired after each secret local is wiped. */
 extern void (*_SSFRSAScrubTestHook)(const void *buf, size_t len);
+
+/* Test-only hook fired with the stack-scrub buffer after each sign / keygen stack scrub. */
+extern void (*_SSFRSAStackScrubTestHook)(const void *buf, size_t len);
 
 #if SSF_RSA_CONFIG_ENABLE_KEYGEN == 1
 /* Test-only: keygen's d = 65537^(-1) mod lambda (t: nLimbs + 1 limbs of scratch). */

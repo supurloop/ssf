@@ -120,13 +120,9 @@ typedef enum
 
 /* Event payloads posted by the pump. Each must fit in sizeof(void *) or ssfsm heap-allocates.  */
 typedef struct { uint8_t code; uint8_t sessionPresent; } SSFMQTTCEvConnAck_t;
-typedef struct { uint16_t packetId; uint8_t count; uint8_t verdict; } SSFMQTTCEvSubAck_t;
-
-/* SSFMQTTCEvSubAck_t verdict, worst over all filters; a higher value takes precedence. */
-#define SSF_MQTTC_SUBACK_EXACT          (0u)   /* Every filter granted at the requested QoS    */
-#define SSF_MQTTC_SUBACK_DOWNGRADED     (1u)   /* A filter granted a lower QoS                 */
-#define SSF_MQTTC_SUBACK_REFUSED        (2u)   /* A filter returned the failure code           */
-#define SSF_MQTTC_SUBACK_QOS_EXCEEDED   (3u)   /* A filter granted a higher QoS: broker error  */
+/* SUBACK: per-filter results do not fit, so the pump stages them in subAckRefused and         */
+/* subAckDowngraded (see isSubAckStaged) and only the id, count and a QoS-exceeded flag travel.  */
+typedef struct { uint16_t packetId; uint8_t count; uint8_t isQosExceeded; } SSFMQTTCEvSubAck_t;
 typedef struct { uint16_t packetId; } SSFMQTTCEvPubAck_t;
 
 typedef struct
@@ -152,9 +148,16 @@ typedef struct
                                       /* on reconnect: clean session makes that unnecessary    */
 
     /* Per connection */
-    uint16_t subscribePacketId;
+    uint16_t subscribePacketId;       /* Of the outstanding SUBSCRIBE, initial or retry        */
     bool isPingPending;               /* PINGREQ queued or sent, PINGRESP not yet received     */
-    bool isSubDowngraded;             /* SUBACK granted a filter a lower QoS than requested    */
+    uint16_t subRefused;              /* Bit i: subsOpt[i] refused by the broker (SUBACK 0x80)  */
+    uint16_t subDowngraded;           /* Bit i: subsOpt[i] granted QoS 0 for QoS 1 requested    */
+    uint16_t subAckRefused;           /* Staged by the pump from the last SUBACK, bit i as above */
+    uint16_t subAckDowngraded;
+    bool isSubAckStaged;              /* Pump staged a SUBACK the state machine has not handled */
+    bool isSubRetryPending;           /* A retry SUBSCRIBE for subRetryIndex[] is outstanding   */
+    uint8_t subRetryCount;            /* Filters in the retry SUBSCRIBE                         */
+    uint8_t subRetryIndex[SSF_MQTTC_CONFIG_MAX_SUBSCRIPTIONS];  /* Retry entry -> subsOpt index */
 
     /* Pump owned */
     SSFMQTTCLink_t link;              /* Transport state; closed by the pump on fatal error    */
@@ -680,25 +683,32 @@ static bool _SSFMQTTCRxControlPost(const uint8_t *pkt, size_t pktLen)
         SSFMQTTCEvSubAck_t ev;
         uint8_t codes[SSF_MQTTC_CONFIG_MAX_SUBSCRIPTIONS];
         uint32_t count;
+        uint32_t expected;
         uint32_t i;
-        uint8_t verdict;
+        uint32_t idx;
 
         if (SSFMQTTPktDecodeSubAck(pkt, pktLen, &ev.packetId, codes, sizeof(codes), &count) == false)
         { break; }
-        /* The declared set is immutable while not STOPPED, so the codes can be compared here  */
-        /* and only the verdict travels in the payload. The decoder admits only 0..2 and 0x80. */
+        /* Only one SUBSCRIBE is ever outstanding, so a second SUBACK before the state machine   */
+        /* took the first is a broker error; it must not overwrite the staged results.          */
+        if (_mqttc.isSubAckStaged) break;
+        /* The declared set is immutable while not STOPPED, so the codes can be compared here.  */
+        /* A retry SUBACK answers subRetryIndex[] only. The decoder admits only 0..2 and 0x80.   */
+        expected = _mqttc.isSubRetryPending ? _mqttc.subRetryCount : _mqttc.opts.subCount;
         ev.count = (uint8_t)count;
-        ev.verdict = SSF_MQTTC_SUBACK_EXACT;
-        for (i = 0; (i < count) && (i < _mqttc.opts.subCount); i++)
+        ev.isQosExceeded = 0;
+        _mqttc.subAckRefused = 0;
+        _mqttc.subAckDowngraded = 0;
+        for (i = 0; (i < count) && (i < expected); i++)
         {
-            if (codes[i] == SSF_MQTT_PKT_SUBACK_FAILURE) verdict = SSF_MQTTC_SUBACK_REFUSED;
-            else if (codes[i] > (uint8_t)_mqttc.opts.subsOpt[i].qos)
-            { verdict = SSF_MQTTC_SUBACK_QOS_EXCEEDED; }
-            else if (codes[i] < (uint8_t)_mqttc.opts.subsOpt[i].qos)
-            { verdict = SSF_MQTTC_SUBACK_DOWNGRADED; }
-            else verdict = SSF_MQTTC_SUBACK_EXACT;
-            if (verdict > ev.verdict) ev.verdict = verdict;
+            idx = _mqttc.isSubRetryPending ? _mqttc.subRetryIndex[i] : i;
+            if (codes[i] == SSF_MQTT_PKT_SUBACK_FAILURE)
+            { _mqttc.subAckRefused |= (uint16_t)(1u << idx); }
+            else if (codes[i] > (uint8_t)_mqttc.opts.subsOpt[idx].qos) ev.isQosExceeded = 1;
+            else if (codes[i] < (uint8_t)_mqttc.opts.subsOpt[idx].qos)
+            { _mqttc.subAckDowngraded |= (uint16_t)(1u << idx); }
         }
+        _mqttc.isSubAckStaged = true;
         SSFSMPutEventData(SSF_SM_MQTTC, SSF_SM_EVENT_MQTTC_RX_SUBACK, (SSFSMData_t *)&ev,
                           sizeof(ev));
         return true;
@@ -1159,27 +1169,102 @@ static void _SSFMQTTCSessionSubscribe(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Acts on a decoded SUBACK: READY if every filter was granted, at the requested or a lower QoS, */
-/* else fails the attempt.                                                                       */
+/* Takes a SUBACK the pump staged: true if it answers the outstanding SUBSCRIBE of count filters */
+/* (its in-flight block is then released and the SUBACK timer stopped), else false.             */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFMQTTCSessionRxSubAck(const SSFMQTTCEvSubAck_t *ev)
+static bool _SSFMQTTCSessionSubAckTake(const SSFMQTTCEvSubAck_t *ev, uint32_t count)
 {
     SSFMQTTCTxPublishFn_t fn;
     void *fnCtx;
 
     SSF_REQUIRE(ev != NULL);
 
-    if ((ev->packetId != _mqttc.subscribePacketId) || (ev->count != _mqttc.opts.subCount))
-    { _SSFMQTTCFail(SSF_MQTTC_REASON_PROTOCOL); return; }
-
+    _mqttc.isSubAckStaged = false;
+    if ((ev->packetId != _mqttc.subscribePacketId) || (ev->count != count)) return false;
     (void)_SSFMQTTCTxInflightRemove(SSF_MQTT_PKT_SUBSCRIBE, ev->packetId, &fn, &fnCtx);
     SSFSMStopTimer(SSF_SM_EVENT_MQTTC_TO_SUBSCRIBE);
-    if (ev->verdict == SSF_MQTTC_SUBACK_QOS_EXCEEDED)
-    { _SSFMQTTCFail(SSF_MQTTC_REASON_SUBSCRIBE_QOS_EXCEEDED); return; }
-    if (ev->verdict == SSF_MQTTC_SUBACK_REFUSED)
-    { _SSFMQTTCFail(SSF_MQTTC_REASON_SUBSCRIBE_REFUSED); return; }
-    _mqttc.isSubDowngraded = (ev->verdict == SSF_MQTTC_SUBACK_DOWNGRADED);
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Acts on the SUBACK for the initial SUBSCRIBE: READY whatever was refused, recording each      */
+/* filter's result; a higher QoS than requested, or a mismatched SUBACK, fails the attempt.      */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCSessionRxSubAck(const SSFMQTTCEvSubAck_t *ev)
+{
+    SSF_REQUIRE(ev != NULL);
+
+    if (_SSFMQTTCSessionSubAckTake(ev, _mqttc.opts.subCount) == false)
+    { _SSFMQTTCFail(SSF_MQTTC_REASON_PROTOCOL); return; }
+    if (ev->isQosExceeded != 0) { _SSFMQTTCFail(SSF_MQTTC_REASON_SUBSCRIBE_QOS_EXCEEDED); return; }
+    _mqttc.subRefused = _mqttc.subAckRefused;
+    _mqttc.subDowngraded = _mqttc.subAckDowngraded;
     SSFSMTran(_SSFMQTTCStateReady);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Queues a SUBSCRIBE for just the refused filters and arms the SUBACK timeout. With no tx block */
+/* free it is skipped and the retry timer armed again.                                           */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCSessionSubRetry(void)
+{
+    SSFMQTTPktSub_t subs[SSF_MQTTC_CONFIG_MAX_SUBSCRIPTIONS];
+    SSFMQTTCTxBlock_t *b;
+    uint32_t i;
+    uint8_t n = 0;
+
+    SSF_REQUIRE(_mqttc.subRefused != 0);
+    SSF_REQUIRE(_mqttc.isSubRetryPending == false);
+
+    if ((b = _SSFMQTTCTxBlockAlloc(SSF_MQTT_PKT_SUBSCRIBE)) == NULL)
+    {
+        SSFSMStartTimer(SSF_SM_EVENT_MQTTC_TO_SUB_RETRY, SSF_MQTTC_CONFIG_SUB_RETRY_TICKS);
+        return;
+    }
+    for (i = 0; i < _mqttc.opts.subCount; i++)
+    {
+        if ((_mqttc.subRefused & (1u << i)) == 0) continue;
+        subs[n] = _mqttc.opts.subsOpt[i];
+        _mqttc.subRetryIndex[n] = (uint8_t)i;
+        n++;
+    }
+    _mqttc.subRetryCount = n;
+    _mqttc.subscribePacketId = _SSFMQTTCNextPacketId();
+    /* A subset of the initial SUBSCRIBE, which fit a tx block */
+    SSFMQTTPktEncodeSubscribe(SSF_MQTTC_TX_DATA(b), _mqttc.txBlockSize, &b->len,
+                              _mqttc.subscribePacketId, subs, n, SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE);
+    b->packetId = _mqttc.subscribePacketId;
+    _SSFMQTTCTxEnqueue(b);
+    _mqttc.isSubRetryPending = true;
+    SSFSMStartTimer(SSF_SM_EVENT_MQTTC_TO_SUBSCRIBE, _mqttc.opts.subscribeTimeout);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Acts on a SUBACK in READY: it must answer the outstanding retry. Filters it grants leave the  */
+/* refused set and SUBSCRIPTION_CHANGED is reported; the retry timer runs while any remain.      */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCReadyRxSubAck(const SSFMQTTCEvSubAck_t *ev)
+{
+    uint16_t granted;
+
+    SSF_REQUIRE(ev != NULL);
+
+    if ((_mqttc.isSubRetryPending == false) ||
+        (_SSFMQTTCSessionSubAckTake(ev, _mqttc.subRetryCount) == false))
+    { _SSFMQTTCFail(SSF_MQTTC_REASON_PROTOCOL); return; }
+    _mqttc.isSubRetryPending = false;
+    if (ev->isQosExceeded != 0) { _SSFMQTTCFail(SSF_MQTTC_REASON_SUBSCRIBE_QOS_EXCEEDED); return; }
+    /* Every refused filter was in the retry, so its SUBACK is the new refused set */
+    granted = (uint16_t)(_mqttc.subRefused & (uint16_t)~_mqttc.subAckRefused);
+    _mqttc.subRefused = _mqttc.subAckRefused;
+    _mqttc.subDowngraded |= _mqttc.subAckDowngraded;
+    if (_mqttc.subRefused != 0)
+    { SSFSMStartTimer(SSF_SM_EVENT_MQTTC_TO_SUB_RETRY, SSF_MQTTC_CONFIG_SUB_RETRY_TICKS); }
+    if (granted != 0)
+    {
+        _SSFMQTTCReport(SSF_MQTTC_EVENT_SUBSCRIPTION_CHANGED, (_mqttc.subRefused != 0) ?
+                        SSF_MQTTC_REASON_SUBSCRIBE_REFUSED : SSF_MQTTC_REASON_NONE);
+    }
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -1211,7 +1296,10 @@ static void _SSFMQTTCSuperStateSession(SSFSMEventId_t eid, const SSFSMData_t *da
     case SSF_SM_EVENT_ENTRY:
         _mqttc.state = SSF_MQTTC_STATE_SUBSCRIBING;   /* Substate ENTRY follows and may change it */
         _mqttc.isPingPending = false;
-        _mqttc.isSubDowngraded = false;
+        _mqttc.subRefused = 0;
+        _mqttc.subDowngraded = 0;
+        _mqttc.isSubAckStaged = false;
+        _mqttc.isSubRetryPending = false;
         SSFSMStartTimer(SSF_SM_EVENT_MQTTC_TO_KEEPALIVE, _SSFMQTTCKeepAliveTicks());
         _SSFMQTTCReport(SSF_MQTTC_EVENT_CONNECTED, SSF_MQTTC_REASON_NONE);
         break;
@@ -1238,8 +1326,7 @@ static void _SSFMQTTCSuperStateSession(SSFSMEventId_t eid, const SSFSMData_t *da
         }
         break;
 
-    case SSF_SM_EVENT_MQTTC_RX_CONNACK:          /* CONNACK twice */
-    case SSF_SM_EVENT_MQTTC_RX_SUBACK:           /* SUBACK outside SUBSCRIBING */
+    case SSF_SM_EVENT_MQTTC_RX_CONNACK:          /* CONNACK twice; each substate takes SUBACK */
         _SSFMQTTCFail(SSF_MQTTC_REASON_PROTOCOL);
         break;
 
@@ -1344,8 +1431,12 @@ static void _SSFMQTTCStateReady(SSFSMEventId_t eid, const SSFSMData_t *data, SSF
         _mqttc.state = SSF_MQTTC_STATE_CONNECTED;
         _mqttc.backoff = 0;
         _SSFMQTTCTxPublishArmTimer();
-        _SSFMQTTCReport(SSF_MQTTC_EVENT_READY, _mqttc.isSubDowngraded ?
-                        SSF_MQTTC_REASON_SUBSCRIBE_DOWNGRADED : SSF_MQTTC_REASON_NONE);
+        if (_mqttc.subRefused != 0)
+        { SSFSMStartTimer(SSF_SM_EVENT_MQTTC_TO_SUB_RETRY, SSF_MQTTC_CONFIG_SUB_RETRY_TICKS); }
+        _SSFMQTTCReport(SSF_MQTTC_EVENT_READY,
+                        (_mqttc.subRefused != 0) ? SSF_MQTTC_REASON_SUBSCRIBE_REFUSED :
+                        (_mqttc.subDowngraded != 0) ? SSF_MQTTC_REASON_SUBSCRIBE_DOWNGRADED :
+                        SSF_MQTTC_REASON_NONE);
         break;
 
     case SSF_SM_EVENT_EXIT:
@@ -1359,6 +1450,22 @@ static void _SSFMQTTCStateReady(SSFSMEventId_t eid, const SSFSMData_t *data, SSF
         _SSFMQTTCTxPublishArmTimer();
         break;
     }
+
+    case SSF_SM_EVENT_MQTTC_TO_SUB_RETRY:
+        _SSFMQTTCSessionSubRetry();
+        break;
+
+    case SSF_SM_EVENT_MQTTC_RX_SUBACK:
+    {
+        SSFMQTTCEvSubAck_t ev;
+        SSF_SM_EVENT_DATA_ALIGN(ev);
+        _SSFMQTTCReadyRxSubAck(&ev);
+        break;
+    }
+
+    case SSF_SM_EVENT_MQTTC_TO_SUBSCRIBE:       /* No SUBACK for a retry */
+        _SSFMQTTCFail(SSF_MQTTC_REASON_SUBSCRIBE_TIMEOUT);
+        break;
 
     default:
         SSF_SM_SUPER(_SSFMQTTCSuperStateSession);
@@ -1766,4 +1873,20 @@ SSFMQTTCState_t SSFMQTTCGetState(void)
 {
     SSF_REQUIRE(_mqttc.magic == SSF_MQTTC_INIT_MAGIC);
     return _mqttc.state;
+}
+
+bool SSFMQTTCGetSubResult(uint32_t index, uint8_t *resultOut)
+{
+    uint16_t bit;
+
+    SSF_REQUIRE(_mqttc.magic == SSF_MQTTC_INIT_MAGIC);
+    SSF_REQUIRE(resultOut != NULL);
+
+    if (_mqttc.state != SSF_MQTTC_STATE_CONNECTED) return false;
+    SSF_REQUIRE(index < _mqttc.opts.subCount);
+    bit = (uint16_t)(1u << index);
+    if ((_mqttc.subRefused & bit) != 0) *resultOut = SSF_MQTTC_SUB_REFUSED;
+    else if ((_mqttc.subDowngraded & bit) != 0) *resultOut = (uint8_t)SSF_MQTTC_QOS_0;
+    else *resultOut = (uint8_t)_mqttc.opts.subsOpt[index].qos;
+    return true;
 }

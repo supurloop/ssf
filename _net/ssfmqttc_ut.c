@@ -1093,21 +1093,14 @@ static const uint8_t _utPktSubscribe2Subs[] =
 { 0x82, 0x0C, 0x00, 0x01, 0x00, 0x03, 'a', '/', 'b', 0x01, 0x00, 0x01, 'c', 0x00 };
 
 /* --------------------------------------------------------------------------------------------- */
-/* Drives a fresh client through CONNACK, injects subAck and pumps; opts uses subs/subCount.     */
+/* Drives a fresh client with opts through CONNACK, expects subscribe, injects subAck and pumps. */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFMQTTCUTSubAckAttempt(const SSFMQTTCSub_t *subs, uint32_t subCount,
-                                     const uint8_t *subscribe, size_t subscribeLen,
-                                     const uint8_t *subAck, size_t subAckLen)
+static void _SSFMQTTCUTSubAckAttemptOpts(const SSFMQTTCOpts_t *opts, const uint8_t *subscribe,
+                                         size_t subscribeLen, const uint8_t *subAck,
+                                         size_t subAckLen)
 {
-    SSFMQTTCOpts_t opts;
-
     _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
-    _SSFMQTTCUTOptsInit(&opts);
-    opts.subsOpt = subs;
-    opts.subCount = subCount;
-    opts.connectTimeout = SSF_TICKS_PER_SEC * 5u;     /* Reconnects must not race a loaded host */
-    opts.subscribeTimeout = SSF_TICKS_PER_SEC * 5u;
-    SSFMQTTCStart(&opts);
+    SSFMQTTCStart(opts);
     _SSFMQTTCUTPump();
     _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktConnect));
     _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktConnAckOk));
@@ -1118,7 +1111,50 @@ static void _SSFMQTTCUTSubAckAttempt(const SSFMQTTCSub_t *subs, uint32_t subCoun
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Tests that a SUBACK failure code on any filter ends the attempt, even if others were granted. */
+/* Fills opts for subs/subCount with timeouts long enough for a loaded host.                     */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTSubOptsInit(SSFMQTTCOpts_t *opts, const SSFMQTTCSub_t *subs,
+                                   uint32_t subCount)
+{
+    _SSFMQTTCUTOptsInit(opts);
+    opts->subsOpt = subs;
+    opts->subCount = subCount;
+    opts->connectTimeout = SSF_TICKS_PER_SEC * 5u;    /* Reconnects must not race a loaded host */
+    opts->subscribeTimeout = SSF_TICKS_PER_SEC * 5u;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Drives a fresh client through CONNACK, injects subAck and pumps; opts uses subs/subCount.     */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTSubAckAttempt(const SSFMQTTCSub_t *subs, uint32_t subCount,
+                                     const uint8_t *subscribe, size_t subscribeLen,
+                                     const uint8_t *subAck, size_t subAckLen)
+{
+    static SSFMQTTCOpts_t opts;                       /* Read on every reconnect */
+
+    _SSFMQTTCUTSubOptsInit(&opts, subs, subCount);
+    _SSFMQTTCUTSubAckAttemptOpts(&opts, subscribe, subscribeLen, subAck, subAckLen);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Asserts SSFMQTTCGetSubResult() for each declared filter.                                      */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTExpectSubResults(const uint8_t *expected, uint32_t count)
+{
+    uint32_t i;
+    uint8_t r;
+
+    for (i = 0; i < count; i++)
+    {
+        r = 0xAA;
+        SSF_ASSERT(SSFMQTTCGetSubResult(i, &r));
+        SSF_ASSERT(r == expected[i]);
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Tests that a SUBACK failure code reaches READY with SUBSCRIBE_REFUSED, even when every filter */
+/* was refused, that each filter's result is reported, and that the connection works.            */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTScenarioSubAckRefused(void)
 {
@@ -1127,11 +1163,20 @@ static void _SSFMQTTCUTScenarioSubAckRefused(void)
     static const uint8_t subAckSecond[] = { 0x90, 0x04, 0x00, 0x01, 0x01, 0x80 };
     static const uint8_t subAckDownFail[] = { 0x90, 0x04, 0x00, 0x01, 0x00, 0x80 };
     static const uint8_t subAckBoth[] = { 0x90, 0x04, 0x00, 0x01, 0x80, 0x80 };
+    static const uint8_t results[5][2] =
+    {
+        { SSF_MQTTC_SUB_REFUSED, 0 },
+        { SSF_MQTTC_SUB_REFUSED, 0 },
+        { 1, SSF_MQTTC_SUB_REFUSED },
+        { 0, SSF_MQTTC_SUB_REFUSED },
+        { SSF_MQTTC_SUB_REFUSED, SSF_MQTTC_SUB_REFUSED },
+    };
     static const SSFMQTTCUTEventRec_t expected[] =
     {
         { SSF_MQTTC_EVENT_CONNECTED, SSF_MQTTC_REASON_NONE },
-        { SSF_MQTTC_EVENT_CONNECT_FAILED, SSF_MQTTC_REASON_SUBSCRIBE_REFUSED },
+        { SSF_MQTTC_EVENT_READY, SSF_MQTTC_REASON_SUBSCRIBE_REFUSED },
     };
+    static const uint8_t pub0[] = { 0x30, 0x06, 0x00, 0x03, 'a', '/', 'b', 'x' };
     const uint8_t *subAcks[5];
     uint32_t i;
 
@@ -1152,9 +1197,15 @@ static void _SSFMQTTCUTScenarioSubAckRefused(void)
             _SSFMQTTCUTSubAckAttempt(_utTwoSubs, 2, SSF_MQTTC_UT_ARRAY(_utPktSubscribe2Subs),
                                      subAcks[i], sizeof(subAckFirst));
         }
-        SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
-        _SSFMQTTCUTExpectTx(NULL, 0);           /* No DISCONNECT on failure: the will fires */
+        SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTED);
         _SSFMQTTCUTExpectEvents(expected, 2);
+        _SSFMQTTCUTExpectSubResults(results[i], (i == 0) ? 1u : 2u);
+        _SSFMQTTCUTExpectTx(NULL, 0);
+        /* The connection works: the app can publish its diagnostic */
+        SSF_ASSERT(SSFMQTTCTxPublish("a/b", (const uint8_t *)"x", 1, SSF_MQTTC_QOS_0, false, NULL,
+                                     NULL));
+        _SSFMQTTCUTPump();
+        _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(pub0));
         _SSFMQTTCUTEnd();
     }
 }
@@ -1195,6 +1246,10 @@ static void _SSFMQTTCUTScenarioSubAckDowngraded(void)
     SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTED);
     SSF_ASSERT(SSFMQTTCIsReady());
     _SSFMQTTCUTExpectEvents(down, 2);
+    {
+        static const uint8_t granted0[] = { 0 };
+        _SSFMQTTCUTExpectSubResults(granted0, 1);
+    }
     _SSFMQTTCUTExpectTx(NULL, 0);
     _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(rxQos0));
     _SSFMQTTCUTPump();
@@ -3091,6 +3146,291 @@ static void _SSFMQTTCUTScenarioWill(void)
     _SSFMQTTCUTEnd();
 }
 
+/* Three filters: "a/b" QoS 1, "c" QoS 0, "d" QoS 1. */
+static const SSFMQTTCSub_t _utThreeSubs[] =
+{ { "a/b", SSF_MQTTC_QOS_1 }, { "c", SSF_MQTTC_QOS_0 }, { "d", SSF_MQTTC_QOS_1 } };
+static const uint8_t _utPktSubscribe3Subs[] =
+{
+    0x82, 0x10, 0x00, 0x01, 0x00, 0x03, 'a', '/', 'b', 0x01, 0x00, 0x01, 'c', 0x00, 0x00, 0x01,
+    'd', 0x01
+};
+/* "a/b" and "d" refused, "c" granted */
+static const uint8_t _utPktSubAck3RefuseAD[] = { 0x90, 0x05, 0x00, 0x01, 0x80, 0x00, 0x80 };
+
+/* --------------------------------------------------------------------------------------------- */
+/* Reaches READY with "a/b" and "d" of _utThreeSubs refused; opts must outlive the client run.   */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTGoReadyRefusedAD(SSFMQTTCOpts_t *opts)
+{
+    static const SSFMQTTCUTEventRec_t ready[] =
+    {
+        { SSF_MQTTC_EVENT_CONNECTED, SSF_MQTTC_REASON_NONE },
+        { SSF_MQTTC_EVENT_READY, SSF_MQTTC_REASON_SUBSCRIBE_REFUSED },
+    };
+    static const uint8_t results[] = { SSF_MQTTC_SUB_REFUSED, 0, SSF_MQTTC_SUB_REFUSED };
+
+    _SSFMQTTCUTSubAckAttemptOpts(opts, SSF_MQTTC_UT_ARRAY(_utPktSubscribe3Subs),
+                                 SSF_MQTTC_UT_ARRAY(_utPktSubAck3RefuseAD));
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTED);
+    _SSFMQTTCUTExpectEvents(ready, 2);
+    _SSFMQTTCUTExpectSubResults(results, 3);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Tests the automatic retry of refused filters: only they are re-subscribed, every              */
+/* SSF_MQTTC_CONFIG_SUB_RETRY_TICKS, until granted; SUBSCRIPTION_CHANGED reports each gain.      */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTScenarioSubRetry(void)
+{
+    /* Retries carry "a/b" and "d" only, with the next packet ids */
+    static const uint8_t retryAD2[] =
+    { 0x82, 0x0C, 0x00, 0x02, 0x00, 0x03, 'a', '/', 'b', 0x01, 0x00, 0x01, 'd', 0x01 };
+    static const uint8_t retryAD3[] =
+    { 0x82, 0x0C, 0x00, 0x03, 0x00, 0x03, 'a', '/', 'b', 0x01, 0x00, 0x01, 'd', 0x01 };
+    static const uint8_t retryA4[] = { 0x82, 0x08, 0x00, 0x04, 0x00, 0x03, 'a', '/', 'b', 0x01 };
+    static const uint8_t subAckGrantDown2[] = { 0x90, 0x04, 0x00, 0x02, 0x01, 0x00 };
+    static const uint8_t subAckRefuseBoth2[] = { 0x90, 0x04, 0x00, 0x02, 0x80, 0x80 };
+    static const uint8_t subAckGrantD3[] = { 0x90, 0x04, 0x00, 0x03, 0x80, 0x01 };
+    static const uint8_t subAckGrantA4[] = { 0x90, 0x03, 0x00, 0x04, 0x01 };
+    static const uint8_t subAckWrongId[] = { 0x90, 0x04, 0x00, 0x09, 0x01, 0x01 };
+    static const uint8_t subAckTooFew2[] = { 0x90, 0x03, 0x00, 0x02, 0x01 };
+    static const uint8_t subAckExceeded2[] = { 0x90, 0x04, 0x00, 0x02, 0x02, 0x01 };
+    static const uint8_t subAckStray1[] = { 0x90, 0x05, 0x00, 0x01, 0x01, 0x00, 0x01 };
+    static const uint8_t pubX[] = { 0x30, 0x06, 0x00, 0x03, 'a', '/', 'b', 'x' };
+    static const SSFMQTTCUTEventRec_t allGranted[] =
+    { { SSF_MQTTC_EVENT_SUBSCRIPTION_CHANGED, SSF_MQTTC_REASON_NONE } };
+    static const SSFMQTTCUTEventRec_t someGranted[] =
+    { { SSF_MQTTC_EVENT_SUBSCRIPTION_CHANGED, SSF_MQTTC_REASON_SUBSCRIBE_REFUSED } };
+    static const SSFMQTTCUTEventRec_t protocol[] =
+    { { SSF_MQTTC_EVENT_DISCONNECTED, SSF_MQTTC_REASON_PROTOCOL } };
+    static const SSFMQTTCUTEventRec_t subTimeout[] =
+    { { SSF_MQTTC_EVENT_DISCONNECTED, SSF_MQTTC_REASON_SUBSCRIBE_TIMEOUT } };
+    static const SSFMQTTCUTEventRec_t exceeded[] =
+    { { SSF_MQTTC_EVENT_DISCONNECTED, SSF_MQTTC_REASON_SUBSCRIBE_QOS_EXCEEDED } };
+    static const SSFMQTTCUTEventRec_t stopped[] =
+    { { SSF_MQTTC_EVENT_STOPPED, SSF_MQTTC_REASON_NONE } };
+    static const uint8_t resultsGrantDown[] = { 1, 0, 0 };
+    static const uint8_t resultsGrantD[] = { SSF_MQTTC_SUB_REFUSED, 0, 1 };
+    static const uint8_t resultsAll[] = { 1, 0, 1 };
+    static SSFMQTTCOpts_t opts;
+    SSFPortTick_t readyAt;
+    SSFPortTick_t sentAt;
+    uint32_t i;
+    uint8_t r;
+
+    _SSFMQTTCUTSubOptsInit(&opts, _utThreeSubs, 3);
+
+    /* Results: false outside CONNECTED; a bad index or NULL output asserts */
+    _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+    SSF_ASSERT(SSFMQTTCGetSubResult(0, &r) == false);
+    _SSFMQTTCUTEnd();
+
+    /* The first retry, one interval after READY, grants "a/b" and grants "d" at a lower QoS */
+    _SSFMQTTCUTGoReadyRefusedAD(&opts);
+    readyAt = SSFPortGetTick64();
+    SSF_ASSERT_TEST(SSFMQTTCGetSubResult(3, &r));
+    SSF_ASSERT_TEST(SSFMQTTCGetSubResult(0, NULL));
+    sentAt = _SSFMQTTCUTPumpUntilTx(sizeof(retryAD2),
+                                    SSF_MQTTC_CONFIG_SUB_RETRY_TICKS + SSF_MQTTC_UT_LOAD_TICKS);
+    SSF_ASSERT((sentAt - readyAt) >= SSF_MQTTC_CONFIG_SUB_RETRY_TICKS);
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(retryAD2));
+    SSF_ASSERT(_utEventCount == 0);
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(subAckGrantDown2));
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectEvents(allGranted, 1);
+    _SSFMQTTCUTExpectSubResults(resultsGrantDown, 3);
+    /* Nothing refused: no further retry */
+    _SSFMQTTCUTPumpFor((SSF_MQTTC_CONFIG_SUB_RETRY_TICKS * 2u) + SSF_MQTTC_UT_SLACK_TICKS);
+    _SSFMQTTCUTExpectTx(NULL, 0);
+    SSF_ASSERT(_utEventCount == 0);
+    SSF_ASSERT(SSFMQTTCIsReady());
+    /* A repeat of that SUBACK, with no retry outstanding, is a protocol error */
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(subAckGrantDown2));
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
+    _SSFMQTTCUTExpectEvents(protocol, 1);
+    _SSFMQTTCUTEnd();
+
+    /* Still refused: no event, retried again; then one granted, then the last */
+    _SSFMQTTCUTGoReadyRefusedAD(&opts);
+    (void)_SSFMQTTCUTPumpUntilTx(sizeof(retryAD2),
+                                 SSF_MQTTC_CONFIG_SUB_RETRY_TICKS + SSF_MQTTC_UT_LOAD_TICKS);
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(retryAD2));
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(subAckRefuseBoth2));
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(_utEventCount == 0);
+    {
+        static const uint8_t same[] = { SSF_MQTTC_SUB_REFUSED, 0, SSF_MQTTC_SUB_REFUSED };
+        _SSFMQTTCUTExpectSubResults(same, 3);
+    }
+    sentAt = SSFPortGetTick64();
+    readyAt = _SSFMQTTCUTPumpUntilTx(sizeof(retryAD3),
+                                     SSF_MQTTC_CONFIG_SUB_RETRY_TICKS + SSF_MQTTC_UT_LOAD_TICKS);
+    SSF_ASSERT((readyAt - sentAt) >=
+               (SSF_MQTTC_CONFIG_SUB_RETRY_TICKS - SSF_MQTTC_UT_SLACK_TICKS));
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(retryAD3));
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(subAckGrantD3));
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectEvents(someGranted, 1);
+    _SSFMQTTCUTExpectSubResults(resultsGrantD, 3);
+    (void)_SSFMQTTCUTPumpUntilTx(sizeof(retryA4),
+                                 SSF_MQTTC_CONFIG_SUB_RETRY_TICKS + SSF_MQTTC_UT_LOAD_TICKS);
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(retryA4));
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(subAckGrantA4));
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectEvents(allGranted, 1);
+    _SSFMQTTCUTExpectSubResults(resultsAll, 3);
+    _SSFMQTTCUTEnd();
+
+    /* Retry SUBACK with the wrong id, the wrong count, or a higher QoS ends the connection */
+    for (i = 0; i < 3; i++)
+    {
+        _SSFMQTTCUTGoReadyRefusedAD(&opts);
+        (void)_SSFMQTTCUTPumpUntilTx(sizeof(retryAD2),
+                                     SSF_MQTTC_CONFIG_SUB_RETRY_TICKS + SSF_MQTTC_UT_LOAD_TICKS);
+        _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(retryAD2));
+        if (i == 0) _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(subAckWrongId));
+        else if (i == 1) _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(subAckTooFew2));
+        else _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(subAckExceeded2));
+        _SSFMQTTCUTPump();
+        SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
+        SSF_ASSERT(SSFMQTTCGetSubResult(0, &r) == false);
+        _SSFMQTTCUTExpectEvents((i < 2) ? protocol : exceeded, 1);
+        _SSFMQTTCUTExpectTx(NULL, 0);
+        _SSFMQTTCUTEnd();
+    }
+
+    /* A SUBACK while no retry is outstanding is a protocol error */
+    _SSFMQTTCUTGoReadyRefusedAD(&opts);
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(subAckStray1));
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
+    _SSFMQTTCUTExpectEvents(protocol, 1);
+    _SSFMQTTCUTEnd();
+
+    /* Two SUBACKs in one read: the second is a broker error and must not replace the first's   */
+    /* results, so READY still reports the refusals before the connection ends                 */
+    {
+        static const uint8_t subAckGrantAll1[] = { 0x90, 0x05, 0x00, 0x01, 0x01, 0x00, 0x01 };
+        static const SSFMQTTCUTEventRec_t readyThenLost[] =
+        {
+            { SSF_MQTTC_EVENT_CONNECTED, SSF_MQTTC_REASON_NONE },
+            { SSF_MQTTC_EVENT_READY, SSF_MQTTC_REASON_SUBSCRIBE_REFUSED },
+            { SSF_MQTTC_EVENT_DISCONNECTED, SSF_MQTTC_REASON_PROTOCOL },
+        };
+        uint8_t both[sizeof(_utPktSubAck3RefuseAD) + sizeof(subAckGrantAll1)];
+
+        memcpy(both, _utPktSubAck3RefuseAD, sizeof(_utPktSubAck3RefuseAD));
+        memcpy(&both[sizeof(_utPktSubAck3RefuseAD)], subAckGrantAll1, sizeof(subAckGrantAll1));
+        _SSFMQTTCUTSubAckAttemptOpts(&opts, SSF_MQTTC_UT_ARRAY(_utPktSubscribe3Subs),
+                                     SSF_MQTTC_UT_ARRAY(both));
+        SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
+        _SSFMQTTCUTExpectEvents(readyThenLost, 3);
+        _SSFMQTTCUTEnd();
+    }
+
+    /* No SUBACK for a retry within subscribeTimeout ends the connection */
+    opts.subscribeTimeout = SSF_MQTTC_UT_SHORT_TICKS;
+    _SSFMQTTCUTGoReadyRefusedAD(&opts);
+    (void)_SSFMQTTCUTPumpUntilTx(sizeof(retryAD2),
+                                 SSF_MQTTC_CONFIG_SUB_RETRY_TICKS + SSF_MQTTC_UT_LOAD_TICKS);
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(retryAD2));
+    _SSFMQTTCUTPumpUntilState(SSF_MQTTC_STATE_RECONNECT_WAIT,
+                              SSF_MQTTC_UT_SHORT_TICKS + SSF_MQTTC_UT_LOAD_TICKS);
+    _SSFMQTTCUTExpectEvents(subTimeout, 1);
+    _SSFMQTTCUTEnd();
+    _SSFMQTTCUTSubOptsInit(&opts, _utThreeSubs, 3);
+
+    /* No free tx block when the retry falls due: skipped, tried again one interval later */
+    opts.txPublishTimeout = SSF_MQTTC_CONFIG_SUB_RETRY_TICKS * 4u;
+    _SSFMQTTCUTGoReadyRefusedAD(&opts);
+    _utMock.sendResult = SSF_NET_IO_WANT_WRITE;
+    for (i = 0; i < SSF_MQTTC_UT_TX_BLOCKS; i++)
+    {
+        SSF_ASSERT(SSFMQTTCTxPublish("a/b", (const uint8_t *)"x", 1, SSF_MQTTC_QOS_0, false, NULL,
+                                     NULL));
+    }
+    _SSFMQTTCUTPumpFor(SSF_MQTTC_CONFIG_SUB_RETRY_TICKS + SSF_MQTTC_UT_SLACK_TICKS);
+    _utMock.sendResult = SSF_NET_IO_SUCCESS;
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(_utMock.txLen == (SSF_MQTTC_UT_TX_BLOCKS * sizeof(pubX)));   /* No SUBSCRIBE */
+    _utMock.txLen = 0;
+    (void)_SSFMQTTCUTPumpUntilTx(sizeof(retryAD2),
+                                 SSF_MQTTC_CONFIG_SUB_RETRY_TICKS + SSF_MQTTC_UT_LOAD_TICKS);
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(retryAD2));
+    SSF_ASSERT(_utEventCount == 0);
+    _SSFMQTTCUTEnd();
+    _SSFMQTTCUTSubOptsInit(&opts, _utThreeSubs, 3);
+
+    /* Stop with a retry outstanding, and Stop before one is due: DISCONNECT, then nothing */
+    for (i = 0; i < 2; i++)
+    {
+        _SSFMQTTCUTGoReadyRefusedAD(&opts);
+        if (i == 0)
+        {
+            (void)_SSFMQTTCUTPumpUntilTx(sizeof(retryAD2), SSF_MQTTC_CONFIG_SUB_RETRY_TICKS +
+                                                           SSF_MQTTC_UT_LOAD_TICKS);
+            _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(retryAD2));
+        }
+        SSFMQTTCStop();
+        _SSFMQTTCUTPumpUntilState(SSF_MQTTC_STATE_STOPPED, SSF_MQTTC_UT_LOAD_TICKS);
+        _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktDisconnect));
+        _SSFMQTTCUTExpectEvents(stopped, 1);
+        _SSFMQTTCUTPumpFor((SSF_MQTTC_CONFIG_SUB_RETRY_TICKS * 2u) + SSF_MQTTC_UT_SLACK_TICKS);
+        _SSFMQTTCUTExpectTx(NULL, 0);
+        SSF_ASSERT(_utEventCount == 0);
+        _SSFMQTTCUTEnd();
+    }
+
+    /* A new connection subscribes the full set again and starts with fresh results, also when */
+    /* the old one ended with a retry outstanding                                              */
+    _SSFMQTTCUTGoReadyRefusedAD(&opts);
+    (void)_SSFMQTTCUTPumpUntilTx(sizeof(retryAD2),
+                                 SSF_MQTTC_CONFIG_SUB_RETRY_TICKS + SSF_MQTTC_UT_LOAD_TICKS);
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(retryAD2));
+    {
+        static const uint8_t reserved[] = { 0xF0, 0x00 };
+        static const SSFMQTTCUTEventRec_t ready[] =
+        {
+            { SSF_MQTTC_EVENT_CONNECTED, SSF_MQTTC_REASON_NONE },
+            { SSF_MQTTC_EVENT_READY, SSF_MQTTC_REASON_SUBSCRIBE_REFUSED },
+        };
+        static const uint8_t resultsRefuseA[] = { SSF_MQTTC_SUB_REFUSED, 0, 1 };
+        static const uint8_t retryA[] =
+        { 0x82, 0x08, 0x00, 0x00, 0x00, 0x03, 'a', '/', 'b', 0x01 };     /* Id not checked */
+        /* This connection refuses "a/b" only */
+        uint8_t subAck[] = { 0x90, 0x05, 0x00, 0x00, 0x80, 0x00, 0x01 };
+
+        _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(reserved));
+        _SSFMQTTCUTPump();
+        _SSFMQTTCUTExpectEvents(protocol, 1);
+        _SSFMQTTCUTPumpUntilState(SSF_MQTTC_STATE_CONNECTING,
+                                  SSF_MQTTC_UT_BACKOFF_TICKS + SSF_MQTTC_UT_LOAD_TICKS);
+        _SSFMQTTCUTPump();
+        _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktConnect));
+        _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktConnAckOk));
+        _SSFMQTTCUTPump();
+        SSF_ASSERT(_utMock.txLen == sizeof(_utPktSubscribe3Subs));     /* The full set */
+        SSF_ASSERT(memcmp(&_utMock.tx[4], &_utPktSubscribe3Subs[4],
+                          sizeof(_utPktSubscribe3Subs) - 4u) == 0);
+        subAck[2] = _utMock.tx[2];
+        subAck[3] = _utMock.tx[3];
+        _utMock.txLen = 0;
+        _SSFMQTTCUTInject(subAck, sizeof(subAck));
+        _SSFMQTTCUTPump();
+        _SSFMQTTCUTExpectEvents(ready, 2);
+        _SSFMQTTCUTExpectSubResults(resultsRefuseA, 3);
+        /* Its retry carries just "a/b": nothing of the old connection's retry survived */
+        (void)_SSFMQTTCUTPumpUntilTx(sizeof(retryA),
+                                     SSF_MQTTC_CONFIG_SUB_RETRY_TICKS + SSF_MQTTC_UT_LOAD_TICKS);
+        SSF_ASSERT(_utMock.txLen == sizeof(retryA));
+        SSF_ASSERT((_utMock.tx[0] == retryA[0]) && (_utMock.tx[1] == retryA[1]));
+        SSF_ASSERT(memcmp(&_utMock.tx[4], &retryA[4], sizeof(retryA) - 4u) == 0);
+        _utMock.txLen = 0;
+    }
+    _SSFMQTTCUTEnd();
+}
+
 /* --------------------------------------------------------------------------------------------- */
 /* Tests the SUBACK timeout and the txPublish deadline.                                          */
 /* --------------------------------------------------------------------------------------------- */
@@ -3653,6 +3993,7 @@ void SSFMQTTCUnitTest(void)
     _SSFMQTTCUTScenarioPeerClosed();
     _SSFMQTTCUTScenarioConnectFailures();
     _SSFMQTTCUTScenarioSessionTimeouts();
+    _SSFMQTTCUTScenarioSubRetry();
     _SSFMQTTCUTScenarioWill();
     _SSFMQTTCUTScenarioStopPaths();
     _SSFMQTTCUTScenarioGracefulClose();

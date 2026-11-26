@@ -6,8 +6,9 @@ Scope      : _net/ssfmqttc.c, _net/ssfmqttpkt.c/.h, _opt/ssfmqttc_opt.h, _net/ss
              MQTT is not an IETF RFC; "the spec" below means MQTT 3.1.1. Section numbers are
              from that document. Code at commit a8ce46f (branch mqtt).
 Status     : MQTT-IOP-01 and MQTT-FEAT-07 are FIXED (commit 0bc61a9); MQTT-IOP-03 is FIXED;
-             MQTT-IOP-02 is PARTLY FIXED (lower grants); MQTT-IOP-04, MQTT-IOP-06, MQTT-IOP-11,
-             MQTT-FEAT-01, MQTT-FEAT-02 and MQTT-FEAT-10 are FIXED; every other item is OPEN.
+             MQTT-IOP-02 is FIXED (with MQTT-FEAT-04); MQTT-IOP-04, MQTT-IOP-06, MQTT-IOP-11,
+             MQTT-FEAT-01, MQTT-FEAT-02, MQTT-FEAT-04 and MQTT-FEAT-10 are FIXED; MQTT-FEAT-03
+             and MQTT-FEAT-13 are deferred; every other item is OPEN.
 
 Lists
   Part A  Interoperability problems, most likely to happen with real brokers first.
@@ -77,12 +78,12 @@ MQTT-IOP-02  A lower QoS granted in SUBACK is treated as fatal, so the client ne
                value per filter (event or query API). Make "all or nothing" an option, not the
                only behaviour. Report a 0x80 per filter rather than failing the session, or
                fail the session only when the app asks for that.
-  Status     : PARTLY FIXED. A lower granted QoS now reaches READY, reported with the new
+  Status     : FIXED. A lower granted QoS now reaches READY, reported with the new
                reason SUBSCRIBE_DOWNGRADED (an exact grant still reports NONE). A higher QoS than
                requested fails the attempt with the new reason SUBSCRIBE_QOS_EXCEEDED, which
-               takes precedence over a 0x80 on another filter. By decision, a 0x80 on any filter
-               still fails the whole attempt with SUBSCRIBE_REFUSED, and there is no per-filter
-               query; both remain under MQTT-FEAT-04.
+               takes precedence over a 0x80 on another filter. The rest (a refused filter and a
+               per-filter query) is FIXED under MQTT-FEAT-04: a 0x80 now reaches READY with
+               SUBSCRIBE_REFUSED and the filter is retried.
 
 MQTT-IOP-03  Keep-alive race: at the minimum (and documented example) configuration, a missing
              PINGRESP may never be detected
@@ -309,6 +310,9 @@ MQTT-FEAT-03  Persistent sessions (CleanSession = 0)
                consistent, and optionally skip SUBSCRIBE when the session is present. The
                txPublish completion contract and txPublishTimeout teardown would need to be
                reworked.
+  Status     : OPEN. Deferred (2026-11-26). Needed when the system relies on the broker
+               queueing cloud-to-device QoS 1 for offline devices; retained state (FEAT-01),
+               a device twin/shadow, or app-level command acks cover most other designs.
 
 MQTT-FEAT-04  Report per-filter SUBACK results and accept partial grants
   Likelihood : MED-HIGH
@@ -316,8 +320,16 @@ MQTT-FEAT-04  Report per-filter SUBACK results and accept partial grants
   Why        : This is the feature side of IOP-02: apps need to know which filters were
                granted and at which QoS, and to carry on with the ones that were.
   Effort     : Small to medium.
-  Status     : OPEN. Lower grants are accepted (see MQTT-IOP-02), but a refused filter still
-               fails the set and the granted QoS per filter is not reported.
+  Status     : FIXED. A refused filter no longer fails the connection: READY follows any SUBACK
+               (reason SUBSCRIBE_REFUSED, else SUBSCRIBE_DOWNGRADED, else NONE), all-or-nothing
+               is gone, and SSFMQTTCGetSubResult() gives each filter's granted QoS or
+               SSF_MQTTC_SUB_REFUSED, so the app can report the refusal over the live
+               connection at QoS 1. Refused filters alone are subscribed again every
+               SSF_MQTTC_CONFIG_SUB_RETRY_TICKS (default 5 min, >= 60 s by #error) until
+               granted; each gain reports SUBSCRIPTION_CHANGED. A higher QoS than requested
+               still ends the attempt or connection (SUBSCRIBE_QOS_EXCEEDED), as does a missing
+               retry SUBACK (SUBSCRIBE_TIMEOUT). SSF_MQTTC_CONFIG_MAX_SUBSCRIPTIONS is now
+               limited to 16 (per-filter result bitmasks).
 
 MQTT-FEAT-05  SUBSCRIBE and UNSUBSCRIBE at run time
   Likelihood : MED
@@ -410,7 +422,9 @@ MQTT-FEAT-13  Failure message: an app-built QoS 0 PUBLISH sent when the client d
   Open       : E1 payload by callback with reason (recommended) or fixed; E2 bounded drain
                (recommended) or send-and-close; report whether it was sent (event or flag).
   Effort     : Medium (new teardown phase in the state machine, callback during teardown).
-  Status     : OPEN. Deferred; do after MQTT-FEAT-02.
+  Status     : OPEN. Deferred; do after MQTT-FEAT-02. Since MQTT-FEAT-04 the most common case
+               (a SUBSCRIBE refused on every attempt) is reported by the app at QoS 1 over the
+               live connection, so this now matters mainly for broker protocol errors.
 
 
 PART C: CHECKED AND FOUND COMPLIANT

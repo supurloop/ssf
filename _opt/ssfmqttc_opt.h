@@ -31,8 +31,8 @@ extern "C" {
 /* Password, binary, not NUL terminated. 1..65535.                                               */
 #define SSF_MQTTC_CONFIG_MAX_PASSWORD_LEN       (64u)
 
-/* Maximum number of entries in the Start option subscription set. >= 1. All entries are sent    */
-/* filters are sent in one SUBSCRIBE, so the tx block size must hold them.                       */
+/* Maximum number of entries in the Start option subscription set. 1..16. All filters are sent   */
+/* in one SUBSCRIBE, so the tx block size must hold them.                                        */
 #define SSF_MQTTC_CONFIG_MAX_SUBSCRIPTIONS      (8u)
 
 /* Inbound PUBLISH packets held for the app. >= 1. Sizes the rx pool (depth + 1 framing block)  */
@@ -80,12 +80,30 @@ extern "C" {
 #endif
 #endif
 
+/* A filter the broker refused (SUBACK 0x80) is subscribed again this many ticks after READY,   */
+/* and after each refused retry, until granted. At least 60 s, so a fleet does not hammer a      */
+/* broker whose policy refuses it. The ssfmqttc unit test build uses 500 ms. Override with -D.   */
+#ifndef SSF_MQTTC_CONFIG_SUB_RETRY_TICKS
+#if SSF_CONFIG_MQTTC_UNIT_TEST == 1
+#define SSF_MQTTC_CONFIG_SUB_RETRY_TICKS        (SSF_TICKS_PER_SEC / 2u)
+#else
+#define SSF_MQTTC_CONFIG_SUB_RETRY_TICKS        (SSF_TICKS_PER_SEC * 300u)
+#endif
+#endif
+
 /* While the transport is opening (name lookup, then connect) SSFMQTTCTask() lowers its next     */
 /* timeout to this many ticks, since there is no socket yet for the app loop to wait on. >= 1.   */
 #define SSF_MQTTC_CONFIG_OPEN_POLL_TICKS        (SSF_TICKS_PER_SEC / 100u)
 
 #if SSF_MQTTC_CONFIG_MAX_SUBSCRIPTIONS < 1
 #error SSF_MQTTC_CONFIG_MAX_SUBSCRIPTIONS must be at least 1.
+#endif
+#if SSF_MQTTC_CONFIG_MAX_SUBSCRIPTIONS > 16
+#error SSF_MQTTC_CONFIG_MAX_SUBSCRIPTIONS must be at most 16 (per-filter SUBACK result masks).
+#endif
+#if (SSF_CONFIG_MQTTC_UNIT_TEST != 1) && \
+    (SSF_MQTTC_CONFIG_SUB_RETRY_TICKS < (SSF_TICKS_PER_SEC * 60u))
+#error SSF_MQTTC_CONFIG_SUB_RETRY_TICKS must be at least 60 s.
 #endif
 #if SSF_MQTTC_CONFIG_RX_PUBLISH_QUEUE_DEPTH < 1
 #error SSF_MQTTC_CONFIG_RX_PUBLISH_QUEUE_DEPTH must be at least 1.

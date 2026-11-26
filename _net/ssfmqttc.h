@@ -138,6 +138,9 @@ typedef enum
                                      /* RX_PUBLISH_QUEUE_FULL, RX_PUBLISH_TOO_LARGE or          */
                                      /* RX_PUBLISH_TOPIC_TOO_LONG. A QoS 1 packet is still      */
                                      /* acknowledged. Connection is unaffected.                 */
+    SSF_MQTTC_EVENT_SUBSCRIPTION_CHANGED, /* READY: a retry granted a refused filter; reason is  */
+                                     /* NONE once every filter is granted, else                 */
+                                     /* SUBSCRIBE_REFUSED. See SSFMQTTCGetSubResult().          */
     SSF_MQTTC_EVENT_MAX
 } SSFMQTTCEvent_t;
 
@@ -224,6 +227,12 @@ bool SSFMQTTCTxPublish(SSFCStrIn_t topic, const uint8_t *payload, size_t payload
                        void *txPublishFnCtxOpt);
 
 SSFMQTTCState_t SSFMQTTCGetState(void);
+
+/* While CONNECTED, sets *resultOut to the QoS granted to subsOpt[index] (0 or 1), or to         */
+/* SSF_MQTTC_SUB_REFUSED, and returns true; returns false in any other state. Asserts if         */
+/* resultOut is NULL or, while CONNECTED, if index >= subCount.                                  */
+#define SSF_MQTTC_SUB_REFUSED (0x80u)
+bool SSFMQTTCGetSubResult(uint32_t index, uint8_t *resultOut);
 
 /* Not STOPPED: client is working to stay connected                                              */
 #define SSFMQTTCIsStarted() (SSFMQTTCGetState() != SSF_MQTTC_STATE_STOPPED)

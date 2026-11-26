@@ -159,6 +159,7 @@ typedef enum
     SSF_SM_EVENT_MQTTC_TO_TX_PUBLISH,      /* Timer: txPublish deadline check                */
     SSF_SM_EVENT_MQTTC_TO_RECONNECT,       /* Timer: reconnect backoff                       */
     SSF_SM_EVENT_MQTTC_TO_STOP,            /* Timer: STOPPING flush limit                    */
+    SSF_SM_EVENT_MQTTC_TO_SUB_RETRY,       /* Timer: re-subscribe refused filters            */
     SSF_SM_EVENT_MAX
 } SSFSMEventList_t;
 

@@ -43,8 +43,29 @@ extern "C" {
 #define SSF_MQTTC_CONFIG_RX_PUBLISH_RETRY_TICKS (SSF_TICKS_PER_SEC)
 
 /* A deferred rxPublish is dropped once this many ticks have elapsed since its first offer.      */
-/* >= SSF_MQTTC_CONFIG_RX_PUBLISH_RETRY_TICKS.                                                   */
+/* >= SSF_MQTTC_CONFIG_RX_PUBLISH_RETRY_TICKS. The ssfmqttc unit test build uses 5 s so the drop */
+/* can be tested. Override with -D.                                                              */
+#ifndef SSF_MQTTC_CONFIG_RX_PUBLISH_MAX_TICKS
+#if SSF_CONFIG_MQTTC_UNIT_TEST == 1
+#define SSF_MQTTC_CONFIG_RX_PUBLISH_MAX_TICKS   (SSF_TICKS_PER_SEC * 5u)
+#else
 #define SSF_MQTTC_CONFIG_RX_PUBLISH_MAX_TICKS   (SSF_TICKS_PER_SEC * 30u)
+#endif
+#endif
+
+/* Back-pressure: a QoS 1 PUBLISH that finds the rx queue full is held, unread bytes behind it   */
+/* stay in the transport, for at most this many ticks; it is then dropped and acknowledged       */
+/* (SSF_MQTTC_REASON_RX_PUBLISH_HOLD_TIMEOUT) and reading resumes. A hold delays everything      */
+/* behind it, PINGRESP and PUBACKs for the app's own publishes included, so txPublishTimeout and */
+/* subscribeTimeout should exceed it. >= 1. The ssfmqttc unit test build uses 400 ms, longer     */
+/* than its PINGRESP timeout, so that keep-alive across a hold can be tested. Override with -D.  */
+#ifndef SSF_MQTTC_CONFIG_RX_HOLD_MAX_TICKS
+#if SSF_CONFIG_MQTTC_UNIT_TEST == 1
+#define SSF_MQTTC_CONFIG_RX_HOLD_MAX_TICKS      ((SSF_TICKS_PER_SEC * 2u) / 5u)
+#else
+#define SSF_MQTTC_CONFIG_RX_HOLD_MAX_TICKS      (SSF_TICKS_PER_SEC * 10u)
+#endif
+#endif
 
 /* Connection is dropped (SSF_MQTTC_REASON_KEEPALIVE) if PINGRESP does not arrive within this    */
 /* many ticks of PINGREQ. >= 1. PINGREQ is sent every keepAliveSec / 4, which must be at least   */
@@ -77,6 +98,9 @@ extern "C" {
 #endif
 #if SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT < 1
 #error SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT must be at least 1.
+#endif
+#if SSF_MQTTC_CONFIG_RX_HOLD_MAX_TICKS < 1
+#error SSF_MQTTC_CONFIG_RX_HOLD_MAX_TICKS must be at least 1.
 #endif
 #if SSF_MQTTC_CONFIG_OPEN_POLL_TICKS < 1
 #error SSF_MQTTC_CONFIG_OPEN_POLL_TICKS must be at least 1.

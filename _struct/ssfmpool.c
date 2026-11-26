@@ -42,6 +42,11 @@
 /* --------------------------------------------------------------------------------------------- */
 #define SSF_MPOOL_INIT_MAGIC (0x43130817ul)
 
+/* Block header: the free-list item, padded so the block after it is SSF_MPOOL_ALIGN aligned.    */
+/* Memory layout per block: [header][blockSize bytes][3-byte canary][owner].                     */
+#define SSF_MPOOL_HDR_SIZE ((((uint32_t)sizeof(SSFLLItem_t) + SSF_MPOOL_ALIGN - 1u) / \
+                             SSF_MPOOL_ALIGN) * SSF_MPOOL_ALIGN)
+
 #if SSF_MPOOL_DEBUG == 1
 typedef struct SSFMPoolDebug
 {
@@ -55,7 +60,7 @@ typedef struct SSFMPoolDebug
 /* --------------------------------------------------------------------------------------------- */
 void SSFMPoolInit(SSFMPool_t *pool, uint32_t blocks, uint32_t blockSize)
 {
-    uint32_t memSize = blockSize + sizeof(SSFLLItem_t) + sizeof(uint32_t);
+    uint32_t memSize = blockSize + SSF_MPOOL_HDR_SIZE + (uint32_t)sizeof(uint32_t);
     uint32_t i;
 #if SSF_MPOOL_DEBUG == 1
     SSFMPoolDebug_t *w;
@@ -75,8 +80,11 @@ void SSFMPoolInit(SSFMPool_t *pool, uint32_t blocks, uint32_t blockSize)
     {
         SSFLLItem_t *mem;
         SSF_ASSERT((mem = (SSFLLItem_t*)SSF_MALLOC(memSize)) != NULL);
+        /* SSF_MALLOC must align like malloc(), or the blocks after the header are not aligned */
+        SSF_ASSERT(((uintptr_t)mem % SSF_MPOOL_ALIGN) == 0u);
         memset(mem, 0, memSize);
-        memcpy(((uint8_t *)mem) + blockSize + sizeof(SSFLLItem_t), "\x12\x34\x56\xff", sizeof(uint32_t));
+        memcpy(((uint8_t *)mem) + SSF_MPOOL_HDR_SIZE + blockSize, "\x12\x34\x56\xff",
+               sizeof(uint32_t));
         SSF_LL_FIFO_PUSH(&(pool->avail), mem);
 #if SSF_MPOOL_DEBUG == 1
         SSF_ASSERT((w = (SSFMPoolDebug_t *)SSF_MALLOC(sizeof(SSFMPoolDebug_t))) != NULL);
@@ -102,7 +110,7 @@ void SSFMPoolDeInit(SSFMPool_t *pool)
     SSF_REQUIRE(pool->magic == SSF_MPOOL_INIT_MAGIC);
     SSF_REQUIRE(SSFMPoolIsFull(pool));
 
-    memSize = pool->blockSize + sizeof(SSFLLItem_t) + sizeof(uint32_t);
+    memSize = pool->blockSize + SSF_MPOOL_HDR_SIZE + (uint32_t)sizeof(uint32_t);
     for (i = 0; i < pool->blocks; i++)
     {
         SSFLLItem_t *mem = NULL;
@@ -143,12 +151,12 @@ void *SSFMPoolAlloc(SSFMPool_t *pool, uint32_t size, uint8_t owner)
 
     SSF_ASSERT(SSF_LL_FIFO_POP(&(pool->avail), &mem) == true);
 
-    p = ((uint8_t *)mem) + sizeof(SSFLLItem_t) + pool->blockSize;
+    p = ((uint8_t *)mem) + SSF_MPOOL_HDR_SIZE + pool->blockSize;
     SSF_ASSERT(memcmp(p, "\x12\x34\x56", sizeof(uint32_t) - 1) == 0);
     p += sizeof(uint32_t) - 1;
     *p = owner;
 
-    return (void *)(((uint8_t *)mem) + sizeof(SSFLLItem_t));
+    return (void *)(((uint8_t *)mem) + SSF_MPOOL_HDR_SIZE);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -162,7 +170,9 @@ void *SSFMPoolFree(SSFMPool_t *pool, void *mpool)
 
     SSF_ASSERT(memcmp(((uint8_t *)mpool) + pool->blockSize, "\x12\x34\x56",
                       sizeof(uint32_t) - 1) == 0);
-    SSF_LL_FIFO_PUSH(&(pool->avail), ((SSFLLItem_t *) mpool) - 1);
+    /* The header is SSF_MPOOL_HDR_SIZE bytes before the block, and malloc() aligned */
+    SSF_LL_FIFO_PUSH(&(pool->avail),
+                     (SSFLLItem_t *)(void *)(((uint8_t *)mpool) - SSF_MPOOL_HDR_SIZE));
     return NULL;
 }
 

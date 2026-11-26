@@ -30,6 +30,10 @@ Each block is guarded by a canary value that detects buffer overruns at free tim
   `ptr = (MyType_t *)SSFMPoolFree(&pool, ptr)`.
 - `SSFMPoolDeInit()` asserts if any blocks are still allocated; free all blocks first.
 - Each block carries a 3-byte canary; `SSFMPoolFree()` verifies it to detect overruns.
+- Every block is aligned to `SSF_MPOOL_ALIGN` bytes, the strictest alignment of the basic C
+  types (as `malloc()` guarantees), so it can hold any struct, including ones with `uint64_t`,
+  `double` or `long double` members. `SSF_MALLOC` must return memory aligned that strictly;
+  `SSFMPoolInit()` asserts if it does not. The per-block header is padded to keep the alignment.
 - When [`SSF_MPOOL_DEBUG`](#opt-mpool-debug) is `1`, each block records its `owner` tag to aid
   leak analysis.
 - All blocks are the same size; allocating a struct smaller than `blockSize` is allowed but
@@ -163,7 +167,8 @@ allocation. The `owner` tag is stored in the block's canary area to aid leak ana
 | `size` | in | `uint32_t` | Requested allocation size in bytes. Must not exceed the pool's `blockSize`. |
 | `owner` | in | `uint8_t` | Tag identifying the allocating code path. Stored in the block header regardless of `SSF_MPOOL_DEBUG`. |
 
-**Returns:** Pointer to the allocated block. Asserts if the pool is empty or `size > blockSize`.
+**Returns:** Pointer to the allocated block, aligned to `SSF_MPOOL_ALIGN` bytes. Asserts if the
+pool is empty or `size > blockSize`.
 
 <a id="ex-alloc"></a>
 

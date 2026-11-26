@@ -36,6 +36,7 @@
 extern "C" {
 #endif
 
+#include <stddef.h>
 #include <stdint.h>
 #include "ssfport.h"
 #include "ssfll.h"
@@ -43,6 +44,25 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 /* Defines and typedefs                                                                          */
 /* --------------------------------------------------------------------------------------------- */
+/* Every block SSFMPoolAlloc() returns is aligned to SSF_MPOOL_ALIGN bytes: the strictest        */
+/* alignment of the basic C types, which is what malloc() guarantees.                            */
+typedef union
+{
+    long double ld;
+    double d;
+    uint64_t u64;
+    void *p;
+    void (*fp)(void);
+} SSFMPoolAlign_t;
+
+typedef struct
+{
+    uint8_t pad;
+    SSFMPoolAlign_t a;
+} SSFMPoolAlignProbe_t;
+
+#define SSF_MPOOL_ALIGN ((uint32_t)offsetof(SSFMPoolAlignProbe_t, a))
+
 typedef struct SSFMPool
 {
     SSFLL_t avail;

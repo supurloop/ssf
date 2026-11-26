@@ -194,6 +194,35 @@ void SSFMPoolUnitTest(void)
     /* Clean up: free the block and deinit properly */
     testPtr = SSFMPoolFree(&smpTestPool, testPtr);
     SSFMPoolDeInit(&smpTestPool);
+
+    /* Every block is SSF_MPOOL_ALIGN aligned, whatever the block size, and holds a uint64_t */
+    {
+        static const uint32_t sizes[] = { 1u, 3u, 8u, 13u, SMP_TEST_BLOCK_SIZE, 64u };
+        uint32_t s;
+
+        SSF_ASSERT(SSF_MPOOL_ALIGN >= sizeof(void *));
+        SSF_ASSERT(SSF_MPOOL_ALIGN >= sizeof(uint32_t));
+        SSF_ASSERT((SSF_MPOOL_ALIGN & (SSF_MPOOL_ALIGN - 1u)) == 0u);
+        for (s = 0; s < (uint32_t)(sizeof(sizes) / sizeof(sizes[0])); s++)
+        {
+            SSFMPoolInit(&smpTestPool, SMP_TEST_BLOCKS, sizes[s]);
+            for (i = 0; i < SMP_TEST_BLOCKS; i++)
+            {
+                smpTestPtrs[i] = SSFMPoolAlloc(&smpTestPool, sizes[s], (uint8_t)i);
+                SSF_ASSERT(((uintptr_t)smpTestPtrs[i] % SSF_MPOOL_ALIGN) == 0u);
+                if (sizes[s] >= sizeof(uint64_t))
+                {
+                    *(uint64_t *)smpTestPtrs[i] = 0x0123456789ABCDEFull;
+                    SSF_ASSERT(*(const uint64_t *)smpTestPtrs[i] == 0x0123456789ABCDEFull);
+                }
+            }
+            for (i = 0; i < SMP_TEST_BLOCKS; i++)
+            {
+                smpTestPtrs[i] = SSFMPoolFree(&smpTestPool, smpTestPtrs[i]);
+            }
+            SSFMPoolDeInit(&smpTestPool);
+        }
+    }
 }
 #endif /* SSF_CONFIG_MPOOL_UNIT_TEST */
 

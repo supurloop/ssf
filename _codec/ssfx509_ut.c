@@ -8704,6 +8704,28 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(SSFX509VerifySignature(&kc, sha256RsaOid, sizeof(sha256RsaOid), NULL, 0u, NULL,
                                           0u, msg, (uint32_t)(sizeof(msg) - 1u), sigE1,
                                           sizeof(sigE1)) == false);
+
+        /* n = 0 or e = 0 (each the single INTEGER byte 0x00) is not a usable key: refused. */
+        {
+            static const uint8_t pubN0[] = {
+                0x30u, 0x06u, 0x02u, 0x01u, 0x00u, 0x02u, 0x01u, 0x03u
+            };
+            static uint8_t pubE0[sizeof(pub2048e3)];
+
+            kc.pubKey = pubN0;
+            kc.pubKeyLen = sizeof(pubN0);
+            SSF_ASSERT(SSFX509VerifySignature(&kc, sha256RsaOid, sizeof(sha256RsaOid), NULL, 0u,
+                                              NULL, 0u, msg, (uint32_t)(sizeof(msg) - 1u),
+                                              sig2048e3, sizeof(sig2048e3)) == false);
+            memcpy(pubE0, pub2048e3, sizeof(pubE0));
+            SSF_ASSERT(pubE0[sizeof(pubE0) - 1u] == 0x03u);
+            pubE0[sizeof(pubE0) - 1u] = 0x00u;
+            kc.pubKey = pubE0;
+            kc.pubKeyLen = sizeof(pubE0);
+            SSF_ASSERT(SSFX509VerifySignature(&kc, sha256RsaOid, sizeof(sha256RsaOid), NULL, 0u,
+                                              NULL, 0u, msg, (uint32_t)(sizeof(msg) - 1u),
+                                              sig2048e3, sizeof(sig2048e3)) == false);
+        }
     }
 #endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 && SSF_RSA_CONFIG_ENABLE_2048 */
 

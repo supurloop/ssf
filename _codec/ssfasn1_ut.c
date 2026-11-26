@@ -352,6 +352,27 @@ void SSFASN1UnitTest(void)
         cursor.buf = i128; cursor.bufLen = sizeof(i128);
         SSF_ASSERT(SSFASN1DecGetUInt(&cursor, &iBuf, &iLen, &next) == true);
         SSF_ASSERT((iLen == 1u) && (iBuf == &i128[3]) && (iBuf[0] == 0x80u));
+
+        /* GetUInt contract callers rely on (ssfx509 RSA key policy): a returned magnitude has */
+        /* no leading 0x00 unless the value is zero, which comes back as the single byte 0x00. */
+        {
+            static const uint8_t iMulti[] = { 0x02u, 0x03u, 0x00u, 0x80u, 0x01u };
+            static const struct { const uint8_t *der; uint32_t len; } uints[] = {
+                { iZero, sizeof(iZero) }, { i7F, sizeof(i7F) }, { i128, sizeof(i128) },
+                { iMulti, sizeof(iMulti) }
+            };
+
+            for (i = 0; i < (uint32_t)(sizeof(uints) / sizeof(uints[0])); i++)
+            {
+                cursor.buf = uints[i].der; cursor.bufLen = uints[i].len;
+                SSF_ASSERT(SSFASN1DecGetUInt(&cursor, &iBuf, &iLen, &next) == true);
+                SSF_ASSERT(iLen >= 1u);
+                SSF_ASSERT((iBuf[0] != 0x00u) || (iLen == 1u));
+            }
+            cursor.buf = iMulti; cursor.bufLen = sizeof(iMulti);
+            SSF_ASSERT(SSFASN1DecGetUInt(&cursor, &iBuf, &iLen, &next) == true);
+            SSF_ASSERT((iLen == 2u) && (iBuf == &iMulti[3]) && (iBuf[0] == 0x80u));
+        }
     }
 
     /* ---- AUDIT ASN1-2: long-form lengths must be minimal (X.690 10.1) ---- */

@@ -4730,6 +4730,68 @@ void SSFBNUnitTest(void)
         SSF_ASSERT_TEST(SSFBNGenPrime(&narrow, 33u, 5u, &prng));
     }
 
+    /* ---- BN-14: Miller-Rabin's squarings: Carmichael, strong pseudoprimes, large-s cases ---- */
+    {
+        static const uint32_t carm[] = { 561u, 1105u, 1729u, 2465u, 2821u, 6601u, 8911u, 41041u,
+                                         825265u, 321197185u, 2047u, 3277u, 4033u, 4681u,
+                                         8321u, 3215031751u };
+        static const uint8_t spsp62[] = { 0x35u, 0x15u, 0x91u, 0x27u, 0x4Fu, 0x9Au, 0xF9u, 0xFBu };
+        static const uint8_t spsp79[] = { 0x43u, 0x7Au, 0xE9u, 0x28u, 0x17u, 0xF9u, 0xFCu, 0x85u,
+                                          0xB7u, 0xE5u };
+        static const uint8_t spsp82[] = { 0x02u, 0xBEu, 0x69u, 0x51u, 0xADu, 0xC5u, 0xB2u, 0x24u,
+                                          0x10u, 0xA5u, 0xFDu };
+        SSFPRNGContext_t prng;
+        uint8_t seed[SSF_PRNG_ENTROPY_SIZE];
+        SSFBN_DEFINE(n, SSF_BN_MAX_MOD_LIMBS);
+        uint16_t k;
+
+        memset(seed, 0x4Du, sizeof(seed));
+        SSFPRNGInitContext(&prng, seed, sizeof(seed));
+
+        /* Carmichael numbers and strong base-2 pseudoprimes are composite */
+        for (k = 0u; k < (uint16_t)(sizeof(carm) / sizeof(carm[0])); k++)
+        {
+            SSFBNSetUint32(&n, carm[k], 1u);
+            SSF_ASSERT(SSFBNIsProbablePrime(&n, 5u, &prng) == false);
+        }
+        /* Strong pseudoprimes to every prime base up to 37 and beyond are composite too */
+        SSF_ASSERT(SSFBNFromBytes(&n, spsp62, sizeof(spsp62), 2u));
+        SSF_ASSERT(SSFBNIsProbablePrime(&n, 5u, &prng) == false);
+        SSF_ASSERT(SSFBNFromBytes(&n, spsp79, sizeof(spsp79), 3u));
+        SSF_ASSERT(SSFBNIsProbablePrime(&n, 5u, &prng) == false);
+        SSF_ASSERT(SSFBNFromBytes(&n, spsp82, sizeof(spsp82), 3u));
+        SSF_ASSERT(SSFBNIsProbablePrime(&n, 5u, &prng) == false);
+
+        /* Large s (n - 1 = 2^s * d): Fermat primes 257 and 65537 (s = 8, 16) are prime; the */
+        /* composite Fermat numbers 2^32 + 1, 2^64 + 1, 2^128 + 1 (s = 32, 64, 128) are not    */
+        SSFBNSetUint32(&n, 257u, 1u);
+        SSF_ASSERT(SSFBNIsProbablePrime(&n, 5u, &prng) == true);
+        SSFBNSetUint32(&n, 65537u, 1u);
+        SSF_ASSERT(SSFBNIsProbablePrime(&n, 5u, &prng) == true);
+        for (k = 32u; k <= 128u; k = (uint16_t)(k * 2u))
+        {
+            SSFBNSetZero(&n, (uint16_t)((k / 32u) + 1u));
+            n.limbs[k / 32u] = 1u;
+            n.limbs[0] = 1u;
+            SSF_ASSERT(SSFBNIsProbablePrime(&n, 5u, &prng) == false);
+        }
+
+        /* 45 * 2^200 + 1 (206 bits, s = 200) and 97 * 2^400 + 1 (407 bits, s = 400) are prime */
+        if (SSF_BN_MAX_MOD_LIMBS >= 13u)
+        {
+            SSFBNSetZero(&n, 7u);
+            n.limbs[200u / 32u] = 45u << (200u % 32u);
+            n.limbs[0] = 1u;
+            SSF_ASSERT(SSFBNIsProbablePrime(&n, 5u, &prng) == true);
+            n.limbs[0] = 3u; /* 45 * 2^200 + 3 is divisible by 3 */
+            SSF_ASSERT(SSFBNIsProbablePrime(&n, 5u, &prng) == false);
+            SSFBNSetZero(&n, 13u);
+            n.limbs[400u / 32u] = 97u << (400u % 32u);
+            n.limbs[0] = 1u;
+            SSF_ASSERT(SSFBNIsProbablePrime(&n, 5u, &prng) == true);
+        }
+    }
+
     /* ---- BN-13: 32-bit targets' trial-division remainder, every d < 2^16 ---- */
     {
         static SSFBNLimb_t tdL[SSF_BN_MAX_LIMBS];

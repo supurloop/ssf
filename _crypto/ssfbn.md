@@ -675,7 +675,8 @@ void SSFBNModSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
 ```
 `r = a² mod m` using `SSFBNSquare` followed by `SSFBNMod`. `r` may alias `a`. Inherits
 `SSFBNMod`'s timing: constant-time for an odd `m` of at most `SSF_BN_MAX_MOD_LIMBS` limbs,
-variable-time otherwise. Used by `SSFBNIsProbablePrime` for the witness inner squaring loop.
+variable-time otherwise. No in-tree module calls it (Miller-Rabin squares in Montgomery form,
+OPTIMIZE BN-14).
 
 <a id="ex-modmul"></a>
 
@@ -1051,7 +1052,11 @@ depending on modulus size. `n` is a Montgomery modulus, so `n->len` must not exc
 Internally writes `n − 1 = 2ˢ · d` (using `SSFBNTrailingZeros` and `SSFBNShiftRight`),
 then for each round picks a random witness `a ∈ [2, n − 2]` (via `SSFBNRandom` with
 post-mask), computes `x = aᵈ mod n` via `SSFBNModExpMont` (the precomputed Montgomery
-context is reused across rounds), and applies the standard Miller-Rabin inner loop. Every
+context is reused across rounds), and applies the standard Miller-Rabin inner loop, squaring
+`x` in Montgomery form with that same context and converting each result out for the
+comparisons with `1` and `n − 1` (OPTIMIZE BN-14; it used `SSFBNModSquare`, which builds a new
+context per squaring: about 4× slower when `s` is large, and 484 B more linked keygen code on
+Cortex-M4). Every
 working value derived from `n` (`n − 1`, `d`, the witness, `x`, `n − 3` and the Montgomery
 context) is zeroized before the function returns, since `n` is typically a secret RSA prime
 candidate.

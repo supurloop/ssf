@@ -3547,21 +3547,25 @@ bool SSFBNIsProbablePrime(const SSFBN_t *n, uint16_t rounds, SSFPRNGContext_t *p
             continue;
         }
 
-        /* Inner loop: square x up to s-1 times, looking for x == n-1. */
+        /* Inner loop: square x up to s-1 times, looking for x == n-1. x is squared in Montgomery */
+        /* form with the context already built for n, and each result converted out into a (the */
+        /* witness, no longer needed this round) for the comparisons (OPTIMIZE BN-14).          */
         cont = false;
+        SSFBNMontConvertIn(&x, &x, &mont);
         for (r = 1; r < s; r++)
         {
-            SSFBNModSquare(&x, &x, n);
+            SSFBNMontSquare(&x, &x, &mont);
+            SSFBNMontConvertOut(&a, &x, &mont);
 
             /* Did squaring hit n-1? */
-            if (SSFBNCmp(&x, &nm1) == 0)
+            if (SSFBNCmp(&a, &nm1) == 0)
             {
                 /* Yes, witness inconclusive. */
                 cont = true;
                 break;
             }
             /* Did squaring reach 1 without first passing through n-1? */
-            if (SSFBNIsOne(&x))
+            if (SSFBNIsOne(&a))
             {
                 /* Yes, definitive composite via non-trivial sqrt(1). */
                 goto cleanup;

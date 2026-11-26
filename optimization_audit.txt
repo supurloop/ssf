@@ -674,7 +674,21 @@ BN-14  CODE / PERF  -484 B linked keygen code; Miller-Rabin squares ~16 -> 2 Mon
   Location : _crypto/ssfbn.c:3347
   Change   : ConvertIn(x) once; per round MontSquare then ConvertOut into a; compare a.
   Risk     : low; constant-time Montgomery operations.
-  Status   : OPEN
+  Status   : DONE (2026-11-25): as specified. Measured (-Os, --gc-sections, tests off, 4096
+             cap, on 6eef44e): keygen + sign 27,028 -> 26,544 B (-484) on Cortex-M4, 30,812 ->
+             30,136 (-676) on M0+; SSFBNModSquare no longer linked. Stack: one more spill in
+             SSFBNIsProbablePrime (3,696 -> 3,704 B), so the keygen peak is +8 B at 4096 and
+             3072 (0 at 2048); a noinline helper for the loop was tried, cost the same 8 B and
+             24 B more code. Host: MR(5) on primes with s = 200 / 600 / 1000 0.90 -> 0.23,
+             9.9 -> 2.8, 55.7 -> 11.7 ms; seeded SSFBNGenPrime within noise (RSA candidates
+             have small s), primes identical. Verdicts: with a fixed seed, identical to HEAD
+             over 2,208 numbers (Carmichael numbers, strong pseudoprimes, primes, semiprimes,
+             random odd, 1,990 of the form i * 2^k + 1) and none disagrees with OpenSSL. Tests:
+             Carmichael numbers and strong pseudoprimes composite, Fermat primes 257 / 65537
+             prime, 2^32 + 1 / 2^64 + 1 / 2^128 + 1 composite, 45 * 2^200 + 1 and 97 * 2^400 + 1
+             prime; a behaviour guard, passing on HEAD. Mutants under ASan: 4 of 5 killed (no
+             ConvertIn, no ConvertOut, one squaring short, x compared instead of a); the 5th
+             (the two checks swapped) is equivalent, as no value is both 1 and n - 1.
 
 BN-15  CODE / STACK  -268 B linked sign code; the 3,144 B _SSFBNModMulCTShift frame
        and the Karatsuba chain leave ModMulCT's static worst case                       M

@@ -2,7 +2,7 @@
 /* Small System Framework                                                                        */
 /*                                                                                               */
 /* ssfpem.h                                                                                      */
-/* Provides a PEM (RFC 7468) block decoder.                                                      */
+/* Provides a PEM (RFC 7468) block encoder and decoder.                                          */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
 /* Copyright 2026 Supurloop Software LLC                                                         */
@@ -47,6 +47,10 @@ extern "C" {
 /* Longest label accepted between "-----BEGIN " and "-----" (e.g. "ENCRYPTED PRIVATE KEY"). */
 #define SSF_PEM_MAX_LABEL_LEN (40u)
 
+/* Buffer size SSFPEMEncode() needs, NUL included; a constant expression for constant inputs. */
+#define SSF_PEM_ENCODE_SIZE(labelLen, derLen) \
+    ((2u * (labelLen)) + 33u + (4u * (((derLen) + 2u) / 3u)) + (((derLen) + 47u) / 48u))
+
 typedef enum
 {
     SSF_PEM_BLOCK,    /* A block was decoded; *pos is past its END line */
@@ -66,6 +70,10 @@ SSFPEMResult_t SSFPEMDecodeNext(const char *pem, size_t pemLen, size_t *pos,
 
 /* Returns true if label[0..labelLen) equals the C string cmpStr. */
 bool SSFPEMLabelIs(const char *label, size_t labelLen, const char *cmpStr);
+
+/* Encodes derOpt[0..derLen) as one PEM block with a NUL; pemOpt NULL only measures. */
+bool SSFPEMEncode(const char *labelStr, const uint8_t *derOpt, size_t derLen, char *pemOpt,
+                  size_t pemSize, size_t *pemLenOut);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */

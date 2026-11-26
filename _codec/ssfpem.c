@@ -212,3 +212,107 @@ bool SSFPEMLabelIs(const char *label, size_t labelLen, const char *cmpStr)
 
     return ((strlen(cmpStr) == labelLen) && (memcmp(label, cmpStr, labelLen) == 0));
 }
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if labelStr is a label SSFPEMDecodeNext() accepts; sets *labelLenOut.           */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFPEMLabelIsValid(const char *labelStr, size_t *labelLenOut)
+{
+    size_t i;
+    size_t dashes = 0;
+
+    SSF_REQUIRE(labelStr != NULL);
+    SSF_REQUIRE(labelLenOut != NULL);
+
+    for (i = 0; labelStr[i] != 0; i++)
+    {
+        uint8_t ch = (uint8_t)labelStr[i];
+
+        /* Is the label too long, or is this character outside printable ASCII? */
+        if ((i >= SSF_PEM_MAX_LABEL_LEN) || (ch < 0x20u) || (ch > 0x7Eu)) return false;
+        /* Is this character a dash? */
+        if (ch == '-')
+        {
+            /* Yes, refuse a run of five, which would read as the closing dashes */
+            dashes++;
+            if (dashes >= SSF_PEM_DASHES_LEN) return false;
+        }
+        else
+        {
+            /* No, the run of dashes ends */
+            dashes = 0;
+        }
+    }
+    *labelLenOut = i;
+    return ((i > 0u) && (dashes == 0u));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Encodes one PEM block; see ssfpem.h.                                                          */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFPEMEncode(const char *labelStr, const uint8_t *derOpt, size_t derLen, char *pemOpt,
+                  size_t pemSize, size_t *pemLenOut)
+{
+    size_t labelLen = 0;
+    size_t need;
+    size_t w;
+    size_t chunk;
+    size_t lineLen;
+    bool isValid;
+
+    SSF_REQUIRE(labelStr != NULL);
+    SSF_REQUIRE(pemLenOut != NULL);
+    SSF_REQUIRE((derOpt != NULL) || (derLen == 0u));
+    SSF_REQUIRE(derLen <= (SIZE_MAX / 2u));
+    isValid = _SSFPEMLabelIsValid(labelStr, &labelLen);
+    SSF_REQUIRE(isValid);
+    SSF_REQUIRE((pemOpt == NULL) || (pemSize == 0u) || (derLen == 0u) ||
+                ((((uintptr_t)pemOpt) + pemSize) <= ((uintptr_t)derOpt)) ||
+                ((((uintptr_t)derOpt) + derLen) <= ((uintptr_t)pemOpt)));
+    SSF_REQUIRE((pemOpt == NULL) || (pemSize == 0u) ||
+                ((((uintptr_t)pemOpt) + pemSize) <= ((uintptr_t)labelStr)) ||
+                ((((uintptr_t)labelStr) + labelLen) <= ((uintptr_t)pemOpt)));
+
+    need = (SSF_PEM_ENCODE_SIZE(labelLen, derLen) - 1u);
+    *pemLenOut = need;
+    /* Is this only a measure? */
+    if (pemOpt == NULL) return true;
+    /* Is the buffer too small for the block and its NUL? */
+    if (pemSize <= need)
+    {
+        /* Yes, zero the buffer and fail */
+        if (pemSize > 0u) SSFCryptSecureZero(pemOpt, pemSize);
+        return false;
+    }
+
+    /* BEGIN line */
+    memcpy(pemOpt, SSF_PEM_BEGIN, SSF_PEM_BEGIN_LEN);
+    w = SSF_PEM_BEGIN_LEN;
+    memcpy(&pemOpt[w], labelStr, labelLen);
+    w += labelLen;
+    memcpy(&pemOpt[w], SSF_PEM_DASHES "\n", (SSF_PEM_DASHES_LEN + 1u));
+    w += (SSF_PEM_DASHES_LEN + 1u);
+
+    /* Body: 48 bytes per 64-character line; each line's NUL from SSFBase64Encode() becomes LF */
+    while (derLen > 0u)
+    {
+        chunk = ((derLen > 48u) ? 48u : derLen);
+        isValid = SSFBase64Encode(derOpt, chunk, &pemOpt[w], (pemSize - w), &lineLen);
+        SSF_ASSERT((isValid) && (lineLen == (4u * ((chunk + 2u) / 3u))));
+        w += lineLen;
+        pemOpt[w] = '\n';
+        w++;
+        derOpt += chunk;
+        derLen -= chunk;
+    }
+
+    /* END line and NUL */
+    memcpy(&pemOpt[w], SSF_PEM_END_TAG, SSF_PEM_END_LEN);
+    w += SSF_PEM_END_LEN;
+    memcpy(&pemOpt[w], labelStr, labelLen);
+    w += labelLen;
+    memcpy(&pemOpt[w], SSF_PEM_DASHES "\n", (SSF_PEM_DASHES_LEN + 2u));
+    w += (SSF_PEM_DASHES_LEN + 1u);
+    SSF_ENSURE(w == need);
+    return true;
+}

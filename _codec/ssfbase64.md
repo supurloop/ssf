@@ -33,8 +33,9 @@ alphabet (`A–Z`, `a–z`, `0–9`, `+`, `/`) with `=` padding.
   character to its value with mask arithmetic, with no branch or table index that depends on the
   character, so decoding a PEM or JWK private key does not leak its text through timing. Only
   whether the input is valid and where its padding falls affect the path taken.
-  [`SSFBase64Encode()`](#ssfbase64encode) still indexes the alphabet table by data; no in-tree
-  caller encodes secrets.
+  [`SSFBase64Encode()`](#ssfbase64encode) still indexes the alphabet table by data; its in-tree
+  caller, the [`ssfpem`](ssfpem.md) encoder, is documented for public data (certificates and
+  CSRs) only.
 
 <a id="configuration"></a>
 

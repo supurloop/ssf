@@ -2,7 +2,7 @@
 /* Small System Framework                                                                        */
 /*                                                                                               */
 /* ssfpem_ut.c                                                                                   */
-/* Provides unit tests for the PEM block decoder.                                                */
+/* Provides unit tests for the PEM block encoder and decoder.                                    */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
 /* Copyright 2026 Supurloop Software LLC                                                         */
@@ -98,7 +98,360 @@ static void _UTScrubHook(const char *quad, size_t quadSize, const uint8_t *tri, 
     }
 }
 
-/* Runs the PEM decoder unit tests. */
+/* OpenSSL 4.0.3 output, used to check that SSFPEMEncode() reproduces it byte for byte:          */
+/*   openssl ecparam -name prime256v1 -genkey -noout -out k.pem                                  */
+/*   openssl req -x509 -key k.pem -subj "/CN=ssfpem test" -days 3650 -out crt.pem  (356 B DER)  */
+/*   openssl req -new -key k.pem -subj "/CN=ssfpem test" -out csr.pem              (211 B DER)  */
+/* 356 = 7 * 48 + 20 ends in "=", 211 = 4 * 48 + 19 ends in "==".                               */
+static const char _utCertPem[] =
+    "-----BEGIN CERTIFICATE-----\n"
+    "MIIBYDCCAQagAwIBAgIUVpTfX88GohZtSBEoqT5HXHT0VmIwCgYIKoZIzj0EAwIw\n"
+    "FjEUMBIGA1UEAwwLc3NmcGVtIHRlc3QwHhcNMjYxMTI2MjAxNTQzWhcNMzYxMTIz\n"
+    "MjAxNTQzWjAWMRQwEgYDVQQDDAtzc2ZwZW0gdGVzdDBZMBMGByqGSM49AgEGCCqG\n"
+    "SM49AwEHA0IABJQvAJZQqnOy3bZs159xAhRGcclkAXC0bYYlNg402Uc7Hr90IR9x\n"
+    "qS9eLg1rQw7CU4cAm7dm9KXpKgtD+vNpy4GjMjAwMB0GA1UdDgQWBBRty0VievVS\n"
+    "bg5Wl0fTEC75BxIfIzAPBgNVHRMBAf8EBTADAQH/MAoGCCqGSM49BAMCA0gAMEUC\n"
+    "IDiBrFrOsIEhLFaAyB2BDWX42R3C2h2L6AtxbN44si/7AiEA+4qLXlYgrhnH3eSo\n"
+    "iVJe010yGop8LCkKMV1X17qNl24=\n"
+    "-----END CERTIFICATE-----\n";
+static const char _utCsrPem[] =
+    "-----BEGIN CERTIFICATE REQUEST-----\n"
+    "MIHQMHgCAQAwFjEUMBIGA1UEAwwLc3NmcGVtIHRlc3QwWTATBgcqhkjOPQIBBggq\n"
+    "hkjOPQMBBwNCAASULwCWUKpzst22bNefcQIURnHJZAFwtG2GJTYONNlHOx6/dCEf\n"
+    "cakvXi4Na0MOwlOHAJu3ZvSl6SoLQ/rzacuBoAAwCgYIKoZIzj0EAwIDSAAwRQIg\n"
+    "PyEXqoXuJviwxvm1YJHI/53POdH6obb8UNzPksOzyTACIQCSrSIjBXZowqqJrhKF\n"
+    "XftqouEFyrbQ95oUP6HFqcocnw==\n"
+    "-----END CERTIFICATE REQUEST-----\n";
+
+/* Largest input the encode checks use. */
+#define SSF_PEM_UT_MAX_DER (320u)
+
+/* True if ch may appear in an encoded Base64 line. */
+static bool _UTIsB64Char(char ch)
+{
+    return (((ch >= 'A') && (ch <= 'Z')) || ((ch >= 'a') && (ch <= 'z')) ||
+            ((ch >= '0') && (ch <= '9')) || (ch == '+') || (ch == '/') || (ch == '='));
+}
+
+/* Encodes der[0..derLen) under labelStr and checks its size, layout, padding and round trip. */
+static void _UTEncodeCheck(const char *labelStr, const uint8_t *der, size_t derLen)
+{
+    static char pem[SSF_PEM_ENCODE_SIZE(SSF_PEM_MAX_LABEL_LEN, SSF_PEM_UT_MAX_DER) + 1u];
+    uint8_t out[SSF_PEM_UT_MAX_DER];
+    size_t labelLen;
+    size_t need = 0;
+    size_t len = 0;
+    size_t p;
+    size_t left;
+    size_t pos = 0;
+    const char *outLabel = NULL;
+    size_t outLabelLen = 0;
+    size_t outLen = 0;
+
+    SSF_REQUIRE(labelStr != NULL);
+    SSF_REQUIRE(derLen <= SSF_PEM_UT_MAX_DER);
+    labelLen = strlen(labelStr);
+    SSF_REQUIRE(labelLen <= SSF_PEM_MAX_LABEL_LEN);
+
+    /* Measure, then encode into a buffer of exactly the reported size */
+    SSF_ASSERT(SSFPEMEncode(labelStr, der, derLen, NULL, 0, &need));
+    SSF_ASSERT(need == (SSF_PEM_ENCODE_SIZE(labelLen, derLen) - 1u));
+    memset(pem, 0xAA, sizeof(pem));
+    SSF_ASSERT(SSFPEMEncode(labelStr, der, derLen, pem, need + 1u, &len));
+    SSF_ASSERT((len == need) && (pem[len] == 0) && (strlen(pem) == len));
+    SSF_ASSERT((uint8_t)pem[len + 1u] == 0xAAu);
+
+    /* BEGIN line */
+    SSF_ASSERT(memcmp(pem, "-----BEGIN ", 11u) == 0);
+    SSF_ASSERT(memcmp(&pem[11], labelStr, labelLen) == 0);
+    SSF_ASSERT(memcmp(&pem[11u + labelLen], "-----\n", 6u) == 0);
+    p = labelLen + 17u;
+
+    /* Body: 64-character lines of 48 bytes, LF-terminated; padding only on the last line */
+    for (left = derLen; left > 0u; )
+    {
+        size_t chunk = (left > 48u) ? 48u : left;
+        size_t chars = 4u * ((chunk + 2u) / 3u);
+        size_t pad = (3u - (chunk % 3u)) % 3u;
+        size_t k;
+
+        for (k = 0; k < chars; k++) SSF_ASSERT(_UTIsB64Char(pem[p + k]));
+        for (k = 0; k < (chars - pad); k++) SSF_ASSERT(pem[p + k] != '=');
+        for (k = chars - pad; k < chars; k++) SSF_ASSERT(pem[p + k] == '=');
+        SSF_ASSERT((chunk == 48u) || (left == chunk));
+        SSF_ASSERT(pem[p + chars] == '\n');
+        p += chars + 1u;
+        left -= chunk;
+    }
+
+    /* END line closes the block exactly */
+    SSF_ASSERT(memcmp(&pem[p], "-----END ", 9u) == 0);
+    SSF_ASSERT(memcmp(&pem[p + 9u], labelStr, labelLen) == 0);
+    SSF_ASSERT(memcmp(&pem[p + 9u + labelLen], "-----\n", 6u) == 0);
+    SSF_ASSERT((p + labelLen + 15u) == len);
+
+    /* It decodes back to the same label and bytes */
+    SSF_ASSERT(SSFPEMDecodeNext(pem, len, &pos, &outLabel, &outLabelLen, out, sizeof(out),
+                                &outLen) == SSF_PEM_BLOCK);
+    SSF_ASSERT((pos == len) && (outLabelLen == labelLen) && (outLen == derLen));
+    SSF_ASSERT(memcmp(outLabel, labelStr, labelLen) == 0);
+    SSF_ASSERT((derLen == 0u) || (memcmp(out, der, derLen) == 0));
+}
+
+/* True if the decoder accepts labelStr as the label of a block and returns it unchanged. */
+static bool _UTDecoderAcceptsLabel(const char *labelStr)
+{
+    char t[160];
+    uint8_t der[8];
+    size_t pos = 0;
+    const char *label = NULL;
+    size_t labelLen = 0;
+    size_t derLen = 0;
+    int n;
+
+    SSF_REQUIRE(labelStr != NULL);
+
+    n = snprintf(t, sizeof(t), "-----BEGIN %s-----\nAAECAw==\n-----END %s-----\n", labelStr,
+                 labelStr);
+    SSF_ASSERT((n > 0) && (n < (int)sizeof(t)));
+    return ((SSFPEMDecodeNext(t, (size_t)n, &pos, &label, &labelLen, der, sizeof(der),
+                              &derLen) == SSF_PEM_BLOCK) &&
+            (SSFPEMLabelIs(label, labelLen, labelStr)));
+}
+
+/* The encoder accepts labelStr exactly when the decoder does; an accepted one round trips. */
+static void _UTLabelMatchesDecoder(const char *labelStr)
+{
+    static const uint8_t der[4] = { 0u, 1u, 2u, 3u };
+    char pem[SSF_PEM_ENCODE_SIZE(SSF_PEM_MAX_LABEL_LEN + 8u, 4u)];
+    size_t len;
+
+    SSF_REQUIRE(labelStr != NULL);
+    SSF_REQUIRE(strlen(labelStr) <= (SSF_PEM_MAX_LABEL_LEN + 8u));
+
+    /* Does the decoder accept this label? */
+    if (_UTDecoderAcceptsLabel(labelStr))
+    {
+        /* Yes, the encoder must too, and the block must round trip */
+        _UTEncodeCheck(labelStr, der, sizeof(der));
+    }
+    else
+    {
+        /* No, the encoder must refuse it */
+        SSF_ASSERT_TEST(SSFPEMEncode(labelStr, der, sizeof(der), pem, sizeof(pem), &len));
+    }
+}
+
+/* Decodes the one block of pemStr, re-encodes it and expects the identical text. */
+static void _UTReencodeExact(const char *pemStr, const char *labelStr)
+{
+    static uint8_t der[1024];
+    static char pem[2048];
+    size_t pos = 0;
+    const char *label = NULL;
+    size_t labelLen = 0;
+    size_t derLen = 0;
+    size_t len = 0;
+
+    SSF_REQUIRE(pemStr != NULL);
+    SSF_REQUIRE(labelStr != NULL);
+
+    SSF_ASSERT(SSFPEMDecodeNext(pemStr, strlen(pemStr), &pos, &label, &labelLen, der,
+                                sizeof(der), &derLen) == SSF_PEM_BLOCK);
+    SSF_ASSERT(SSFPEMLabelIs(label, labelLen, labelStr));
+    SSF_ASSERT(SSFPEMEncode(labelStr, der, derLen, pem, sizeof(pem), &len));
+    SSF_ASSERT((len == strlen(pemStr)) && (strcmp(pem, pemStr) == 0));
+}
+
+/* Runs the PEM encoder unit tests. */
+static void _UTEncode(void)
+{
+    static const uint8_t d4[4] = { 0u, 1u, 2u, 3u };
+    static uint8_t pattern[SSF_PEM_UT_MAX_DER];
+    char pem[128];
+    size_t len;
+    size_t n;
+
+    for (n = 0; n < sizeof(pattern); n++) pattern[n] = (uint8_t)((n * 37u) + 11u);
+
+    /* ---- Known output: the strings the decoder tests use ---- */
+    len = 0;
+    SSF_ASSERT(SSFPEMEncode("TEST", d4, sizeof(d4), pem, sizeof(pem), &len));
+    SSF_ASSERT(strcmp(pem, "-----BEGIN TEST-----\nAAECAw==\n-----END TEST-----\n") == 0);
+    SSF_ASSERT(len == strlen(pem));
+    SSF_ASSERT(SSFPEMEncode("EMPTY", NULL, 0, pem, sizeof(pem), &len));
+    SSF_ASSERT(strcmp(pem, "-----BEGIN EMPTY-----\n-----END EMPTY-----\n") == 0);
+    SSF_ASSERT(len == strlen(pem));
+    SSF_ASSERT(SSFPEMEncode("EMPTY", d4, 0, pem, sizeof(pem), &len));
+    SSF_ASSERT(strcmp(pem, "-----BEGIN EMPTY-----\n-----END EMPTY-----\n") == 0);
+
+    /* ---- Every length 0..SSF_PEM_UT_MAX_DER: layout, padding, line breaks, round trip ---- */
+    for (n = 0; n <= SSF_PEM_UT_MAX_DER; n++)
+    {
+        _UTEncodeCheck("CERTIFICATE", pattern, n);
+    }
+    _UTEncodeCheck("X", NULL, 0);
+
+    /* ---- OpenSSL output reproduced byte for byte ---- */
+    _UTReencodeExact(_utCertPem, "CERTIFICATE");
+    _UTReencodeExact(_utCsrPem, "CERTIFICATE REQUEST");
+    {
+        /* SSF_PEM_ENCODE_SIZE as an array size, filled exactly */
+        static uint8_t der[356];
+        static char certPem[SSF_PEM_ENCODE_SIZE(11u, 356u)];
+        size_t pos = 0;
+        const char *label;
+        size_t labelLen;
+        size_t derLen;
+
+        SSF_ASSERT(SSFPEMDecodeNext(_utCertPem, strlen(_utCertPem), &pos, &label, &labelLen, der,
+                                    sizeof(der), &derLen) == SSF_PEM_BLOCK);
+        SSF_ASSERT(derLen == sizeof(der));
+        SSF_ASSERT(sizeof(certPem) == sizeof(_utCertPem));
+        SSF_ASSERT(SSFPEMEncode("CERTIFICATE", der, derLen, certPem, sizeof(certPem), &len));
+        SSF_ASSERT((len == (sizeof(certPem) - 1u)) && (strcmp(certPem, _utCertPem) == 0));
+    }
+
+    /* ---- Output too small: false, length still reported, buffer zeroed, rest untouched ---- */
+    {
+        static const size_t sizes[] = { 0u, 1u, 2u, 20u, 48u, 49u, 50u };
+        size_t need = 0;
+        size_t k;
+        size_t j;
+
+        SSF_ASSERT(SSFPEMEncode("TEST", d4, sizeof(d4), NULL, 0, &need));
+        SSF_ASSERT(need == 49u);
+        for (k = 0; k < (sizeof(sizes) / sizeof(sizes[0])); k++)
+        {
+            memset(pem, 0x5A, sizeof(pem));
+            len = 0;
+            /* Is this size enough for the block and its NUL? */
+            if (sizes[k] > need)
+            {
+                /* Yes, it encodes */
+                SSF_ASSERT(SSFPEMEncode("TEST", d4, sizeof(d4), pem, sizes[k], &len));
+                SSF_ASSERT((len == need) && (strlen(pem) == need));
+            }
+            else
+            {
+                /* No, it fails, zeroes pem[0..size) and leaves the rest */
+                SSF_ASSERT(!SSFPEMEncode("TEST", d4, sizeof(d4), pem, sizes[k], &len));
+                SSF_ASSERT(len == need);
+                SSF_ASSERT(_UTAllZero((const uint8_t *)pem, sizes[k]));
+            }
+            for (j = sizes[k]; j < sizeof(pem); j++) SSF_ASSERT(pem[j] == 0x5A);
+        }
+    }
+
+    /* ---- Labels: the encoder accepts exactly what the decoder accepts ---- */
+    {
+        static const char *named[] = {
+            "X", "CERTIFICATE", "CERTIFICATE REQUEST", "PRIVATE KEY", "EC PRIVATE KEY",
+            "RSA PRIVATE KEY", "EC PARAMETERS", "MULTI WORD LABEL", "TEST", "ONE", "TWO",
+            "EMPTY", "A-B", "A----B", " X", "X ", "A  B", " ", "-A", "",
+            "A-", "-", "--", "-----", "A-----B", "A-----", "-----A", "TE\tST", "TE\x01ST",
+            "A\nB", "A\rB", "\x7f", "A\x80", "\xff" };
+        char lab[SSF_PEM_MAX_LABEL_LEN + 3u];
+        char ch;
+        size_t k;
+        uint32_t combo;
+
+        for (k = 0; k < (sizeof(named) / sizeof(named[0])); k++) _UTLabelMatchesDecoder(named[k]);
+
+        /* Every one-byte label 0x01..0xFF */
+        for (k = 1u; k <= 0xFFu; k++)
+        {
+            lab[0] = (char)k;
+            lab[1] = 0;
+            _UTLabelMatchesDecoder(lab);
+        }
+
+        /* Every two-character printable label */
+        for (k = 0; k < (95u * 95u); k++)
+        {
+            lab[0] = (char)(' ' + (k / 95u));
+            lab[1] = (char)(' ' + (k % 95u));
+            lab[2] = 0;
+            _UTLabelMatchesDecoder(lab);
+        }
+
+        /* Every label of 1..8 characters from { 'A', ' ', '-' }: all runs of dashes and spaces */
+        for (n = 1u; n <= 8u; n++)
+        {
+            uint32_t combos = 1u;
+            for (k = 0; k < n; k++) combos *= 3u;
+            for (combo = 0; combo < combos; combo++)
+            {
+                uint32_t c = combo;
+                for (k = 0; k < n; k++)
+                {
+                    ch = "A -"[c % 3u];
+                    lab[k] = ch;
+                    c /= 3u;
+                }
+                lab[n] = 0;
+                _UTLabelMatchesDecoder(lab);
+            }
+        }
+
+        /* Lengths SSF_PEM_MAX_LABEL_LEN - 1 .. + 2, plain and ending in '-' */
+        for (n = SSF_PEM_MAX_LABEL_LEN - 1u; n <= (SSF_PEM_MAX_LABEL_LEN + 2u); n++)
+        {
+            memset(lab, 'K', n);
+            lab[n] = 0;
+            _UTLabelMatchesDecoder(lab);
+            lab[n - 1u] = '-';
+            _UTLabelMatchesDecoder(lab);
+        }
+    }
+
+    /* ---- Argument contracts ---- */
+    {
+        char ov[128];
+
+        SSF_ASSERT_TEST(SSFPEMEncode(NULL, d4, sizeof(d4), pem, sizeof(pem), &len));
+        SSF_ASSERT_TEST(SSFPEMEncode("TEST", d4, sizeof(d4), pem, sizeof(pem), NULL));
+        SSF_ASSERT_TEST(SSFPEMEncode("TEST", NULL, 1u, pem, sizeof(pem), &len));
+        SSF_ASSERT_TEST(SSFPEMEncode("TEST", d4, (SIZE_MAX / 2u) + 1u, pem, sizeof(pem), &len));
+        SSF_ASSERT_TEST(SSFPEMEncode("TEST", d4, (SIZE_MAX / 2u) + 1u, NULL, 0, &len));
+        /* The largest derLen allowed is measured without overflow */
+        SSF_ASSERT(SSFPEMEncode("TEST", d4, SIZE_MAX / 2u, NULL, 0, &len));
+        SSF_ASSERT(len == (SSF_PEM_ENCODE_SIZE(4u, SIZE_MAX / 2u) - 1u));
+        SSF_ASSERT(len > (SIZE_MAX / 2u));
+        /* der inside pem, pem inside der, partial overlap either way */
+        memset(ov, 0, sizeof(ov));
+        SSF_ASSERT_TEST(SSFPEMEncode("TEST", (const uint8_t *)&ov[10], 4u, ov, sizeof(ov), &len));
+        SSF_ASSERT_TEST(SSFPEMEncode("TEST", (const uint8_t *)ov, sizeof(ov), &ov[10], 8u, &len));
+        SSF_ASSERT_TEST(SSFPEMEncode("TEST", (const uint8_t *)&ov[0], 12u, &ov[11], 100u, &len));
+        SSF_ASSERT_TEST(SSFPEMEncode("TEST", (const uint8_t *)&ov[60], 12u, ov, 61u, &len));
+        /* Overlap is checked even when the buffer is too small */
+        SSF_ASSERT_TEST(SSFPEMEncode("TEST", (const uint8_t *)&ov[0], 4u, &ov[2], 4u, &len));
+        /* Adjacent but not overlapping is fine, on either side */
+        memcpy(ov, d4, sizeof(d4));
+        SSF_ASSERT(SSFPEMEncode("TEST", (const uint8_t *)ov, 4u, &ov[4], 100u, &len));
+        SSF_ASSERT(strcmp(&ov[4], "-----BEGIN TEST-----\nAAECAw==\n-----END TEST-----\n") == 0);
+        memcpy(&ov[100], d4, sizeof(d4));
+        SSF_ASSERT(SSFPEMEncode("TEST", (const uint8_t *)&ov[100], 4u, ov, 100u, &len));
+        SSF_ASSERT(strcmp(ov, "-----BEGIN TEST-----\nAAECAw==\n-----END TEST-----\n") == 0);
+        /* label inside pem (re-encoding in place over the decoded text) */
+        memset(ov, 0, sizeof(ov));
+        memcpy(&ov[60], "TEST", 5u);
+        SSF_ASSERT_TEST(SSFPEMEncode(&ov[60], d4, sizeof(d4), ov, sizeof(ov), &len));
+        SSF_ASSERT_TEST(SSFPEMEncode(&ov[60], d4, sizeof(d4), &ov[63], 65u, &len));
+        SSF_ASSERT_TEST(SSFPEMEncode(&ov[60], d4, sizeof(d4), ov, 61u, &len));
+        /* label adjacent to pem on either side is fine; its NUL may be overwritten */
+        memcpy(ov, "TEST", 5u);
+        SSF_ASSERT(SSFPEMEncode(ov, d4, sizeof(d4), &ov[4], 100u, &len));
+        SSF_ASSERT(strcmp(&ov[4], "-----BEGIN TEST-----\nAAECAw==\n-----END TEST-----\n") == 0);
+        memcpy(&ov[100], "TEST", 5u);
+        SSF_ASSERT(SSFPEMEncode(&ov[100], d4, sizeof(d4), ov, 100u, &len));
+        SSF_ASSERT(strcmp(ov, "-----BEGIN TEST-----\nAAECAw==\n-----END TEST-----\n") == 0);
+        /* pemSize 0 with NULL pemOpt is only a measure */
+        SSF_ASSERT(SSFPEMEncode("TEST", d4, sizeof(d4), NULL, 0, &len) && (len == 49u));
+    }
+}
+
+/* Runs the PEM decoder and encoder unit tests. */
 void SSFPEMUnitTest(void)
 {
     uint8_t der[64];
@@ -338,5 +691,8 @@ void SSFPEMUnitTest(void)
     SSF_ASSERT(!SSFPEMLabelIs("PRIVATE KEY", 11u, "PRIVATE KE"));
     SSF_ASSERT(!SSFPEMLabelIs("PRIVATE KEY", 10u, "PRIVATE KEY"));
     SSF_ASSERT(!SSFPEMLabelIs("EC PRIVATE KEY", 14u, "PRIVATE KEY"));
+
+    /* ---- SSFPEMEncode ---- */
+    _UTEncode();
 }
 #endif /* SSF_CONFIG_PEM_UNIT_TEST */

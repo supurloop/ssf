@@ -12,6 +12,9 @@
 #         <module>  one of _crypto _codec _ecc _edc _fsm _storage _struct
 #                   _time _ui _osal _debug   (default: _crypto)
 #
+#         COV_CFLAGS  optional extra compiler flags for a configuration variant, e.g.
+#                     COV_CFLAGS="-DSSF_EC_CONFIG_FIXED_BASE_P384=0" ./tools/coverage/run.sh
+#
 # Exit:   0 on successful build + run; non-zero if the build failed or the
 #         instrumented binary aborted before any .gcda was written.
 #         Test failures during the run do NOT fail the script — coverage is
@@ -59,13 +62,14 @@ mkdir -p "$cov_dir"
 cov_ninja="$cov_dir/build.ninja"
 
 # Derive the coverage ninja from the host's normal ninja by patching only the
-# four lines that need to differ: cflags (drop -O3, add coverage flags), ldflags
+# four lines that need to differ: cflags (keep any host-specific warning flags
+# between $cflags_common and the trailing -O3, swap -O3 for coverage flags), ldflags
 # (link in libgcov), builddir (parallel tree), and the final binary name.
 #
 # Keeping the rest byte-for-byte identical means the source list stays in sync
 # automatically when sources are added or removed from the canonical ninja.
 sed \
-    -e 's|^cflags = \$cflags_common -O3$|cflags = $cflags_common -O0 -g --coverage -fprofile-update=atomic -DSSF_COVERAGE=1|' \
+    -e "s|^cflags = \\\$cflags_common \\(.*\\)-O3\$|cflags = \$cflags_common \\1-O0 -g --coverage -fprofile-update=atomic -DSSF_COVERAGE=1${COV_CFLAGS:+ $COV_CFLAGS}|" \
     -e 's|^ldflags = \(.*\)$|ldflags = \1 --coverage|' \
     -e "s|^builddir = build$|builddir = $cov_dir|" \
     -e "s|^build ssf: link |build $cov_bin: link |" \

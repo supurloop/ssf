@@ -1789,6 +1789,18 @@ void SSFX509UnitTest(void)
                    trust, trustLens, 1, "other.local", validTime, &_utVErr) == false);
         _UT_VERR(ERR_HOSTNAME, 0u);
 
+        /* COV-10: a hostname longer than any DNS name (> 253) cannot match, even by prefix */
+        {
+            static char longHost[300];
+
+            memset(longHost, 'a', sizeof(longHost) - 1u);
+            memcpy(longHost, "test.ssf.local", 14u);
+            longHost[sizeof(longHost) - 1u] = '\0';
+            SSF_ASSERT(SSFX509VerifyChain(chain, chainLens, 1,
+                       trust, trustLens, 1, longHost, validTime, &_utVErr) == false);
+            _UT_VERR(ERR_HOSTNAME, 0u);
+        }
+
         /* 8d. Case-insensitive: "TEST.SSF.LOCAL" */
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLens, 1,
                    trust, trustLens, 1, "TEST.SSF.LOCAL", validTime, &_utVErr) == true);
@@ -2797,6 +2809,87 @@ void SSFX509UnitTest(void)
             certStub.sigAlgParamsLen = 0;
             SSF_ASSERT(SSFX509VerifyCertSignature(&certStub, &issuerStub) == false);
         }
+
+        /* ---- COV-3d: RSA-PSS-SHA512 (params name SHA-512, salt 64) verifies, tamper fails ---- */
+        {
+            static const uint8_t pssParamsSHA512[] = {
+                0x30u, 0x34u, 0xA0u, 0x0Fu, 0x30u, 0x0Du, 0x06u, 0x09u,
+                0x60u, 0x86u, 0x48u, 0x01u, 0x65u, 0x03u, 0x04u, 0x02u, 0x03u, 0x05u, 0x00u,
+                /* [1] maskGenAlgorithm MGF1-SHA-512 */
+                0xA1u, 0x1Cu, 0x30u, 0x1Au, 0x06u, 0x09u, 0x2Au, 0x86u, 0x48u, 0x86u,
+                0xF7u, 0x0Du, 0x01u, 0x01u, 0x08u, 0x30u, 0x0Du, 0x06u, 0x09u, 0x60u,
+                0x86u, 0x48u, 0x01u, 0x65u, 0x03u, 0x04u, 0x02u, 0x03u, 0x05u, 0x00u,
+                0xA2u, 0x03u, 0x02u, 0x01u, 0x40u /* [2] saltLength 64 */
+            };
+            uint8_t hash512[SSF_SHA2_512_BYTE_SIZE];
+            static uint8_t sig512[SSF_RSA_MAX_SIG_SIZE];
+            size_t sig512Len;
+
+            SSFSHA512(fakeTbs, sizeof(fakeTbs), hash512, sizeof(hash512));
+            SSF_ASSERT(SSFRSASignPSS(rsaPriv, rsaPrivLen, SSF_RSA_HASH_SHA512, hash512,
+                                     SSF_SHA2_512_BYTE_SIZE, sig512, sizeof(sig512),
+                                     &sig512Len) == true);
+            SSF_ASSERT(SSFX509VerifySignature(&issuerStub, rsaPssOid, sizeof(rsaPssOid),
+                                              pssParamsSHA512, sizeof(pssParamsSHA512), NULL, 0u,
+                                              fakeTbs, sizeof(fakeTbs), sig512,
+                                              (uint32_t)sig512Len) == true);
+            sig512[sig512Len / 2u] ^= 0x01u;
+            SSF_ASSERT(SSFX509VerifySignature(&issuerStub, rsaPssOid, sizeof(rsaPssOid),
+                                              pssParamsSHA512, sizeof(pssParamsSHA512), NULL, 0u,
+                                              fakeTbs, sizeof(fakeTbs), sig512,
+                                              (uint32_t)sig512Len) == false);
+            sig512[sig512Len / 2u] ^= 0x01u;
+
+            /* ---- COV-3c: an RSA key below the size policy is refused before PSS verify ---- */
+            {
+                static const uint8_t pubTiny[] = {
+                    0x30u, 0x07u, 0x02u, 0x02u, 0x00u, 0xC5u, 0x02u, 0x01u, 0x03u
+                };
+                static SSFX509Cert_t tinyStub;
+
+                tinyStub = issuerStub;
+                tinyStub.pubKey = pubTiny;
+                tinyStub.pubKeyLen = sizeof(pubTiny);
+                SSF_ASSERT(SSFX509VerifySignature(&tinyStub, rsaPssOid, sizeof(rsaPssOid),
+                                                  pssParamsSHA512, sizeof(pssParamsSHA512), NULL,
+                                                  0u, fakeTbs, sizeof(fakeTbs), sig512,
+                                                  (uint32_t)sig512Len) == false);
+            }
+        }
+
+        /* ---- COV-3a/b: EC key on an unknown curve; PKCS#1 v1.5 handed an EC key ---- */
+        {
+            static const uint8_t ecdsaSha256Oid[] = {
+                0x2Au, 0x86u, 0x48u, 0xCEu, 0x3Du, 0x04u, 0x03u, 0x02u
+            };
+            static const uint8_t ecPubKeyOid[] = {
+                0x2Au, 0x86u, 0x48u, 0xCEu, 0x3Du, 0x02u, 0x01u
+            };
+            static const uint8_t secp256k1Oid[] = { 0x2Bu, 0x81u, 0x04u, 0x00u, 0x0Au };
+            static const uint8_t sha256RsaOid[] = {
+                0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x01u, 0x0Bu
+            };
+            static uint8_t ecPoint[65];
+            static uint8_t ecSig[72];
+            static SSFX509Cert_t ecStub;
+
+            memset(ecPoint, 0x11, sizeof(ecPoint));
+            ecPoint[0] = 0x04u;
+            memset(ecSig, 0x22, sizeof(ecSig));
+            memset(&ecStub, 0, sizeof(ecStub));
+            ecStub.pubKey = ecPoint;
+            ecStub.pubKeyLen = sizeof(ecPoint);
+            ecStub.pubKeyAlgOidRaw = ecPubKeyOid;
+            ecStub.pubKeyAlgOidRawLen = sizeof(ecPubKeyOid);
+            ecStub.ecCurveOidRaw = secp256k1Oid;
+            ecStub.ecCurveOidRawLen = sizeof(secp256k1Oid);
+            SSF_ASSERT(SSFX509VerifySignature(&ecStub, ecdsaSha256Oid, sizeof(ecdsaSha256Oid),
+                                              NULL, 0u, NULL, 0u, fakeTbs, sizeof(fakeTbs), ecSig,
+                                              sizeof(ecSig)) == false);
+            SSF_ASSERT(SSFX509VerifySignature(&ecStub, sha256RsaOid, sizeof(sha256RsaOid),
+                                              NULL, 0u, NULL, 0u, fakeTbs, sizeof(fakeTbs), sig256,
+                                              (uint32_t)sig256Len) == false);
+        }
     }
 
     /* ---- 10. RSA-PSS Full Encode/Parse/Verify Round-Trip ---- */
@@ -3024,6 +3117,23 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(SSFX509IsSigRSAPKCS1SHA256(&parsed) == false);
         SSF_ASSERT(SSFX509IsSigRSAPKCS1SHA384(&parsed) == false);
         SSF_ASSERT(SSFX509VerifyCertSignature(&parsed, &parsed) == true);
+
+        /* COV-3d: plain rsaEncryption with a SHA-512 digest algorithm (CMS, RFC 3370 3.2) */
+        {
+            static const uint8_t sha512Oid[] = {
+                0x60u, 0x86u, 0x48u, 0x01u, 0x65u, 0x03u, 0x04u, 0x02u, 0x03u
+            };
+            static const uint8_t sha384Oid[] = {
+                0x60u, 0x86u, 0x48u, 0x01u, 0x65u, 0x03u, 0x04u, 0x02u, 0x02u
+            };
+
+            SSF_ASSERT(SSFX509VerifySignature(&parsed, rsaPubKeyOid, sizeof(rsaPubKeyOid), NULL,
+                                              0u, sha512Oid, sizeof(sha512Oid), tbsDer, tbsLen,
+                                              sig, (uint32_t)sigLen) == true);
+            SSF_ASSERT(SSFX509VerifySignature(&parsed, rsaPubKeyOid, sizeof(rsaPubKeyOid), NULL,
+                                              0u, sha384Oid, sizeof(sha384Oid), tbsDer, tbsLen,
+                                              sig, (uint32_t)sigLen) == false);
+        }
     }
 #endif /* _UT_RSA_PKCS1_SIGN == 1 */
 
@@ -4732,6 +4842,120 @@ void SSFX509UnitTest(void)
         _utGenBaseParams(&p, serial, bigKey, 65u);
         _utGenCheckConsistent(&p, fakeSig, 64u, out, sizeof(out), &parsed);
 
+        /* COV-10: every extension and DN attribute set; each encoder refuses every short */
+        /* buffer, 0 .. len - 1, and writes nothing past the size it was given.             */
+        {
+            static const uint8_t sanIp[] = { 192u, 168u, 1u, 1u };
+            static const uint8_t *sanIps[] = { sanIp, NULL };
+            static const char *sanDns[] = { "a.example.com", "b.example.com", NULL };
+            static const char *ncExDns[] = { "bad.example.com", NULL };
+            static const uint8_t ncExIp[] = { 10u, 1u, 0u, 0u, 255u, 255u, 0u, 0u };
+            static const uint8_t *ncExIps[] = { ncExIp, NULL };
+            static const uint8_t nullParams[] = { 0x05u, 0x00u };
+            uint32_t full;
+            uint32_t sz;
+            uint32_t w;
+            uint32_t g;
+            uint8_t pass;
+
+            for (pass = 0u; pass < 2u; pass++)
+            {
+                _utGenBaseParams(&p, serial, bigKey, (pass == 0u) ? 65u : 270u);
+                p.issuer.o = "Org"; p.issuer.ou = "Unit"; p.issuer.c = "US";
+                p.issuer.st = "State"; p.issuer.l = "City";
+                p.subject = p.issuer;
+                p.subject.cn = "leaf";
+                p.isCA = true;
+                p.pathLenConstraint = 2;
+                p.addBasicConstraints = true;
+                p.addKeyUsage = true;
+                p.keyUsageBits = 0x0186u;
+                p.addExtKeyUsage = true;
+                p.ekuServerAuth = true;
+                p.ekuClientAuth = true;
+                p.ekuCodeSigning = true;
+                p.sanDNSNames = sanDns;
+                p.sanIPAddrs = sanIps;
+                p.skid = kid; p.skidLen = 20u;
+                p.akid = kid; p.akidLen = 20u;
+                p.addRawExt = true;
+                p.rawExtOid = rawOid; p.rawExtOidLen = sizeof(rawOid);
+                p.rawExtValue = rawVal; p.rawExtValueLen = sizeof(rawVal);
+                p.rawExtCritical = true;
+                p.addNameConstraints = true;
+                p.ncPermittedDNS = ncDns; p.ncPermittedIPs = ncIps;
+                p.ncExcludedDNS = ncExDns; p.ncExcludedIPs = ncExIps;
+                if (pass == 1u)
+                {
+                    /* RSA-shaped: no curve OID, sha256WithRSA with explicit NULL parameters */
+                    p.pubKeyAlgOidRaw = rsaOid; p.pubKeyAlgOidRawLen = sizeof(rsaOid);
+                    p.ecCurveOidRaw = NULL; p.ecCurveOidRawLen = 0u;
+                    p.sigAlgOidRaw = rsaSha256Oid; p.sigAlgOidRawLen = sizeof(rsaSha256Oid);
+                    p.sigAlgParams = nullParams; p.sigAlgParamsLen = sizeof(nullParams);
+                }
+                _utGenCheckConsistent(&p, fakeSig, 64u, out, sizeof(out), &parsed);
+
+                SSF_ASSERT(SSFX509EncodeTBS(NULL, 0u, &p, &full) == true);
+                for (sz = 0u; sz < full; sz++)
+                {
+                    memset(out, 0xA5, full + 16u);
+                    SSF_ASSERT(SSFX509EncodeTBS(out, sz, &p, &w) == false);
+                    for (g = sz; g < (full + 16u); g++) SSF_ASSERT(out[g] == 0xA5u);
+                }
+                SSF_ASSERT(SSFX509EncodeCert(NULL, 0u, &p, fakeSig, 64u, &full) == true);
+                for (sz = 0u; sz < full; sz++)
+                {
+                    memset(out, 0xA5, full + 16u);
+                    SSF_ASSERT(SSFX509EncodeCert(out, sz, &p, fakeSig, 64u, &w) == false);
+                    for (g = sz; g < (full + 16u); g++) SSF_ASSERT(out[g] == 0xA5u);
+                }
+            }
+
+            /* A validity time past what X.509 time can carry is unencodable, both passes */
+            _utGenBaseParams(&p, serial, bigKey, 65u);
+            p.notAfter = UINT64_MAX;
+            SSF_ASSERT(SSFX509EncodeTBS(NULL, 0u, &p, &w) == false);
+            SSF_ASSERT(SSFX509EncodeCert(out, sizeof(out), &p, fakeSig, 64u, &w) == false);
+            _utGenBaseParams(&p, serial, bigKey, 65u);
+            p.notBefore = UINT64_MAX;
+            SSF_ASSERT(SSFX509EncodeTBS(out, sizeof(out), &p, &w) == false);
+
+            /* Each DN attribute one past its RFC 5280 upper bound is refused (C 2, ST/L 128, */
+            /* O/OU 64), and so is a Name Constraints dNSName past 253                        */
+            {
+                static char over129[130];
+                static char over254[255];
+                static const char *ncLong[2];
+                uint8_t f;
+
+                memset(over129, 'z', 129u); over129[129] = '\0';
+                memset(over254, 'z', 254u); over254[254] = '\0';
+                for (f = 0u; f < 5u; f++)
+                {
+                    _utGenBaseParams(&p, serial, bigKey, 65u);
+                    if (f == 0u) p.subject.c = "USA";
+                    else if (f == 1u) p.subject.st = over129;
+                    else if (f == 2u) p.subject.l = over129;
+                    else if (f == 3u) p.subject.o = cn65;
+                    else p.subject.ou = cn65;
+                    SSF_ASSERT(SSFX509EncodeTBS(NULL, 0u, &p, &w) == false);
+                    p.subject.c = "US";
+                    p.subject.st = st128;
+                    p.subject.l = st128;
+                    p.subject.o = cn64;
+                    p.subject.ou = cn64;
+                    SSF_ASSERT(SSFX509EncodeTBS(NULL, 0u, &p, &w) == true);
+                }
+                _utGenBaseParams(&p, serial, bigKey, 65u);
+                p.isCA = true;
+                p.addBasicConstraints = true;
+                p.addNameConstraints = true;
+                ncLong[0] = over254; ncLong[1] = NULL;
+                p.ncPermittedDNS = ncLong;
+                SSF_ASSERT(SSFX509EncodeTBS(NULL, 0u, &p, &w) == false);
+            }
+        }
+
         /* RSA-4096 sized SubjectPublicKeyInfo and signature */
         _utGenBaseParams(&p, serial, bigKey, sizeof(bigKey));
         p.pubKeyAlgOidRaw = rsaOid;
@@ -6252,6 +6476,112 @@ void SSFX509UnitTest(void)
         /* A hostname with ':' is an (unsupported) IPv6 literal, never a DNS name */
         _X5095_CASE(sanDnsV6, NULL, "::1", false, ERR_HOSTNAME, 0u);
         #undef _X5095_CASE
+    }
+
+    /* ---- COV-5: an IP exclusion that cannot be evaluated against a SAN rejects the SAN ---- */
+    {
+        static uint8_t caPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t caPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t leafPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t caOut[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t leafOut[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static const uint8_t exclIP[] = { 192u, 168u, 0u, 0u, 255u, 255u, 0u, 0u };
+        static const uint8_t *exclIPs[] = { exclIP, NULL };
+        static const uint8_t ip10001[] = { 10u, 0u, 0u, 1u };
+        static const uint8_t *sanIP10001[] = { ip10001, NULL };
+        static const uint8_t sanOid[] = { 0x55u, 0x1Du, 0x11u };
+        static const uint8_t ncOid[] = { 0x55u, 0x1Du, 0x1Eu };
+        /* SubjectAltName { iPAddress [7] of 5 bytes } (neither IPv4 nor IPv6) */
+        static const uint8_t san5[] = { 0x30u, 0x07u, 0x87u, 0x05u, 10u, 0u, 0u, 1u, 1u };
+        /* NameConstraints { excludedSubtrees [1] { { iPAddress [7] of 7 bytes } } } */
+        static const uint8_t ncExcl7[] = {
+            0x30u, 0x0Du, 0xA1u, 0x0Bu, 0x30u, 0x09u, 0x87u, 0x07u,
+            10u, 0u, 0u, 0u, 255u, 0u, 0u
+        };
+        size_t caPubLen;
+        size_t leafPubLen;
+        uint8_t serial[] = { 0x5Eu };
+        static SSFX509GenParams_t p;
+        const uint8_t *chain[1];
+        uint32_t chainLen[1];
+        const uint8_t *trust[1];
+        uint32_t trustLen[1];
+        uint32_t caLen;
+        uint32_t leafLen;
+        uint8_t ca;
+
+        SSF_ASSERT(SSFECDSAKeyGen(_UT_CURVE, caPriv, sizeof(caPriv), caPub,
+                                  sizeof(caPub), &caPubLen) == true);
+        SSF_ASSERT(SSFECDSAKeyGen(_UT_CURVE, leafPriv, sizeof(leafPriv), leafPub,
+                                  sizeof(leafPub), &leafPubLen) == true);
+
+        /* ca 0: excludes 192.168.0.0/16 (8-byte subtree); ca 1: a 7-byte excluded subtree */
+        for (ca = 0u; ca < 2u; ca++)
+        {
+            _utGenBaseParams(&p, serial, caPub, (uint32_t)caPubLen);
+            p.issuer.cn = "ca";
+            p.subject.cn = "ca";
+            p.addBasicConstraints = true;
+            p.isCA = true;
+            p.addKeyUsage = true;
+            p.keyUsageBits = SSF_X509_KU_KEY_CERT_SIGN;
+            if (ca == 0u)
+            {
+                p.addNameConstraints = true;
+                p.ncExcludedIPs = exclIPs;
+            }
+            else
+            {
+                p.addRawExt = true;
+                p.rawExtOid = ncOid; p.rawExtOidLen = sizeof(ncOid);
+                p.rawExtValue = ncExcl7; p.rawExtValueLen = sizeof(ncExcl7);
+                p.rawExtCritical = true;
+            }
+            caLen = _utSignCert(&p, caPriv, caOut, sizeof(caOut));
+            SSF_ASSERT(caLen != 0u);
+            trust[0] = caOut;
+            trustLen[0] = caLen;
+
+            /* A well-formed IPv4 SAN outside 192.168/16: passes ca 0, refused by ca 1 */
+            _utGenBaseParams(&p, serial, leafPub, (uint32_t)leafPubLen);
+            p.issuer.cn = "ca";
+            p.subject.cn = "leaf";
+            p.sanIPAddrs = sanIP10001;
+            leafLen = _utSignCert(&p, caPriv, leafOut, sizeof(leafOut));
+            SSF_ASSERT(leafLen != 0u);
+            chain[0] = leafOut;
+            chainLen[0] = leafLen;
+            if (ca == 0u)
+            {
+                SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, trust, trustLen, 1u, "10.0.0.1",
+                                              1800000000ull, &_utVErr) == true);
+                _UT_VERR(OK, 0u);
+            }
+            else
+            {
+                SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, trust, trustLen, 1u, "10.0.0.1",
+                                              1800000000ull, &_utVErr) == false);
+                _UT_VERR(ERR_NAME_CONSTRAINTS, 0u);
+            }
+
+            /* A 5-byte iPAddress SAN: an IPv4 exclusion cannot rule it out, so it is refused */
+            if (ca == 0u)
+            {
+                _utGenBaseParams(&p, serial, leafPub, (uint32_t)leafPubLen);
+                p.issuer.cn = "ca";
+                p.subject.cn = "leaf";
+                p.addRawExt = true;
+                p.rawExtOid = sanOid; p.rawExtOidLen = sizeof(sanOid);
+                p.rawExtValue = san5; p.rawExtValueLen = sizeof(san5);
+                leafLen = _utSignCert(&p, caPriv, leafOut, sizeof(leafOut));
+                SSF_ASSERT(leafLen != 0u);
+                chainLen[0] = leafLen;
+                SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, trust, trustLen, 1u, "10.0.0.1",
+                                              1800000000ull, &_utVErr) == false);
+                _UT_VERR(ERR_NAME_CONSTRAINTS, 0u);
+            }
+        }
     }
 
     /* ---- A SAN GeneralName overrunning its SEQUENCE fails to parse instead of looping ---- */
@@ -8704,6 +9034,28 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(SSFX509VerifySignature(&kc, sha256RsaOid, sizeof(sha256RsaOid), NULL, 0u, NULL,
                                           0u, msg, (uint32_t)(sizeof(msg) - 1u), sigE1,
                                           sizeof(sigE1)) == false);
+
+        /* n = 0 or e = 0 (each the single INTEGER byte 0x00) is not a usable key: refused. */
+        {
+            static const uint8_t pubN0[] = {
+                0x30u, 0x06u, 0x02u, 0x01u, 0x00u, 0x02u, 0x01u, 0x03u
+            };
+            static uint8_t pubE0[sizeof(pub2048e3)];
+
+            kc.pubKey = pubN0;
+            kc.pubKeyLen = sizeof(pubN0);
+            SSF_ASSERT(SSFX509VerifySignature(&kc, sha256RsaOid, sizeof(sha256RsaOid), NULL, 0u,
+                                              NULL, 0u, msg, (uint32_t)(sizeof(msg) - 1u),
+                                              sig2048e3, sizeof(sig2048e3)) == false);
+            memcpy(pubE0, pub2048e3, sizeof(pubE0));
+            SSF_ASSERT(pubE0[sizeof(pubE0) - 1u] == 0x03u);
+            pubE0[sizeof(pubE0) - 1u] = 0x00u;
+            kc.pubKey = pubE0;
+            kc.pubKeyLen = sizeof(pubE0);
+            SSF_ASSERT(SSFX509VerifySignature(&kc, sha256RsaOid, sizeof(sha256RsaOid), NULL, 0u,
+                                              NULL, 0u, msg, (uint32_t)(sizeof(msg) - 1u),
+                                              sig2048e3, sizeof(sig2048e3)) == false);
+        }
     }
 #endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 && SSF_RSA_CONFIG_ENABLE_2048 */
 
@@ -8756,6 +9108,37 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(SSFX509VerifyChainPurpose(chain9999, chain9999Len, 1u, chain9999, chain9999Len,
                                              1u, SSF_X509_PURPOSE_CODE_SIGNING, NULL,
                                              1795000000ull, &_utVErr) == true); _UT_VERR(OK, 0u);
+
+        /* COV-2: an outer sigAlg OID that differs from the signed TBS copy is refused (4.1.2.3) */
+        {
+            static const uint8_t ecdsaSha256Oid[] = {
+                0x06u, 0x08u, 0x2Au, 0x86u, 0x48u, 0xCEu, 0x3Du, 0x04u, 0x03u, 0x02u
+            };
+            static uint8_t certOuter[sizeof(cert9999)];
+            static SSFX509Cert_t cOuter;
+            uint32_t i;
+            uint32_t last = 0u;
+
+            memcpy(certOuter, cert9999, sizeof(certOuter));
+            for (i = 0; (i + sizeof(ecdsaSha256Oid)) <= sizeof(certOuter); i++)
+            {
+                /* Is this the ecdsa-with-SHA256 OID (the last one is the outer copy)? */
+                if (memcmp(&certOuter[i], ecdsaSha256Oid, sizeof(ecdsaSha256Oid)) == 0)
+                {
+                    /* Yes */
+                    last = i + (uint32_t)sizeof(ecdsaSha256Oid) - 1u;
+                }
+            }
+            SSF_ASSERT(last != 0u);
+            certOuter[last] = 0x03u; /* ecdsa-with-SHA384, unsigned outer copy only */
+            SSF_ASSERT(SSFX509Parse(certOuter, sizeof(certOuter), &cOuter) == true);
+            SSF_ASSERT(cOuter.sigAlgOidRawLen == cOuter.outerSigAlgOidRawLen);
+            chain9999[0] = certOuter;
+            SSF_ASSERT(SSFX509VerifyChainPurpose(chain9999, chain9999Len, 1u, chain9999,
+                                                 chain9999Len, 1u, SSF_X509_PURPOSE_CODE_SIGNING,
+                                                 NULL, 1795000000ull, &_utVErr) == false);
+            _UT_VERR(ERR_SIG_ALG_MISMATCH, 0u);
+        }
     }
 #endif /* SSF_EC_CONFIG_ENABLE_P256 */
 

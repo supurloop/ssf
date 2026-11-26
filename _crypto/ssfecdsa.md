@@ -160,6 +160,18 @@ Two design choices worth calling out up front:
   `SSFECDHComputeSecret` all run [`SSFBNZeroize`](ssfbn.md#ssfbnzeroize) over the working
   private-key bignum before unwinding their stack frame. Callers are still responsible for
   erasing the caller-provided `privKey` byte buffer at an appropriate time.
+- **Digest lengths other than SHA-1 / SHA-2 use the curve's hash for the nonce.** RFC 6979
+  derives `k` with HMAC over the digest's own hash, but `ssfhmac` offers only SHA-1, SHA-256,
+  SHA-384 and SHA-512. Any other `hashLen` (for example a 28-byte SHA-224 digest) runs the
+  HMAC-DRBG with the curve's hash instead (P-256 → SHA-256, P-384 → SHA-384). The nonce is
+  still deterministic and secret, so signatures stay safe and verify everywhere, but they will
+  not match RFC 6979's published vectors for those digests.
+- **Code not reached by the unit tests, by construction.** The final `return false` after the
+  RFC 6979 candidate loop in `_SSFECDSAGenK` cannot be reached with valid inputs. The generic
+  `d·G` multiply in `_SSFECDSAScalarMulBase` runs only when a curve's fixed-base table is
+  compiled out; measure it with
+  `COV_CFLAGS="-DSSF_EC_CONFIG_FIXED_BASE_P256=0 -DSSF_EC_CONFIG_FIXED_BASE_P384=0"
+  ./tools/coverage/run.sh _crypto`.
 
 <a id="configuration"></a>
 

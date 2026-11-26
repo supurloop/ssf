@@ -156,6 +156,11 @@ against a caller-supplied trust store. There is no encoder: the module verifies,
   fresh image digest, and the result must verify against the signing CA alone (the anchor a
   bootloader would hold) and against the root. It must fail for a changed digest, before the
   leaf's `notBefore`, and under the previous chain's signing CA.
+- **Code not reached by the unit tests, by construction.** The signer check's "detached
+  content with no digest supplied" refusal cannot be reached through the public API:
+  `SSFCMSVerifyDigest()` requires a digest and `SSFCMSVerifyAttached()` refuses detached
+  content first. The signer certificate re-parse failure fires only if a certificate that
+  already parsed during chain verification fails to parse again. Both are kept fail-closed.
 
 <a id="configuration"></a>
 

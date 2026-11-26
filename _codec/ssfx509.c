@@ -2880,23 +2880,12 @@ static bool _SSFX509RSAKeyPolicyOK(const uint8_t *der, uint32_t derLen)
     if (!SSFASN1DecGetUInt(&inner, &n, &nLen, &inner)) return false;
     if (!SSFASN1DecGetUInt(&inner, &e, &eLen, &inner)) return false;
 
-    /* Is a leading zero (INTEGER sign) byte left on the modulus? */
-    while ((nLen > 0u) && (*n == 0u))
-    {
-        /* Yes, drop it */
-        n++;
-        nLen--;
-    }
-    /* Is a leading zero (INTEGER sign) byte left on the exponent? */
-    while ((eLen > 0u) && (*e == 0u))
-    {
-        /* Yes, drop it */
-        e++;
-        eLen--;
-    }
+    /* Assumes SSFASN1DecGetUInt returns a magnitude of at least one byte with the sign octet */
+    /* removed and non-minimal encodings rejected, so a leading 0x00 means the value is zero  */
+    /* (pinned by the GetUInt contract test in ssfasn1_ut.c).                                 */
 
     /* Is either value zero? */
-    if ((nLen == 0u) || (eLen == 0u))
+    if ((nLen == 0u) || (eLen == 0u) || (n[0] == 0u) || (e[0] == 0u))
     {
         /* Yes, not a usable RSA key */
         return false;

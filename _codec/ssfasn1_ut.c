@@ -352,6 +352,27 @@ void SSFASN1UnitTest(void)
         cursor.buf = i128; cursor.bufLen = sizeof(i128);
         SSF_ASSERT(SSFASN1DecGetUInt(&cursor, &iBuf, &iLen, &next) == true);
         SSF_ASSERT((iLen == 1u) && (iBuf == &i128[3]) && (iBuf[0] == 0x80u));
+
+        /* GetUInt contract callers rely on (ssfx509 RSA key policy): a returned magnitude has */
+        /* no leading 0x00 unless the value is zero, which comes back as the single byte 0x00. */
+        {
+            static const uint8_t iMulti[] = { 0x02u, 0x03u, 0x00u, 0x80u, 0x01u };
+            static const struct { const uint8_t *der; uint32_t len; } uints[] = {
+                { iZero, sizeof(iZero) }, { i7F, sizeof(i7F) }, { i128, sizeof(i128) },
+                { iMulti, sizeof(iMulti) }
+            };
+
+            for (i = 0; i < (uint32_t)(sizeof(uints) / sizeof(uints[0])); i++)
+            {
+                cursor.buf = uints[i].der; cursor.bufLen = uints[i].len;
+                SSF_ASSERT(SSFASN1DecGetUInt(&cursor, &iBuf, &iLen, &next) == true);
+                SSF_ASSERT(iLen >= 1u);
+                SSF_ASSERT((iBuf[0] != 0x00u) || (iLen == 1u));
+            }
+            cursor.buf = iMulti; cursor.bufLen = sizeof(iMulti);
+            SSF_ASSERT(SSFASN1DecGetUInt(&cursor, &iBuf, &iLen, &next) == true);
+            SSF_ASSERT((iLen == 2u) && (iBuf == &iMulti[3]) && (iBuf[0] == 0x80u));
+        }
     }
 
     /* ---- AUDIT ASN1-2: long-form lengths must be minimal (X.690 10.1) ---- */
@@ -402,6 +423,66 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(SSFASN1DecOpenConstructed(&cursor, SSF_ASN1_TAG_SEQUENCE, &inner,
                                              &next) == true);
         SSF_ASSERT((inner.bufLen == 256u) && (next.bufLen == 0u));
+    }
+
+    /* ---- COV-6b: EncTagLen writes the minimal 0x83 and 0x84 long forms ---- */
+    {
+        static const struct { uint32_t len; uint8_t hdr[6]; uint32_t hdrLen; } vec[] = {
+            { 0x10000u, { 0x30u, 0x83u, 0x01u, 0x00u, 0x00u, 0x00u }, 5u },
+            { 0xFFFFFFu, { 0x30u, 0x83u, 0xFFu, 0xFFu, 0xFFu, 0x00u }, 5u },
+            { 0x1000000u, { 0x30u, 0x84u, 0x01u, 0x00u, 0x00u, 0x00u }, 6u },
+            { 0xFFFFFFFFu, { 0x30u, 0x84u, 0xFFu, 0xFFu, 0xFFu, 0xFFu }, 6u }
+        };
+        static uint8_t big[5u + 0x10000u];
+        uint8_t hdr[6];
+        uint32_t measured;
+        uint32_t written;
+        SSFASN1Cursor_t inner;
+        uint32_t i;
+
+        for (i = 0; i < (uint32_t)(sizeof(vec) / sizeof(vec[0])); i++)
+        {
+            SSF_ASSERT(SSFASN1EncTagLen(NULL, 0u, SSF_ASN1_TAG_SEQUENCE, vec[i].len,
+                                        &measured) == true);
+            SSF_ASSERT(measured == vec[i].hdrLen);
+            SSF_ASSERT(SSFASN1EncTagLen(hdr, vec[i].hdrLen - 1u, SSF_ASN1_TAG_SEQUENCE,
+                                        vec[i].len, &written) == false);
+            SSF_ASSERT(SSFASN1EncTagLen(hdr, sizeof(hdr), SSF_ASN1_TAG_SEQUENCE, vec[i].len,
+                                        &written) == true);
+            SSF_ASSERT((written == vec[i].hdrLen) && (memcmp(hdr, vec[i].hdr, written) == 0));
+        }
+
+        /* The 0x83 form decodes back to the same content length */
+        memset(big, 0, sizeof(big));
+        SSF_ASSERT(SSFASN1EncTagLen(big, sizeof(big), SSF_ASN1_TAG_SEQUENCE, 0x10000u,
+                                    &written) == true);
+        cursor.buf = big; cursor.bufLen = sizeof(big);
+        SSF_ASSERT(SSFASN1DecOpenConstructed(&cursor, SSF_ASN1_TAG_SEQUENCE, &inner,
+                                             &next) == true);
+        SSF_ASSERT((inner.buf == &big[5]) && (inner.bufLen == 0x10000u) && (next.bufLen == 0u));
+    }
+
+    /* ---- COV-6c: a non-digit in the second place of a two-digit time field is refused ---- */
+    {
+        static const uint8_t utcBadSec[] = {
+            0x17u, 0x0Du, '2', '6', '0', '1', '0', '1', '0', '0', '0', '0', '5', 'a', 'Z'
+        };
+        static const uint8_t genBadMonth[] = {
+            0x18u, 0x0Fu, '2', '0', '2', '6', '0', 'a', '0', '1', '0', '0', '0', '0', '0', '0',
+            'Z'
+        };
+        static const uint8_t utcGood[] = {
+            0x17u, 0x0Du, '2', '6', '0', '1', '0', '1', '0', '0', '0', '0', '5', '9', 'Z'
+        };
+        uint64_t t;
+
+        cursor.buf = utcBadSec; cursor.bufLen = sizeof(utcBadSec);
+        SSF_ASSERT(SSFASN1DecGetTime(&cursor, &t, &next) == false);
+        cursor.buf = genBadMonth; cursor.bufLen = sizeof(genBadMonth);
+        SSF_ASSERT(SSFASN1DecGetTime(&cursor, &t, &next) == false);
+        cursor.buf = utcGood; cursor.bufLen = sizeof(utcGood);
+        SSF_ASSERT(SSFASN1DecGetTime(&cursor, &t, &next) == true);
+        SSF_ASSERT(t == 1767225659ull); /* 2026-01-01T00:00:59Z */
     }
 
     /* ---- AUDIT ASN1-7: a decoder that returns false leaves *next untouched ---- */

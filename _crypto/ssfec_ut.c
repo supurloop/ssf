@@ -263,9 +263,13 @@ static void _ECVerifyAtCurve(SSFECCurve_t curve, uint16_t iters)
         SSF_ASSERT(_ECPointEqOSSL(&R, osslR, curve, group, ctx) == true);
 
         /* === Test 8: ScalarMulDualBase: [k1]G + [k2]Q ====================================== */
+        /* (built only with a fixed-base table; with one table, the other curve takes its   */
+        /* generic G path)                                                                    */
+#if (SSF_EC_CONFIG_FIXED_BASE_P256 == 1) || (SSF_EC_CONFIG_FIXED_BASE_P384 == 1)
         SSFECScalarMulDualBase(&R, &k1, &k2, &Q, curve);
         SSF_ASSERT(EC_POINT_mul(group, osslR, bnK1, osslQ, bnK2, ctx) == 1);
         SSF_ASSERT(_ECPointEqOSSL(&R, osslR, curve, group, ctx) == true);
+#endif /* SSF_EC_CONFIG_FIXED_BASE_P256 || SSF_EC_CONFIG_FIXED_BASE_P384 */
 
         /* === Test 9: PointEncode/Decode roundtrip ========================================== */
         {

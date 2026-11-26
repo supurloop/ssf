@@ -166,14 +166,16 @@ comparable security.
   DER key decoders bound every integer before it reaches the big-number layer or any
   fixed-size buffer: a modulus that is empty, even, or wider than `SSF_RSA_MAX_KEY_BYTES`
   (the largest build-enabled key) is rejected, and in `RSAPrivateKey` the CRT fields
-  `p / q / dp / dq / qInv` must fit half the modulus width, and `p` must be exactly half
-  the modulus width in limbs (as every generated key is). Every key INTEGER must
+  `p / q / dp / dq / qInv` must fit half the modulus width, `p` must be exactly half
+  the modulus width in limbs (as every generated key is), and `p` and `q` must be odd
+  (an even prime, `q = 0` included, returns `false` from every signing call rather than
+  reaching the odd-modulus requirement of the Montgomery layer). Every key INTEGER must
   be a minimal, non-negative DER INTEGER
   ([`SSFASN1DecGetUInt`](../_codec/ssfasn1.md#ssfasn1decgetuint)), so a negative or
   zero-padded modulus is rejected rather than read as a magnitude. An out-of-range width
   would otherwise overflow the `SSF_RSA_MAX_KEY_BYTES` encoded-message buffers in the verify
   and sign paths or trip a halting `SSF_REQUIRE` in `ssfbn`. As a result `SSFRSAPubKeyIsValid`,
-  `SSFRSAPrivKeyIsValid`, and the verify entry points return `false` on malformed or
+  `SSFRSAPrivKeyIsValid`, and the verify and sign entry points return `false` on malformed or
   hostile key / DER input instead of aborting — safe to call on attacker-controlled bytes.
   Note that the decoders enforce only these structural bounds; the exact-size and exponent
   policy (bit length in the enabled set, `e >= 65537`) is applied by `SSFRSAPubKeyIsValid()`

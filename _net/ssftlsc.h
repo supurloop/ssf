@@ -294,8 +294,9 @@ typedef struct SSFTLSCSession
     uint8_t alpnCount;
     uint8_t alpnChosen;
 
-    /* Ephemeral key */
-    uint8_t ephemeralPrivKey[48];
+    /* Ephemeral ClientHello keys: X25519 at [0] and P-384 at [32] in ClientHello1 (an HRR's   */
+    /* key at [0]); 48 bytes until SAFE-07, which spilled P-384 into the next field.          */
+    uint8_t ephemeralPrivKey[32u + 48u];
 
     /* Handshake secret */
     uint8_t savedHandshakeSecret[SSF_TLS_MAX_HASH_SIZE];

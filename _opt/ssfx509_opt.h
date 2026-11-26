@@ -17,8 +17,10 @@ extern "C" {
 /* time, whatever the depth. It is also the TLS client's chain limit: ssftlsc keeps this many    */
 /* from a server's Certificate message and drops the rest (traced if verification then fails). 6 */
 /* covers leaf, two intermediates, a cross-signed root and the root. With ssfcms it must be at   */
-/* least SSF_CMS_CONFIG_MAX_CERTS + 1.                                                           */
+/* least SSF_CMS_CONFIG_MAX_CERTS + 1. Must be 1 to 255 (chain lengths are uint8_t; SAFE-04).   */
+#ifndef SSF_X509_CONFIG_MAX_CHAIN_DEPTH
 #define SSF_X509_CONFIG_MAX_CHAIN_DEPTH      (6u)
+#endif
 
 /* Maximum number of extensions retained in SSFX509Cert_t.exts; extras are skipped.              */
 #define SSF_X509_CONFIG_MAX_EXTENSIONS       (16u)

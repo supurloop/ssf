@@ -110,7 +110,25 @@ SAFE-04  ssfx509: SSF_X509_CONFIG_MAX_CHAIN_DEPTH cannot be overridden with -D
   Issue    : config hygiene, not a bug: the option cannot be set from the build line,
              unlike the other SSF options.
   Fix      : wrap it in #ifndef.
-  Status   : OPEN
+  Correction (2026-11-25): "unlike the other SSF options" is wrong: 18 of the 88 config
+             options in _opt/ are #ifndef-guarded (in this header only RSA_MIN_BITS). Also
+             unbounded: chain lengths and path indexes are uint8_t, and on HEAD a depth of
+             256 compiled with warnings only, the "no issuer" sentinel truncating to 0 (the
+             leaf's index).
+  Status   : DONE (2026-11-25): option B. #ifndef guard in ssfx509_opt.h, and ssfx509.c
+             #errors unless 1 <= depth <= 255 (next to the RSA_MIN_BITS check); ssfx509.md
+             row and header comment updated. Build checks, red on HEAD (9 of 9 fail), green
+             after: -D...=10u is applied (object holds 10, no "redefined" warning); 0, 256
+             and 1000 hit the new #error; 1 builds with -Werror; 255 builds ssfx509 / ssfcms
+             / ssftlsc with project warning flags, ssfx509 giving one harmless -Wtype-limits
+             ("chainLen <= 255 always true" in the REQUIRE). x509, CMS and TLS client unit
+             tests pass at depths 5 (CMS minimum), 10 (the x509 test's maximum) and 6, normal
+             and ASan. Mutants: 8 of 8 killed (guard removed, #ifdef, bound 256 / 254, lower
+             bound 0 / 2, && for ||, check disabled). Default build (M4 -Os): ssfcms and
+             ssftlsc .text byte-identical, ssfx509 14,436 B unchanged in size (237 bytes
+             differ: HEAD with 3 blank lines at the same spot compiles to identical .text, so
+             they are SSF_REQUIRE line numbers). No run-time or stack change unless the depth
+             is set.
 
 SAFE-05  ssfrsa: the 8 KB stack scrub does not reach the deepest freed frames      [V]
   Location : _crypto/ssfrsa.c:93 (_SSFRSAStackScrub, volatile uint8_t scratch[8192]);
@@ -201,7 +219,60 @@ SAFE-06  ssfrsa: a private key with an even p or q asserts in signing           
   Fix      : reject an even p or q in _SSFRSAPrivKeyDecode, next to the even-n check, plus
              a unit test per sign function; IsValid's own check then becomes redundant.
   Found    : 2026-11-25, BN-01 correctness and security audit.
-  Status   : OPEN
+  Status   : DONE (2026-11-25): option B. _SSFRSAPrivKeyDecode rejects ((p.limbs[0] &
+             q.limbs[0]) & 1) == 0 right after q is loaded (q = 0 included, which on HEAD
+             stopped in SSFBNMod's non-zero REQUIRE, ssfbn.c:1405, before MontInit's);
+             SSFRSAPrivKeyIsValid drops its now-redundant SSFBNIsEven(p) / SSFBNIsEven(q)
+             and keeps the IsOne checks. A sweep of 23 malformed keys (fresh RSA-2048)
+             through SignPKCS1 / SignPSS / IsValid: on HEAD exactly the five with an even p
+             or q (p even, q even, both, q = 2, q = 0) asserted; all now return false, the
+             other 18 and the valid key are unchanged on all three calls. Measured (M4 -Os,
+             --gc-sections, 4096): SIGN 20,024 -> 20,044 B (+20), KEYGEN 26,336 -> 26,356
+             (+20), VERIFY 0; M0+ +24 / +24 / 0; SSFRSAPrivKeyIsValid 764 -> 692 (-72, so
+             builds linking ssfpkey are net smaller); decoder frame 88 -> 96, not on the
+             deepest chain: sign peaks 19,840 / 20,616 and IsValid 17,864 unchanged,
+             SAFE-05 scrub sizes unchanged. Parity of p, q is public for any valid key
+             (always odd); the early return precedes all CRT work and every caller's
+             cleanup still wipes the decoded fields and scrubs. Tests: p + 1, q + 1, both,
+             and q = 0 (DER rebuilt by a new _SSFRSAUTZeroInt helper, itself checked as an
+             identity copy) must make SignPKCS1 and SignPSS return false with sigLen
+             untouched and IsValid false; red on HEAD (ssfbn.c:2636). Mutants under ASan: 6
+             of 7 killed (no check, p only, q only, & -> |, inverted, bit 1); the survivor
+             removes IsValid's existing p == 1 check, unreachable since the decoder
+             requires p to be exactly half n's width with no leading zero bytes (pre-
+             existing, unchanged). ssfpkey tests pass with the new ssfrsa. Docs: ssfrsa.md
+             (odd p, q; sign entry points return false).
+
+SAFE-07  ssftlsc: the P-384 ClientHello1 key overflows ephemeralPrivKey by 32 bytes     [V]
+  Location : _net/ssftlsc.h:298 (uint8_t ephemeralPrivKey[48]); _net/ssftlsc.c:1555
+             (memcpy(&ephemeralPrivKey[32], ecPriv, 48)) and :1226 (the ECDH reads 48 bytes
+             from [32])
+  Issue    : ClientHello1 keeps the X25519 key at [0] and the P-384 key at [32], 80 bytes
+             in a 48-byte array: the key's last 32 bytes are written into the next field,
+             savedHandshakeSecret (x86-64 offsets 730 / 778). P-384 key exchange works only
+             because nothing writes that field between key generation and the ECDH, and the
+             key schedule then overwrites it (every failure path wipes it), so no key bytes
+             are left behind; but it is an out-of-bounds write that a layout change breaks
+             (TLSC-02's ephemeralPrivKey / savedHandshakeSecret union would have spilled
+             the key into the HRR fields written while the ServerHello is processed). GCC
+             (-O2 -Warray-bounds=2 -Wstringop-overflow=4) and ASan do not see it: the write
+             stays inside the session struct. An HRR key is stored at [0], and an HRR to
+             P-384 is refused (P-384 always has a share in ClientHello1).
+  Fix      : uint8_t ephemeralPrivKey[32u + 48u].
+  Found    : 2026-11-25, while prototyping TLSC-02.
+  Status   : DONE (2026-11-25): as specified. Session +32 B (M4 26,888 -> 26,920; x86-64
+             27,080 -> 27,112); ssftlsc code -4 B (24,725 -> 24,721). The existing wipes
+             use sizeof, so all 80 bytes are wiped on every path. Test: after ClientHello1,
+             ephemeralPrivKey holds 32 + 48 bytes and the public keys computed from [0]
+             (X25519) and [32..80) (P-384) equal the key_share entries of the ClientHello
+             sent (read with _SSFTLSCUTRecvRecord: a 512-byte buffer or one recv() can
+             truncate it); red on HEAD at the size check (the key check alone passes on
+             HEAD, the spilled bytes being contiguous). SSFTLSCUnitTest passes, normal and
+             ASan; tools/tlsc-interop 158 of 158, normal and ASan. Mutants under ASan: 5 of
+             6 killed by the unit tests (48- and 79-byte array, P-384 key at [0], only 32
+             bytes copied, wipe of 48 bytes); the 6th (ECDH reading P-384 from [16])
+             survives them, since no unit test runs a P-384 exchange with the client's own
+             ClientHello1 key, and is killed by interop (40 P-384 rows fail).
 
 =====================================================================================
 ssftlsc  (TLS 1.3 client)          baseline: code 13,611 B; sizeof(SSFTLSCSession_t) 43,264 B
@@ -245,6 +316,12 @@ TLSC-02  STRUCT  -264 B per session (26,824 -> 26,560 on top of H)              
              handshake secret.
   Risk     : medium. Every secret is still overwritten or zeroed at end of life; the
              scrub-hook unit tests need the new names. Code not prototyped.
+  Note     : (2026-11-25) prototyped on HEAD a0c8a53: needs SAFE-07 first (the union would
+             move the P-384 spill into live fields). With it: M4 session 26,920 -> 26,624
+             (-296; -264 vs before SAFE-07), cryptoWork 384 -> 184, code -24 B; the
+             ephemeral wipe must move before the save, the serverHsTrafficSecret wipe in
+             _EnterAppSendKeys must go (it would erase the app secret), and two unit-test
+             assertions change (ut:3939, ut:4028).
   Status   : OPEN
 
 TLSC-03  CODE  -185 B                                                              M

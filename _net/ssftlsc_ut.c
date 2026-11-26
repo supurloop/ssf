@@ -69,6 +69,7 @@
 #include "ssfpkey.h"
 #include "ssfecdsa.h"
 #include "ssfed25519.h"
+#include "ssfx25519.h"
 #include "ssfrsa.h"
 #include "ssfsha2.h"
 #include "ssfbase64.h"
@@ -5259,17 +5260,62 @@ void SSFTLSCUnitTest(void)
     SSF_ASSERT((r == SSF_NET_IO_WANT_READ) || (r == SSF_NET_IO_WANT_WRITE));
     SSF_ASSERT(peer != SSF_TLSC_UT_INVALID);
     {
-        int got = recv(peer, (char *)buf, (int)sizeof(buf), 0);
+        static uint8_t chRec[SSF_TLS_RECORD_HEADER_SIZE + SSF_TLSC_CH_SIZE];
+        int got = (int)_SSFTLSCUTRecvRecord(peer, chRec, sizeof(chRec));   /* One whole record */
+        const uint8_t *rec = chRec;
         size_t i;
         bool hasSni = false;
 
         SSF_ASSERT(got >= 9);
-        SSF_ASSERT(buf[0] == SSF_TLS_CT_HANDSHAKE);           /* Record: handshake */
-        SSF_ASSERT((buf[1] == 0x03u) && (buf[2] == 0x03u));   /* legacy_record_version */
-        SSF_ASSERT(buf[5] == SSF_TLS_HS_CLIENT_HELLO);
+        SSF_ASSERT(rec[0] == SSF_TLS_CT_HANDSHAKE);           /* Record: handshake */
+        SSF_ASSERT((rec[1] == 0x03u) && (rec[2] == 0x03u));   /* legacy_record_version */
+        SSF_ASSERT(rec[5] == SSF_TLS_HS_CLIENT_HELLO);
         for (i = 0; (i + sizeof("localhost") - 1u) <= (size_t)got; i++)
-        { if (memcmp(&buf[i], "localhost", sizeof("localhost") - 1u) == 0) hasSni = true; }
+        { if (memcmp(&rec[i], "localhost", sizeof("localhost") - 1u) == 0) hasSni = true; }
         SSF_ASSERT(hasSni);
+
+        /* SAFE-07: both ClientHello1 private keys lie inside ephemeralPrivKey (X25519 at [0],  */
+        /* P-384 at [32]) and are the ones whose public keys the key_share carries.             */
+        {
+            SSFTLSCUTClientHello_t ch;
+            const uint8_t *ksd;
+            int ks;
+            size_t p;
+            uint8_t pub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+            size_t pubLen;
+            bool gotX = false;
+            bool gotP = false;
+
+            SSF_ASSERT(sizeof(_utSession.ephemeralPrivKey) >= (32u + 48u));
+            _SSFTLSCUTParseClientHello(rec, (size_t)got, &ch);
+            ks = _SSFTLSCUTFindExt(&ch, SSF_TLS_EXT_KEY_SHARE);
+            SSF_ASSERT(ks >= 0);
+            ksd = ch.extData[ks];
+            SSF_ASSERT((2u + (((size_t)ksd[0] << 8) | ksd[1])) == ch.extLen[ks]);
+            for (p = 2u; p < ch.extLen[ks]; )
+            {
+                uint16_t g = (uint16_t)(((uint16_t)ksd[p] << 8) | ksd[p + 1u]);
+                size_t kl = ((size_t)ksd[p + 2u] << 8) | ksd[p + 3u];
+
+                if (g == SSF_TLS_GROUP_X25519)
+                {
+                    SSF_ASSERT(kl == 32u);
+                    SSFX25519PubKeyFromPrivKey(_utSession.ephemeralPrivKey, pub);
+                    SSF_ASSERT(memcmp(pub, &ksd[p + 4u], 32u) == 0);
+                    gotX = true;
+                }
+                else if (g == SSF_TLS_GROUP_SECP384R1)
+                {
+                    SSF_ASSERT(SSFECDSAPubKeyFromPrivKey(SSF_EC_CURVE_P384,
+                                                         &_utSession.ephemeralPrivKey[32], 48u,
+                                                         pub, sizeof(pub), &pubLen));
+                    SSF_ASSERT((pubLen == kl) && (memcmp(pub, &ksd[p + 4u], kl) == 0));
+                    gotP = true;
+                }
+                p += 4u + kl;
+            }
+            SSF_ASSERT(gotX && gotP);
+        }
     }
     (void)SSF_TLSC_UT_CLOSE(peer);
     peer = SSF_TLSC_UT_INVALID;

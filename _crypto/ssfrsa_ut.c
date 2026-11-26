@@ -659,6 +659,67 @@ static void _SSFRSAUTBumpInt(uint8_t *der, size_t derLen, uint8_t idx)
         pos += len;
     }
 }
+
+/* --------------------------------------------------------------------------------------------- */
+/* UT helper: copy a 30 82 LL LL DER SEQUENCE with INTEGER number idx replaced by 0 (SAFE-06).   */
+/* --------------------------------------------------------------------------------------------- */
+static size_t _SSFRSAUTZeroInt(const uint8_t *der, size_t derLen, uint8_t idx, uint8_t *out,
+                               size_t outSize)
+{
+    size_t pos = 4u;
+    size_t start;
+    size_t len;
+    uint32_t outPos = 4u;
+    uint8_t i;
+    uint8_t k;
+
+    SSF_REQUIRE(der != NULL);
+    SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE(derLen > 4u);
+    SSF_REQUIRE(outSize >= derLen);
+    SSF_REQUIRE((der[0] == 0x30u) && (der[1] == 0x82u));
+
+    for (i = 0; pos < derLen; i++)
+    {
+        start = pos;
+        SSF_REQUIRE(der[pos] == 0x02u);
+        pos++;
+        /* Is the length in long form? */
+        if ((der[pos] & 0x80u) != 0u)
+        {
+            /* Yes, read the k length bytes */
+            k = (uint8_t)(der[pos] & 0x7Fu);
+            pos++;
+            len = 0u;
+            while (k > 0u) { len = (len << 8) | der[pos]; pos++; k--; }
+        }
+        else
+        {
+            /* No, the byte is the length */
+            len = der[pos];
+            pos++;
+        }
+        pos += len;
+        SSF_REQUIRE(pos <= derLen);
+        /* Is this the INTEGER to replace? */
+        if (i == idx)
+        {
+            /* Yes, write INTEGER 0 */
+            out[outPos++] = 0x02u;
+            out[outPos++] = 0x01u;
+            out[outPos++] = 0x00u;
+        }
+        else
+        {
+            /* No, copy it unchanged */
+            memcpy(&out[outPos], &der[start], pos - start);
+            outPos += (uint32_t)(pos - start);
+        }
+    }
+    SSF_REQUIRE(i > idx);
+    _SSFRSAUTCloseSeq(out, outPos);
+    return outPos;
+}
 #endif /* PKCS1_V15 && 2048 */
 
 /* --------------------------------------------------------------------------------------------- */
@@ -1638,6 +1699,48 @@ void SSFRSAUnitTest(void)
         SSF_ASSERT(SSFRSAVerifyPSS(foreignPub, sizeof(foreignPub), SSF_RSA_HASH_SHA256,
                    hashVal, sizeof(hashVal), sizeof(hashVal), sig, sigLen) == true);
 #endif /* SSF_RSA_CONFIG_ENABLE_PSS == 1 */
+
+        /* ---- SAFE-06: an even p or q (or q = 0) makes signing return false, not assert ---- */
+        {
+            static uint8_t bad[sizeof(foreignPriv)];
+            size_t badLen;
+            uint8_t c;
+
+            /* Cases: 0 = p + 1 (even), 1 = q + 1 (even), 2 = p and q + 1, 3 = q = 0 */
+            for (c = 0u; c < 4u; c++)
+            {
+                if (c < 3u)
+                {
+                    memcpy(bad, foreignPriv, sizeof(bad));
+                    badLen = sizeof(bad);
+                    if (c != 1u) _SSFRSAUTBumpInt(bad, badLen, 4u);
+                    if (c != 0u) _SSFRSAUTBumpInt(bad, badLen, 5u);
+                }
+                else
+                {
+                    badLen = _SSFRSAUTZeroInt(foreignPriv, sizeof(foreignPriv), 5u, bad,
+                                              sizeof(bad));
+                    SSF_ASSERT(badLen < sizeof(foreignPriv));
+                }
+                sigLen = 0u;
+                SSF_ASSERT(SSFRSASignPKCS1(bad, badLen, SSF_RSA_HASH_SHA256, hashVal,
+                           sizeof(hashVal), sig, sizeof(sig), &sigLen) == false);
+                SSF_ASSERT(sigLen == 0u);
+#if SSF_RSA_CONFIG_ENABLE_PSS == 1
+                SSF_ASSERT(SSFRSASignPSS(bad, badLen, SSF_RSA_HASH_SHA256, hashVal,
+                           sizeof(hashVal), sig, sizeof(sig), &sigLen) == false);
+                SSF_ASSERT(sigLen == 0u);
+#endif /* SSF_RSA_CONFIG_ENABLE_PSS == 1 */
+                SSF_ASSERT(SSFRSAPrivKeyIsValid(bad, badLen) == false);
+            }
+
+            /* The rebuilt-DER helper is a faithful copy when it replaces an INTEGER already 0 */
+            badLen = _SSFRSAUTZeroInt(foreignPriv, sizeof(foreignPriv), 0u, bad, sizeof(bad));
+            SSF_ASSERT(badLen == sizeof(foreignPriv));
+            SSF_ASSERT(memcmp(bad, foreignPriv, badLen) == 0);
+            SSF_ASSERT(SSFRSASignPKCS1(bad, badLen, SSF_RSA_HASH_SHA256, hashVal,
+                       sizeof(hashVal), sig, sizeof(sig), &sigLen) == true);
+        }
 
         /* ---- Stricter SSFRSAPubKeyIsValid: small public exponent (e = 3) ---- */
         {

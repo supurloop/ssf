@@ -550,6 +550,14 @@ static bool _SSFRSAPrivKeyDecode(const uint8_t *der, size_t derLen, SSFBN_t *n, 
 
     /* q, dp, dq, qInv are loaded at half-key width. */
     if (!_SSFRSADecIntToBN(&next, q, hl, &next)) return false;
+
+    /* Is p or q even (q == 0 included)? */
+    if (((p->limbs[0] & q->limbs[0]) & 1u) == 0u)
+    {
+        /* Yes, no RSA prime is even and the CRT reductions require odd p, q (SAFE-06) */
+        return false;
+    }
+    /* No, p and q are odd */
     if (!_SSFRSADecIntToBN(&next, dp, hl, &next)) return false;
     if (!_SSFRSADecIntToBN(&next, dq, hl, &next)) return false;
     if (!_SSFRSADecIntToBN(&next, qInv, hl, &next)) return false;
@@ -908,16 +916,16 @@ bool SSFRSAPrivKeyIsValid(const uint8_t *privKeyDer, size_t privKeyDerLen)
         /* Yes, d must be > 1 */
         goto cleanup;
     }
-    /* No, is p even or one? */
-    if (SSFBNIsEven(&p) || SSFBNIsOne(&p))
+    /* No, is p one (the decoder already rejected an even p or q, SAFE-06)? */
+    if (SSFBNIsOne(&p))
     {
-        /* Yes, p must be odd and > 1 */
+        /* Yes, p must be > 1 */
         goto cleanup;
     }
-    /* No, is q even or one? */
-    if (SSFBNIsEven(&q) || SSFBNIsOne(&q))
+    /* No, is q one? */
+    if (SSFBNIsOne(&q))
     {
-        /* Yes, q must be odd and > 1 */
+        /* Yes, q must be > 1 */
         goto cleanup;
     }
 

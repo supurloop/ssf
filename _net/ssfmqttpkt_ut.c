@@ -672,7 +672,18 @@ static void _SSFMQTTPktUTDecodePublish(void)
     static const uint8_t pubHalfId[] = { 0x32, 0x04, 0x00, 0x01, 't', 0x00 };
     static const uint8_t pubZeroId[] = { 0x32, 0x05, 0x00, 0x01, 't', 0x00, 0x00 };
     static const uint8_t notPub[] = { 0x40, 0x02, 0x00, 0x01 };
+    /* A received topic name holds no wildcard (3.3.2.1); non-ASCII bytes are accepted */
+    static const uint8_t pubPlusTopic[] = { 0x30, 0x05, 0x00, 0x03, 'a', '/', '+' };
+    static const uint8_t pubHashTopic[] = { 0x30, 0x03, 0x00, 0x01, '#' };
+    static const uint8_t pubMidHashTopic[] = { 0x30, 0x05, 0x00, 0x03, 'a', '#', 'b' };
+    static const uint8_t pubUtf8Topic[] = { 0x30, 0x06, 0x00, 0x04, 'c', 'a', 0xC3, 0xA9 };
     SSFMQTTPktPublish_t pub;
+
+    SSF_ASSERT(SSFMQTTPktDecodePublish(pubPlusTopic, sizeof(pubPlusTopic), &pub) == false);
+    SSF_ASSERT(SSFMQTTPktDecodePublish(pubHashTopic, sizeof(pubHashTopic), &pub) == false);
+    SSF_ASSERT(SSFMQTTPktDecodePublish(pubMidHashTopic, sizeof(pubMidHashTopic), &pub) == false);
+    SSF_ASSERT(SSFMQTTPktDecodePublish(pubUtf8Topic, sizeof(pubUtf8Topic), &pub));
+    SSF_ASSERT(pub.topicLen == 4);
 
     SSF_ASSERT_TEST((void)SSFMQTTPktDecodePublish(NULL, sizeof(pubRetain), &pub));
     SSF_ASSERT_TEST((void)SSFMQTTPktDecodePublish(pubRetain, 0, &pub));
@@ -722,6 +733,29 @@ static void _SSFMQTTPktUTDecodePublish(void)
     _utBuf[sizeof(pubRetain) + 1] = 0x00;
     SSF_ASSERT(SSFMQTTPktDecodePublish(_utBuf, sizeof(pubRetain) + 2, &pub) == false);
     SSF_ASSERT(SSFMQTTPktDecodePublish(_utBuf, sizeof(pubRetain), &pub));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Tests the PINGRESP decoder: exactly D0 00 (3.12, 2.2.2).                                      */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTPktUTDecodePingResp(void)
+{
+    static const uint8_t ok[] = { 0xD0, 0x00 };
+    static const uint8_t flags[] = { 0xD1, 0x00 };
+    static const uint8_t flags8[] = { 0xD8, 0x00 };
+    static const uint8_t body[] = { 0xD0, 0x01, 0x00 };
+    static const uint8_t notPingResp[] = { 0xC0, 0x00 };          /* PINGREQ */
+    static const uint8_t trailing[] = { 0xD0, 0x00, 0x00 };       /* Not one packet */
+
+    SSF_ASSERT_TEST((void)SSFMQTTPktDecodePingResp(NULL, 2));
+    SSF_ASSERT_TEST((void)SSFMQTTPktDecodePingResp(ok, 0));
+
+    SSF_ASSERT(SSFMQTTPktDecodePingResp(ok, sizeof(ok)));
+    SSF_ASSERT(SSFMQTTPktDecodePingResp(flags, sizeof(flags)) == false);
+    SSF_ASSERT(SSFMQTTPktDecodePingResp(flags8, sizeof(flags8)) == false);
+    SSF_ASSERT(SSFMQTTPktDecodePingResp(body, sizeof(body)) == false);
+    SSF_ASSERT(SSFMQTTPktDecodePingResp(notPingResp, sizeof(notPingResp)) == false);
+    SSF_ASSERT(SSFMQTTPktDecodePingResp(trailing, sizeof(trailing)) == false);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -805,6 +839,7 @@ void SSFMQTTPktUnitTest(void)
     _SSFMQTTPktUTEncodeSubscribe();
     _SSFMQTTPktUTDecodeAcks();
     _SSFMQTTPktUTDecodePublish();
+    _SSFMQTTPktUTDecodePingResp();
     _SSFMQTTPktUTValidTopic();
 }
 

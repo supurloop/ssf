@@ -56,7 +56,8 @@ extern "C" {
 /* - Outbound strings (topic names, filters, client id, user name) are limited to printable     */
 /*   ASCII, 0x20..0x7E, so ill-formed UTF-8 (1.5.3) and control characters are never sent.       */
 /*   Non-ASCII UTF-8 is refused too: a limitation, not a protocol rule. Topic names may not     */
-/*   hold '+' or '#'; filters must place them per 4.7.1. Inbound topics are not restricted.      */
+/*   hold '+' or '#'; filters must place them per 4.7.1. An inbound topic is rejected only for   */
+/*   NUL or a wildcard; its UTF-8 is not checked.                                                */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Defines and typedefs                                                                          */
@@ -178,6 +179,7 @@ bool SSFMQTTPktDecodeSubAck(const uint8_t *pkt, size_t pktLen, uint16_t *packetI
                             uint8_t *codes, size_t codesSize, uint32_t *countOut);
 bool SSFMQTTPktDecodePubAck(const uint8_t *pkt, size_t pktLen, uint16_t *packetIdOut);
 bool SSFMQTTPktDecodePublish(const uint8_t *pkt, size_t pktLen, SSFMQTTPktPublish_t *pubOut);
+bool SSFMQTTPktDecodePingResp(const uint8_t *pkt, size_t pktLen);
 
 /* Validation of outbound strings: NUL terminated within size, 1..65535 bytes, printable ASCII.  */
 /* A topic name holds no wildcard; a filter has '#' only as the whole last level and '+' only as */

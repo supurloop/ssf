@@ -43,7 +43,8 @@ the application run in `SSFMQTTCTask()`. Both are driven from one application lo
   a control character. Non-ASCII text (for example `café`) is refused. Topic names may not hold
   the wildcards `+` or `#` (3.3.2.1), and filters must place them correctly (4.7.1). A bad topic
   makes `TxPublish()` return `false`; a bad Start string asserts. The password is binary and
-  unrestricted, and inbound topics are accepted as the broker sends them.
+  unrestricted. Inbound topics are only checked for NUL and wildcards; their UTF-8 is not
+  validated (see the `topic` field of `SSFMQTTCRxPublish_t`).
 - **Last Will.** An optional will (`willOpt`) rides on every CONNECT. The broker publishes it
   when the connection ends without DISCONNECT. A connection the client ends because of an error
   is closed without DISCONNECT, so the will fires whatever the cause; only `SSFMQTTCStop()`
@@ -92,7 +93,7 @@ the application run in `SSFMQTTCTask()`. Both are driven from one application lo
 - **A PUBACK is never skipped.** Every dropped QoS 1 PUBLISH is acknowledged so the broker's
   in-flight window keeps moving. If no PUBACK block is free (the transport is not taking bytes),
   the packet id is owed and reads stop until its PUBACK is queued; at most one is ever owed. A
-  delivery's PUBACK waits behind an owed one. Before CONNACK nothing is acknowledged, and once
+  delivery's PUBACK waits behind an owed one. A PUBLISH before CONNACK fails the attempt, and once
   `Stop()` has queued DISCONNECT nothing more is sent: inbound PUBLISH is dropped unacknowledged,
   and a hold or owed PUBACK is abandoned (the clean session forgets it).
 - **Strings.** Every string the application supplies is NUL terminated and strictly shorter than
@@ -162,7 +163,7 @@ connection failed in, not RECONNECT_WAIT.
 | `SUBSCRIBE_DOWNGRADED` | Reported with READY, not a failure: SUBACK granted a lower QoS than requested for one or more filters, and refused none. |
 | `KEEPALIVE` | No PINGRESP within [`SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT`](#opt-pingresp). |
 | `TX_PUBLISH_TIMEOUT` | A publish did not complete within `txPublishTimeout`. |
-| `PROTOCOL` | Malformed packet, or a packet type not valid at that point. |
+| `PROTOCOL` | Malformed packet, or a packet type not valid at that point: for example a PUBLISH before CONNACK (3.2.0), a PINGRESP other than exactly `D0 00`, or an inbound topic holding `+` or `#` (3.3.2.1). |
 | `RX_PUBLISH_QOS2` | The broker sent a QoS 2 PUBLISH, which no subscription allows; decided by the fixed header alone. A broker bug: it recurs on every reconnect. |
 | `RX_OVERFLOW` | Inbound packet other than PUBLISH larger than `rxBlockSize`. |
 | `RX_PUBLISH_TIMEOUT` | The application deferred an inbound PUBLISH past [`SSF_MQTTC_CONFIG_RX_PUBLISH_MAX_TICKS`](#opt-maxticks). |
@@ -244,7 +245,7 @@ brokers may deliver matching and retained packets ahead of SUBACK.
 
 | Field | Meaning |
 |-------|---------|
-| `topic`, `topicLen` | NUL terminated, shorter than the topic constant. Valid only during the callback. |
+| `topic`, `topicLen` | NUL terminated, shorter than the topic constant. Valid only during the callback. The bytes are as the broker sent them: never NUL, `+` or `#` (a topic holding one ends the connection with `PROTOCOL`), but not checked for UTF-8, so they may be non-ASCII, non-printable or ill-formed UTF-8. Validate them before treating them as text. |
 | `payload`, `payloadLen` | Valid only during the callback. `payload` is NULL when the length is 0. |
 | `qos` | 0 or 1. |
 | `retain` | Set by the broker when delivering a retained message. |
@@ -727,12 +728,21 @@ static void OnEvent(void *ctx, SSFMQTTCEvent_t event, SSFMQTTCReason_t reason)
   TCP connection is seen to close. It fires on any failure the client detects too, so a failure
   followed by a quick reconnect shows `offline` then `online`. A reconnect with the same client
   id before the broker noticed the old connection was lost also makes the broker publish it.
-- **PUBACK order is not arrival order in every case.** PUBACKs for dropped packets can go out
-  ahead of those for earlier packets still waiting in the queue (MQTT-IOP-07); an owed PUBACK
-  always precedes those of later deliveries.
+- **PUBACK order is not arrival order in every case.** PUBACKs for dropped packets
+  (`RX_PUBLISH_HOLD_TIMEOUT`, `RX_PUBLISH_TOO_LARGE`, `RX_PUBLISH_TOPIC_TOO_LONG`) can go out
+  ahead of those for earlier packets still waiting in the queue, which MQTT 3.1.1 4.6 does not
+  allow (MQTT-IOP-07); an owed PUBACK always precedes those of later deliveries. Every QoS 1
+  packet still gets exactly one PUBACK. Mosquitto, EMQX and HiveMQ match a PUBACK to its message
+  by packet id anywhere in the in-flight window (checked in their source), so this is harmless
+  with them; AWS IoT Core and Azure IoT Hub do not document either way.
 - **ASCII only.** Topic names, filters, client ids and user names with non-ASCII UTF-8 (accented
   letters, other scripts, emoji) cannot be sent, although MQTT allows them. Inbound topics are
   not limited, so a wildcard subscription still receives them.
+- **Inbound UTF-8 is not validated.** MQTT 1.5.3 says a receiver must close the connection on
+  ill-formed UTF-8. The client does not check: it passes inbound topic bytes to the application
+  as received, so a broker that sends bad UTF-8 is not detected. The application must not assume
+  a received topic is valid UTF-8. An oversized PUBLISH, dropped as it arrives, has its topic
+  checked for nothing, since only its fixed header and length fields are read.
 - **IPv4 only.** SSF is not designed for an IPv6 stack ([`ssfnet.h`](ssfnet.h)): `host` is a
   DNS name or a dotted IPv4 address, names resolve to IPv4 addresses only, and an IPv6 literal
   fails every attempt with `TRANSPORT_ERROR`. A broker with no IPv4 address cannot be reached.

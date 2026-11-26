@@ -6,10 +6,10 @@ Scope      : _net/ssfmqttc.c, _net/ssfmqttpkt.c/.h, _opt/ssfmqttc_opt.h, _net/ss
              MQTT is not an IETF RFC; "the spec" below means MQTT 3.1.1. Section numbers are
              from that document. Code at commit a8ce46f (branch mqtt).
 Status     : MQTT-IOP-01 and MQTT-FEAT-07 are FIXED (commit 0bc61a9); MQTT-IOP-02, MQTT-IOP-03,
-             MQTT-IOP-04, MQTT-IOP-05, MQTT-IOP-06, MQTT-IOP-11, MQTT-FEAT-01, MQTT-FEAT-02,
-             MQTT-FEAT-04 and MQTT-FEAT-10 are FIXED; MQTT-FEAT-03, MQTT-FEAT-05, MQTT-FEAT-08,
-             MQTT-FEAT-09, MQTT-FEAT-11 and MQTT-FEAT-13 are deferred; MQTT-IOP-08, MQTT-FEAT-06
-             and MQTT-FEAT-12 are won't do; every other item is OPEN.
+             MQTT-IOP-04, MQTT-IOP-05, MQTT-IOP-06, MQTT-IOP-09, MQTT-IOP-11, MQTT-FEAT-01,
+             MQTT-FEAT-02, MQTT-FEAT-04 and MQTT-FEAT-10 are FIXED; MQTT-FEAT-03, MQTT-FEAT-05,
+             MQTT-FEAT-08, MQTT-FEAT-09, MQTT-FEAT-11 and MQTT-FEAT-13 are deferred; MQTT-IOP-07,
+             MQTT-IOP-08, MQTT-FEAT-06 and MQTT-FEAT-12 are won't do; every other item is OPEN.
 
 Lists
   Part A  Interoperability problems, most likely to happen with real brokers first.
@@ -210,6 +210,24 @@ MQTT-IOP-07  Inbound PUBACK ordering is not preserved when a packet is dropped b
   Suggestion : Fixed by the "PUBACK owed" approach in IOP-04 if acks are released in arrival
                order, or by giving each rx entry an ack-ready flag and releasing acks from
                the head.
+  Status     : WON'T DO (2026-11-26). Documented in ssfmqttc.md Known Trade-offs.
+               Remaining cases since MQTT-IOP-04: only drops acknowledged at once while
+               earlier QoS 1 packets still wait in the queue, i.e. RX_PUBLISH_HOLD_TIMEOUT,
+               RX_PUBLISH_TOO_LARGE and RX_PUBLISH_TOPIC_TOO_LONG. QUEUE_FULL is now QoS 0 only
+               (no PUBACK), and RX_PUBLISH_TIMEOUT drops the queue head (already in order).
+               Every QoS 1 packet still gets exactly one PUBACK; nothing is lost or repeated.
+               Broker check (source on master, read 2026-11-26): Mosquitto
+               (src/database.c db__message_delete_outgoing scans the whole in-flight list by
+               mid), EMQX (emqx_session_mem:puback/4, emqx_inflight:lookup/delete on a
+               gb_trees keyed by packet id) and HiveMQ CE (OrderedTopicService
+               messageFlowComplete removes the id from a set) all match a PUBACK by packet id
+               anywhere in the window, with no oldest-first check. AWS IoT Core documents only
+               that the broker "doesn't guarantee the order in which messages and ACK are
+               received" (its "out of order packet" text is an MQTT 5 DISCONNECT reason code,
+               0x82); Azure IoT Hub was not checked. Neither is verified by test. A fix would
+               need an ordered list of delayed PUBACK ids (a hold-timeout drop happens because
+               no rx block is free) with back-pressure when it fills, extending the IOP-04
+               owed-PUBACK machinery; not worth it for a rule no checked broker enforces.
 
 MQTT-IOP-08  Keep-alive policy: minimum 120 s, keepAliveSec = 0 not allowed, PINGREQ at
              keepAlive/4 even when traffic is flowing
@@ -238,6 +256,15 @@ MQTT-IOP-09  Packets the broker should never send are accepted rather than rejec
   Suggestion : Check that PINGRESP is exactly 0xD0 0x00. Treat PUBLISH before CONNACK as
                PROTOCOL. Optionally reject wildcards and bad UTF-8 in inbound topics.
                Low value, but cheap.
+  Status     : FIXED (2026-11-26) except inbound UTF-8, which is documented as not validated.
+               A PINGRESP other than exactly D0 00 is PROTOCOL (new SSFMQTTPktDecodePingResp()).
+               A PUBLISH framed before CONNACK fails the attempt with PROTOCOL whatever its
+               size (a QoS 2 one keeps its own reason, RX_PUBLISH_QOS2); one after CONNACK in
+               the same read is still accepted. An inbound topic holding '+' or '#' makes
+               SSFMQTTPktDecodePublish() fail, so the connection ends with PROTOCOL without
+               delivery or PUBACK. Inbound topic bytes are passed to the app unvalidated for
+               UTF-8 (ssfmqttc.md, Known Trade-offs); an oversized PUBLISH dropped as it
+               arrives has its topic checked for nothing.
 
 MQTT-IOP-10  A packet identifier is not checked against in-flight ids before it is reused
   Probability: VERY LOW
@@ -474,6 +501,8 @@ PART C: CHECKED AND FOUND COMPLIANT
     for QoS 1.
   - SUBACK: packet id and return-code count matched against the request.
   - Only the CONNACK -> SUBSCRIBE -> PUBLISH ordering is used; nothing is sent before CONNACK.
+  - Inbound: CONNACK must be the first packet (3.2.0; a PUBLISH before it is PROTOCOL), PINGRESP
+    must be exactly D0 00 (2.2.2, 3.13), and a received topic may not hold '+' or '#' (3.3.2.1).
   - DISCONNECT is sent only on a packet boundary (a partially sent packet is never cut by
     it), and only by Stop(): a failure closes without it, so the will is published (3.1.2.5).
 

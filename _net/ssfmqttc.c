@@ -176,6 +176,7 @@ typedef struct
                                       /* waits for queue space; reads are suspended            */
     SSFPortTick_t rxHeldSince;        /* When the current hold began                           */
     bool isRxHoldEnded;               /* A hold ended since the PINGRESP deadline was armed    */
+    bool isRxConnAckSeen;             /* A CONNACK was framed on this connection (3.2.0: first)  */
     uint16_t pubAckOwed;              /* Packet id of a PUBACK no ctl block could take, or 0;  */
                                       /* reads are suspended until it is queued                */
 
@@ -522,6 +523,7 @@ static void _SSFMQTTCRxFrameReset(void)
     _mqttc.isRxHeld = false;                    /* All belong to the connection */
     _mqttc.isRxHoldEnded = false;
     _mqttc.pubAckOwed = 0;
+    _mqttc.isRxConnAckSeen = false;
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -561,8 +563,8 @@ static bool _SSFMQTTCRxPubAckOwedFlush(void)
 
 /* --------------------------------------------------------------------------------------------- */
 /* Drops an inbound PUBLISH: acknowledges QoS 1 (or owes the PUBACK) so the broker window moves  */
-/* on, then reports the drop. Before CONNACK nothing is acknowledged: a PUBLISH there is a       */
-/* broker error, and a PUBACK could otherwise reach the wire ahead of CONNECT. Nor once         */
+/* on, then reports the drop. Until CONNACK is acted on nothing is acknowledged: a PUBLISH then  */
+/* is a broker error (one framed before CONNACK already failed the attempt). Nor once           */
 /* DISCONNECT is queued (STOPPING): nothing may follow it, and the clean session forgets the id. */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCRxPublishDrop(SSFMQTTCQoS_t qos, uint16_t packetId, SSFMQTTCReason_t reason)
@@ -622,7 +624,7 @@ static bool _SSFMQTTCRxPublishQueue(const uint8_t *pkt, size_t pktLen, bool *isH
 
     /* The rx pool holds exactly the framing block plus the queue depth, so an empty pool is   */
     /* the queue-full condition. QoS 1 is held (back-pressure) for up to RX_HOLD_MAX_TICKS, then */
-    /* dropped; QoS 0, or a PUBLISH before CONNACK or while STOPPING, is dropped at once.       */
+    /* dropped; QoS 0, or a PUBLISH before CONNACK is acted on or while STOPPING, at once.      */
     if ((b = _SSFMQTTCRxBlockAlloc()) == NULL)
     {
         if ((pub.qos == SSF_MQTTC_QOS_1) && _SSFMQTTCIsRxAckAllowed())
@@ -682,6 +684,7 @@ static bool _SSFMQTTCRxControlPost(const uint8_t *pkt, size_t pktLen)
         bool sessionPresent;
 
         if (SSFMQTTPktDecodeConnAck(pkt, pktLen, &sessionPresent, &ev.code) == false) break;
+        _mqttc.isRxConnAckSeen = true;
         ev.sessionPresent = sessionPresent ? 1u : 0u;
         SSFSMPutEventData(SSF_SM_MQTTC, SSF_SM_EVENT_MQTTC_RX_CONNACK, (SSFSMData_t *)&ev,
                           sizeof(ev));
@@ -732,6 +735,7 @@ static bool _SSFMQTTCRxControlPost(const uint8_t *pkt, size_t pktLen)
         return true;
     }
     case SSF_MQTT_PKT_PINGRESP:
+        if (SSFMQTTPktDecodePingResp(pkt, pktLen) == false) break;
         SSFSMPutEvent(SSF_SM_MQTTC, SSF_SM_EVENT_MQTTC_RX_PINGRESP);
         return true;
     default:
@@ -872,6 +876,12 @@ static bool _SSFMQTTCRxFrameProcess(void)
 
         fr = SSFMQTTPktFrame(frame, _mqttc.rxLen, &pktLen);
         if (fr == SSF_MQTT_PKT_FRAME_MALFORMED)
+        { _SSFMQTTCLinkFail(SSF_MQTTC_REASON_PROTOCOL); return false; }
+        /* The first packet from the broker is CONNACK (3.2.0), so a PUBLISH framed before one  */
+        /* fails; one after it in the same read is fine and waits for the state machine. A QoS  */
+        /* 2 one goes on to fail with its own, more specific reason (RX_PUBLISH_QOS2).           */
+        if ((SSF_MQTT_PKT_TYPE(frame[0]) == SSF_MQTT_PKT_PUBLISH) &&
+            (_mqttc.isRxConnAckSeen == false) && (_SSFMQTTCRxIsQoS2(frame[0]) == false))
         { _SSFMQTTCLinkFail(SSF_MQTTC_REASON_PROTOCOL); return false; }
         if ((pktLen != 0) && (pktLen > _mqttc.rxBlockSize))
         {

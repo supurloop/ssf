@@ -1486,18 +1486,26 @@ static void _SSFMQTTCUTScenarioProtocolErrors(void)
     static const uint8_t connAckAgain[] = { 0x20, 0x02, 0x00, 0x00 };
     static const uint8_t reserved[] = { 0xF0, 0x00 };
     static const uint8_t pubRel[] = { 0x62, 0x02, 0x00, 0x01 };
+    static const uint8_t pingRespFlags[] = { 0xD1, 0x00 };            /* Reserved bits (2.2.2) */
+    static const uint8_t pingRespBody[] = { 0xD0, 0x01, 0x00 };       /* Length 0 only (3.13) */
+    static const uint8_t pubWild0[] = { 0x30, 0x05, 0x00, 0x03, 'a', '/', '+' };   /* 3.3.2.1 */
+    static const uint8_t pubWild1[] = { 0x32, 0x07, 0x00, 0x03, 'a', '/', '#', 0x00, 0x01 };
     static const SSFMQTTCUTEventRec_t expected[] =
     { { SSF_MQTTC_EVENT_DISCONNECTED, SSF_MQTTC_REASON_PROTOCOL } };
-    const uint8_t *pkts[4];
-    size_t lens[4];
+    const uint8_t *pkts[8];
+    size_t lens[8];
     uint32_t i;
     SSFMQTTCOpts_t opts;
 
-    pkts[0] = qos3;         lens[0] = sizeof(qos3);
-    pkts[1] = connAckAgain; lens[1] = sizeof(connAckAgain);
-    pkts[2] = reserved;     lens[2] = sizeof(reserved);
-    pkts[3] = pubRel;       lens[3] = sizeof(pubRel);
-    for (i = 0; i < 4; i++)
+    pkts[0] = qos3;          lens[0] = sizeof(qos3);
+    pkts[1] = connAckAgain;  lens[1] = sizeof(connAckAgain);
+    pkts[2] = reserved;      lens[2] = sizeof(reserved);
+    pkts[3] = pubRel;        lens[3] = sizeof(pubRel);
+    pkts[4] = pingRespFlags; lens[4] = sizeof(pingRespFlags);
+    pkts[5] = pingRespBody;  lens[5] = sizeof(pingRespBody);
+    pkts[6] = pubWild0;      lens[6] = sizeof(pubWild0);
+    pkts[7] = pubWild1;      lens[7] = sizeof(pubWild1);   /* Not delivered, not acknowledged */
+    for (i = 0; i < 8; i++)
     {
         _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
         _SSFMQTTCUTOptsInit(&opts);
@@ -1906,43 +1914,97 @@ static void _SSFMQTTCUTScenarioRxTooLargeRetained(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Tests that a PUBLISH dropped before CONNACK is not acknowledged, so nothing precedes CONNECT. */
+/* Tests that a PUBLISH before CONNACK (3.2.0: CONNACK comes first) ends the attempt with        */
+/* PROTOCOL, whatever its size, and is never delivered or acknowledged; one after CONNACK in the */
+/* same read is accepted.                                                                        */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFMQTTCUTScenarioRxDropBeforeConnAck(void)
+static void _SSFMQTTCUTScenarioRxPublishBeforeConnAck(void)
 {
-    static const SSFMQTTCUTEventRec_t tooLarge[] =
-    { { SSF_MQTTC_EVENT_RX_PUBLISH_DROPPED, SSF_MQTTC_REASON_RX_PUBLISH_TOO_LARGE } };
-    static const SSFMQTTCUTEventRec_t tooLong[] =
-    { { SSF_MQTTC_EVENT_RX_PUBLISH_DROPPED, SSF_MQTTC_REASON_RX_PUBLISH_TOPIC_TOO_LONG } };
+    static const SSFMQTTCUTEventRec_t failed[] =
+    { { SSF_MQTTC_EVENT_CONNECT_FAILED, SSF_MQTTC_REASON_PROTOCOL } };
     uint8_t pkt[512];
-    size_t len;
+    size_t len = 0;
     size_t hdrLen;
+    uint32_t i;
     SSFMQTTCOpts_t opts;
 
-    /* Oversized QoS 1, sent by the broker as soon as the transport opens */
+    for (i = 0; i < 4; i++)
+    {
+        if (i == 3) _SSFMQTTCUTBeginRx(SSF_MQTTC_UT_TX_BLOCKS, 512);
+        else _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+        _SSFMQTTCUTOptsInit(&opts);
+        switch (i)
+        {
+        case 0:     /* Small QoS 0 */
+            len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x30, 1, 0, 1, 1, &hdrLen);
+            break;
+        case 1:     /* Small QoS 1 */
+            len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x32, 1, 0x1234, 1, 1, &hdrLen);
+            break;
+        case 2:     /* Oversized QoS 1, which would otherwise be skipped as it arrives */
+            len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x32, 3, 0x1234, 200, 200, &hdrLen);
+            break;
+        default:    /* QoS 1 that fits but whose topic is too long */
+            len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x32, SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE,
+                                          0x1234, 1, 1, &hdrLen);
+            break;
+        }
+        SSFMQTTCStart(&opts);
+        _SSFMQTTCUTPump();
+        _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktConnect));
+        _SSFMQTTCUTInject(pkt, len);                 /* The broker's answer to CONNECT */
+        _SSFMQTTCUTPump();
+        SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
+        _SSFMQTTCUTExpectTx(NULL, 0);                 /* No PUBACK, no SUBSCRIBE */
+        _SSFMQTTCUTExpectEvents(failed, 1);
+        SSF_ASSERT(_utRxPublishCount == 0);
+        _SSFMQTTCUTEnd();
+    }
+
+    /* After CONNACK in the same read: accepted, delivered once the attempt is under way */
     _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
     _SSFMQTTCUTOptsInit(&opts);
-    len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x32, 3, 0x1234, 200, 200, &hdrLen);
+    memcpy(pkt, _utPktConnAckOk, sizeof(_utPktConnAckOk));
+    len = sizeof(_utPktConnAckOk) + _SSFMQTTCUTBuildPublish(&pkt[sizeof(_utPktConnAckOk)],
+                                                            sizeof(pkt) - sizeof(_utPktConnAckOk),
+                                                            0x30, 1, 0, 1, 1, &hdrLen);
     _SSFMQTTCUTInject(pkt, len);
     SSFMQTTCStart(&opts);
+    _SSFMQTTCUTPumpUntilState(SSF_MQTTC_STATE_SUBSCRIBING, SSF_MQTTC_UT_LOAD_TICKS);
     _SSFMQTTCUTPump();
-    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTING);
-    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktConnect));
-    _SSFMQTTCUTExpectEvents(tooLarge, 1);
+    SSF_ASSERT(_utRxPublishCount == 1);
+    SSF_ASSERT(_utEventCount == 1);                  /* CONNECTED only */
+    SSF_ASSERT(_utEvents[0].event == SSF_MQTTC_EVENT_CONNECTED);
+    _utMock.txLen = 0;
+    _utEventCount = 0;
     _SSFMQTTCUTEnd();
 
-    /* QoS 1 that fits but whose topic is too long */
-    _SSFMQTTCUTBeginRx(SSF_MQTTC_UT_TX_BLOCKS, 512);
-    _SSFMQTTCUTOptsInit(&opts);
-    len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x32, SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE, 0x1234,
-                                  1, 1, &hdrLen);
-    _SSFMQTTCUTInject(pkt, len);
-    SSFMQTTCStart(&opts);
-    _SSFMQTTCUTPump();
-    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTING);
-    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktConnect));
-    _SSFMQTTCUTExpectEvents(tooLong, 1);
-    _SSFMQTTCUTEnd();
+    /* Each connection starts over: after a READY one is lost, a PUBLISH ahead of the next      */
+    /* CONNACK still fails the attempt                                                          */
+    {
+        static const uint8_t reserved[] = { 0xF0, 0x00 };
+        static const SSFMQTTCUTEventRec_t lost[] =
+        { { SSF_MQTTC_EVENT_DISCONNECTED, SSF_MQTTC_REASON_PROTOCOL } };
+
+        _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+        _SSFMQTTCUTOptsInit(&opts);
+        opts.connectTimeout = SSF_TICKS_PER_SEC * 5u;
+        _SSFMQTTCUTGoReady(&opts);
+        _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(reserved));
+        _SSFMQTTCUTPump();
+        _SSFMQTTCUTExpectEvents(lost, 1);
+        _SSFMQTTCUTPumpUntilState(SSF_MQTTC_STATE_CONNECTING,
+                                  SSF_MQTTC_UT_BACKOFF_TICKS + SSF_MQTTC_UT_LOAD_TICKS);
+        _SSFMQTTCUTPump();
+        _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktConnect));
+        len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x30, 1, 0, 1, 1, &hdrLen);
+        _SSFMQTTCUTInject(pkt, len);
+        _SSFMQTTCUTPump();
+        SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
+        _SSFMQTTCUTExpectEvents(failed, 1);
+        SSF_ASSERT(_utRxPublishCount == 0);
+        _SSFMQTTCUTEnd();
+    }
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -2939,8 +3001,8 @@ static void _SSFMQTTCUTScenarioRxHoldEdges(void)
     _utEventCount = 0;
     _SSFMQTTCUTEnd();
 
-    /* 4. No hold before CONNACK: a hostile burst ahead of CONNACK is dropped unacknowledged and */
-    /* the CONNACK behind it is still read                                                       */
+    /* 4. No hold before CONNACK: a hostile burst ahead of CONNACK ends the attempt at its first */
+    /* PUBLISH (3.2.0), so nothing is held or acknowledged                                       */
     _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
     _SSFMQTTCUTOptsInit(&opts);
     SSFMQTTCStart(&opts);
@@ -2953,10 +3015,13 @@ static void _SSFMQTTCUTScenarioRxHoldEdges(void)
         _SSFMQTTCUTInject(pkt, sizeof(pkt));
     }
     _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktConnAckOk));
-    _SSFMQTTCUTPumpUntilState(SSF_MQTTC_STATE_SUBSCRIBING, SSF_MQTTC_UT_LOAD_TICKS);
-    SSF_ASSERT(_utMock.rxPos == _utMock.rxLen);
-    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktSubscribe1));   /* No PUBACK */
-    _utEventCount = 0;
+    _SSFMQTTCUTPumpUntilState(SSF_MQTTC_STATE_RECONNECT_WAIT, SSF_MQTTC_UT_LOAD_TICKS);
+    _SSFMQTTCUTExpectTx(NULL, 0);                   /* No PUBACK */
+    {
+        static const SSFMQTTCUTEventRec_t failed[] =
+        { { SSF_MQTTC_EVENT_CONNECT_FAILED, SSF_MQTTC_REASON_PROTOCOL } };
+        _SSFMQTTCUTExpectEvents(failed, 1);
+    }
     _SSFMQTTCUTEnd();
 
     /* 5. Wake-up: once the transport drains under a hold and a slot frees, the task asks to be  */
@@ -4016,7 +4081,7 @@ void SSFMQTTCUnitTest(void)
     _SSFMQTTCUTScenarioRxTooLargeRetained();
     _SSFMQTTCUTScenarioRxPublishQoS2();
     _SSFMQTTCUTScenarioRxTooLargeLinkLoss();
-    _SSFMQTTCUTScenarioRxDropBeforeConnAck();
+    _SSFMQTTCUTScenarioRxPublishBeforeConnAck();
     _SSFMQTTCUTScenarioKeepAliveTimeout();
     _SSFMQTTCUTScenarioKeepAliveAnswered();
     _SSFMQTTCUTScenarioKeepAliveUnsolicitedPingResp();

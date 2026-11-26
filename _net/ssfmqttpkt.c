@@ -319,7 +319,8 @@ static bool _SSFMQTTPktIsPrintable(SSFCStrIn_t str, size_t len)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if an inbound topic has a legal length and no embedded NUL, else false.          */
+/* Returns true if an inbound topic has a legal length, no embedded NUL and no wildcard, else    */
+/* false. UTF-8 well-formedness is not checked: the bytes are passed to the app as received.     */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFMQTTPktIsInboundTopicOk(const uint8_t *t, size_t len)
 {
@@ -328,7 +329,11 @@ static bool _SSFMQTTPktIsInboundTopicOk(const uint8_t *t, size_t len)
     SSF_REQUIRE((t != NULL) || (len == 0));
 
     if (_SSFMQTTPktIsTopicLenOk(len) == false) return false;
-    for (i = 0; i < len; i++) { if (t[i] == 0) return false; }
+    for (i = 0; i < len; i++)
+    {
+        if (t[i] == 0) return false;                                        /* U+0000 (1.5.3) */
+        if ((t[i] == (uint8_t)'+') || (t[i] == (uint8_t)'#')) return false;   /* 3.3.2.1 */
+    }
     return true;
 }
 
@@ -660,6 +665,23 @@ bool SSFMQTTPktDecodePubAck(const uint8_t *pkt, size_t pktLen, uint16_t *packetI
     if (remaining != 2) return false;
     *packetIdOut = _SSFMQTTPktGetU16(&pkt[body]);
     return (*packetIdOut != 0);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if pkt is exactly a PINGRESP, D0 00 (flags 0, 2.2.2; no body, 3.13), else false. */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFMQTTPktDecodePingResp(const uint8_t *pkt, size_t pktLen)
+{
+    size_t body;
+    size_t remaining;
+
+    SSF_REQUIRE(pkt != NULL);
+    SSF_REQUIRE(pktLen > 0);
+
+    if (_SSFMQTTPktCheckPacket(pkt, pktLen, SSF_MQTT_PKT_PINGRESP, 0, SSF_MQTT_FLAGS_MASK, &body,
+                               &remaining) == false)
+    { return false; }
+    return (remaining == 0);
 }
 
 /* --------------------------------------------------------------------------------------------- */

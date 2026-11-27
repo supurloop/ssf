@@ -532,19 +532,34 @@ static void _ECDSAUTECDHHook(void *ctx,
     _ECDSAUTRecordBN(a, Sy, "Sy");
 }
 
-/* KeyGen exit hook: audit d and the entropy seed buffer for residue. */
+/* Record the first leak among the projective coordinates of pt, named prefix.x/y/z. */
+static void _ECDSAUTRecordPoint(_SSFECDSAZeroAudit_t *a, const SSFECPoint_t *pt,
+                                const char *xName, const char *yName, const char *zName)
+{
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(pt != NULL);
+
+    _ECDSAUTRecordBN(a, &pt->x, xName);
+    _ECDSAUTRecordBN(a, &pt->y, yName);
+    _ECDSAUTRecordBN(a, &pt->z, zName);
+}
+
+/* KeyGen exit hook: audit d, the projective Q and the entropy seed buffer for residue. */
 static void _ECDSAUTKeyGenHook(void *ctx,
                                const SSFBN_t *d,
+                               const SSFECPoint_t *Q,
                                const uint8_t *entropy, size_t entropyLen)
 {
     _SSFECDSAZeroAudit_t *a;
     size_t i;
 
     SSF_REQUIRE(ctx != NULL);
+    SSF_REQUIRE(Q != NULL);
 
     a = (_SSFECDSAZeroAudit_t *)ctx;
     a->sawHook = true;
     _ECDSAUTRecordBN(a, d, "d");
+    _ECDSAUTRecordPoint(a, Q, "Q.x", "Q.y", "Q.z");
 
     /* Is there entropy to scan and no leak recorded yet? */
     if ((entropy != NULL) && (!a->nonZero))
@@ -560,6 +575,116 @@ static void _ECDSAUTKeyGenHook(void *ctx,
             }
         }
     }
+}
+
+/* PubKeyFromPrivKey exit hook: audit d and the projective Q for residue. */
+static void _ECDSAUTPubKeyHook(void *ctx, const SSFBN_t *d, const SSFECPoint_t *Q)
+{
+    _SSFECDSAZeroAudit_t *a;
+
+    SSF_REQUIRE(ctx != NULL);
+    SSF_REQUIRE(d != NULL);
+    SSF_REQUIRE(Q != NULL);
+
+    a = (_SSFECDSAZeroAudit_t *)ctx;
+    a->sawHook = true;
+    _ECDSAUTRecordBN(a, d, "d");
+    _ECDSAUTRecordPoint(a, Q, "Q.x", "Q.y", "Q.z");
+}
+
+/* Assert PubKeyFromPrivKey's result for privKey, and that d and Q are wiped on return. */
+static void _ECDSAUTPubKeyAudit(SSFECCurve_t curve, const uint8_t *privKey, size_t privKeyLen,
+                                bool expectOk, const char *caseStr)
+{
+    const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
+    uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+    size_t pubKeyLen = 0xA5u;
+    size_t i;
+    _SSFECDSAZeroAudit_t audit = { false, false, NULL };
+
+    SSF_REQUIRE(c != NULL);
+    SSF_REQUIRE(privKey != NULL);
+    SSF_REQUIRE(caseStr != NULL);
+
+    memset(pubKey, 0xEE, sizeof(pubKey));
+    _SSFECDSAPubKeyTestExitHookCtx = &audit;
+    _SSFECDSAPubKeyTestExitHook = _ECDSAUTPubKeyHook;
+    SSF_ASSERT(SSFECDSAPubKeyFromPrivKey(curve, privKey, privKeyLen, pubKey, sizeof(pubKey),
+                                         &pubKeyLen) == expectOk);
+    _SSFECDSAPubKeyTestExitHook = NULL;
+    _SSFECDSAPubKeyTestExitHookCtx = NULL;
+
+    SSF_ASSERT(audit.sawHook == true);
+    if (audit.nonZero)
+    {
+        SSF_UT_PRINTF("PubKeyFromPrivKey (%s) zeroization audit FAILED: %s left non-zero\n",
+                      caseStr, audit.firstNonZero);
+    }
+    SSF_ASSERT(audit.nonZero == false);
+
+    /* Was the scalar expected to be accepted? */
+    if (expectOk)
+    {
+        /* Yes, an uncompressed SEC 1 point was written */
+        SSF_ASSERT(pubKeyLen == (1u + (2u * (size_t)c->bytes)));
+        SSF_ASSERT(pubKey[0] == 0x04u);
+    }
+    else
+    {
+        /* No, neither output was written */
+        SSF_ASSERT(pubKeyLen == 0xA5u);
+        for (i = 0u; i < sizeof(pubKey); i++)
+        {
+            SSF_ASSERT(pubKey[i] == 0xEEu);
+        }
+    }
+}
+
+/* Run the PubKeyFromPrivKey audit on 1, n - 1, 0, n, n + 1 and all 0xFF for curve. */
+static void _ECDSAUTPubKeyAuditCurve(SSFECCurve_t curve)
+{
+    const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
+    uint8_t priv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+    size_t i;
+
+    SSF_REQUIRE(c != NULL);
+    SSF_REQUIRE(c->bytes <= sizeof(priv));
+
+    /* d = 1, the smallest valid scalar */
+    memset(priv, 0, sizeof(priv));
+    priv[c->bytes - 1u] = 1u;
+    _ECDSAUTPubKeyAudit(curve, priv, c->bytes, true, "d = 1");
+
+    /* d = n - 1, the largest valid scalar (n is odd, so no borrow) */
+    SSF_ASSERT(SSFBNToBytes(&c->n, priv, c->bytes));
+    priv[c->bytes - 1u]--;
+    _ECDSAUTPubKeyAudit(curve, priv, c->bytes, true, "d = n - 1");
+
+    /* d = 0 */
+    memset(priv, 0, sizeof(priv));
+    _ECDSAUTPubKeyAudit(curve, priv, c->bytes, false, "d = 0");
+
+    /* d = n */
+    SSF_ASSERT(SSFBNToBytes(&c->n, priv, c->bytes));
+    _ECDSAUTPubKeyAudit(curve, priv, c->bytes, false, "d = n");
+
+    /* d = n + 1 (big-endian increment with carry) */
+    for (i = c->bytes; i > 0u; i--)
+    {
+        priv[i - 1u]++;
+        /* Did this byte absorb the carry? */
+        if (priv[i - 1u] != 0u)
+        {
+            /* Yes, done */
+            break;
+        }
+        /* No, carry into the next byte up */
+    }
+    _ECDSAUTPubKeyAudit(curve, priv, c->bytes, false, "d = n + 1");
+
+    /* d = all 0xFF */
+    memset(priv, 0xFF, c->bytes);
+    _ECDSAUTPubKeyAudit(curve, priv, c->bytes, false, "d = all 0xFF");
 }
 #endif /* (SSF_ECDSA_CONFIG_ENABLE_SIGN == 1) && (SSF_EC_CONFIG_ENABLE_P256 == 1) */
 
@@ -792,7 +917,7 @@ void SSFECDSAUnitTest(void)
         SSF_ASSERT(audit.nonZero == false);
     }
 
-    /* ---- Zeroization audit: KeyGen wipes both d and the entropy seed buffer ---- */
+    /* ---- Zeroization audit: KeyGen wipes d, the projective Q and the entropy seed buffer ---- */
     {
         uint8_t privKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
         uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
@@ -815,6 +940,12 @@ void SSFECDSAUnitTest(void)
         }
         SSF_ASSERT(audit.nonZero == false);
     }
+
+    /* ---- Zeroization audit: PubKeyFromPrivKey wipes d and Q on every return ---- */
+    _ECDSAUTPubKeyAuditCurve(SSF_EC_CURVE_P256);
+#if SSF_EC_CONFIG_ENABLE_P384 == 1
+    _ECDSAUTPubKeyAuditCurve(SSF_EC_CURVE_P384);
+#endif
 
     /* ---- RFC 6979 A.2.5: canonical (r, s) and DER KAT for P-256/SHA-256 "sample" ---- */
     {

@@ -158,8 +158,13 @@ Two design choices worth calling out up front:
 - **Private keys are zeroized before return from every function that touches them.**
   `SSFECDSAKeyGen`, `SSFECDSAPubKeyFromPrivKey`, `SSFECDSASign`, and
   `SSFECDHComputeSecret` all run [`SSFBNZeroize`](ssfbn.md#ssfbnzeroize) over the working
-  private-key bignum before unwinding their stack frame. Callers are still responsible for
-  erasing the caller-provided `privKey` byte buffer at an appropriate time.
+  private-key bignum before unwinding their stack frame, on every return path including a
+  refused key. They also wipe the Jacobian (X, Y, Z) form of each point computed from a secret
+  scalar (`Q = d * G` in KeyGen and PubKeyFromPrivKey, `R = k * G` in Sign, `S = d * Q` in
+  ECDH): the affine public key is not secret, but the projective form of a scalar
+  multiplication result leaks bits of the scalar (Naccache, Smart and Stern, EUROCRYPT 2004).
+  Callers are still responsible for erasing the caller-provided `privKey` byte buffer at an
+  appropriate time.
 - **Digest lengths other than SHA-1 / SHA-2 use the curve's hash for the nonce.** RFC 6979
   derives `k` with HMAC over the digest's own hash, but `ssfhmac` offers only SHA-1, SHA-256,
   SHA-384 and SHA-512. Any other `hashLen` (for example a 28-byte SHA-224 digest) runs the

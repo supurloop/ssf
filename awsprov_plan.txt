@@ -18,7 +18,9 @@ Sources    : AWS docs read on 2026-11-26. Each fact in section 1 names its page.
              (developerguide = https://docs.aws.amazon.com/iot/latest/developerguide/)
 Status     : G01 done (commit 9041eba, 2026-11-26). G02 done (commit d510ab3, 2026-11-26).
              G03 done (commit 0557f94, 2026-11-26). G04 done (commit 7900292, 2026-11-26).
-             G05 done (2026-11-26).
+             G05 done (commit d4bcd2d, 2026-11-26). G06 skipped (2026-11-26).
+             G09 done (commit f16516a, 2026-11-27). G08 implemented (2026-11-27), not yet
+             committed.
              Everything else is plan only.
 
 Layout
@@ -412,7 +414,7 @@ AWSPROV-G03  ssfx509: PKCS#10 CSR encoder
            pass still refused it; no out-of-bounds write). Now refused in both passes.
            Not fixed (pre-existing): subject strings are not checked to be valid UTF-8, for
            certificates and CSRs alike; invalid input gives a non-conforming UTF8String that
-           strict parsers refuse. Inputs come from the caller. Tracked as AWSPROV-G09.
+           strict parsers refuse. Inputs come from the caller. Tracked as AWSPROV-G09 (ssfutf8).
            ssfx509.md now says C is a PrintableString (it said every value was a UTF8String).
            Coverage: two failure returns in _SSFX509EncCRIContent (INTEGER 0, empty [0]) cannot
            be reached, since the enclosing size check precedes every write; EncodeTBS has the
@@ -479,7 +481,8 @@ AWSPROV-G04  ssfjson: allow a larger input limit per build
            Base64-padded certificatePem or the ownership token would come back with an
            embedded NUL. M04 copies the token back as the raw escaped JSON slice (span from
            SSFJsonMessage), never unescaped; for the PEM, V02 must confirm AWS emits only \n,
-           \/ and \" escapes. If it emits \u escapes, add G10: a standard \u -> UTF-8 decode.
+           \/ and \" escapes. If it emits \u escapes, add G10: a standard \u -> UTF-8 decode
+           (SSFUTF8FromUTF16Pair + SSFUTF8EncodeCP from G09).
 
 AWSPROV-G05  ssfmqttc: size the string limits for AWS and other cloud brokers by default
   Why    : AWS client IDs and thing names are up to 128 bytes, topics up to 256 bytes; the
@@ -582,42 +585,197 @@ AWSPROV-G07  ssfbase64: constant-time encode, wipe the working copy
   Done   : ./ssf and ASan pass; tools/coverage 100% of the changed lines; ARM / XC32 no
            warnings; README Base64 size figure updated if it changes.
 
-AWSPROV-G08  ssfecdsa: wipe the scalar copy on every SSFECDSAPubKeyFromPrivKey return
-  Why    : Found while planning G02 (pre-existing). SSFECDSAPubKeyFromPrivKey copies the scalar
-           into a local big number d, then returns false without SSFBNZeroize(&d) when
-           SSFBNFromBytes fails or _SSFECDSAPrivKeyIsValid refuses it (_crypto/ssfecdsa.c:712,
-           713). Only the out-of-range path is reachable with real input, so what is left on
-           the stack is a scalar that is 0 or >= n: a corrupted or wrong key, not a working
-           one, but often a near copy of a real key (e.g. one flipped bit). SSFPKeyFromECPriv
-           (G02) and the SEC 1 / PKCS#8 decoders reach this path with stored data.
-  Change : Route both early returns through one cleanup path that calls SSFBNZeroize(&d), the
-           pattern SSFECDSASign already uses (goto cleanup). Check the other ssfecdsa functions
-           that hold d or k (KeyGen, ECDH, the sign self-check) for the same gap while there.
-  Test   : A unit-test scrub hook in the style of _ssfPEMUTScrubHook, called on every return
-           with d, asserts it is zero; drive it with scalar 0, n, n+1, all 0xFF and a valid
-           scalar. Existing ssfecdsa vectors unchanged.
-  Done   : ./ssf and ASan pass; tools/coverage 100% of the changed lines; ARM / XC32 no
-           warnings. Needs approval to modify ssfecdsa.
+AWSPROV-G08  ssfecdsa: wipe d and the projective Q on every PubKeyFromPrivKey / KeyGen return
+  Approved 2026-11-27 (ssfecdsa change).
+  Why    : Found while planning G02 (pre-existing); re-checked 2026-11-27 against every
+           ssfecdsa function that holds d or k.
+           1. SSFECDSAPubKeyFromPrivKey returns false without SSFBNZeroize(&d) when
+              _SSFECDSAPrivKeyIsValid refuses d (_crypto/ssfecdsa.c:713). Reachable with real
+              input: what is left on the stack is a scalar >= n (0 leaves nothing), which is a
+              wrong key but often a near copy of a real one (a corrupted stored key).
+              SSFPKeyFromECPriv (G02, ssfpkey.c:164) and the SEC 1 / PKCS#8 decoder
+              (ssfpkey.c:439) reach it with stored data. The SSFBNFromBytes failure at line
+              712 is unreachable (it fails only for dataLen > limbs * limb size, before writing,
+              and SSF_REQUIRE(privKeyLen == c->bytes) rules that out) but goes through the same
+              path.
+           2. Neither SSFECDSAPubKeyFromPrivKey nor SSFECDSAKeyGen wipes Q, the Jacobian
+              (X, Y, Z) result of d * G. The affine Q is the public key, but the projective
+              representation of a scalar-multiplication result leaks bits of the scalar
+              (Naccache, Smart, Stern, "Projective Coordinates Leak", EUROCRYPT 2004). Sign
+              already wipes R.x/y/z for k and ECDH wipes S.x/y/z for the same reason; these
+              two functions are the only ones that do not.
+           3. ssfecdsa.md says every function that touches a private key zeroizes it before
+              return; (1) makes that untrue today.
+           Already correct, no change: SSFECDSASign (goto cleanup wipes d, k, e, kInv, tmp,
+           R, Rx, Ry on every path), SSFECDHComputeSecret (d, S, Sx, Sy), _SSFECDSAGenK (V, K,
+           h1Octets, T, HMAC ctx; k on failure), _SSFECDSASignSelfCheck (dQ, Q, R). Verify
+           and the DER helpers handle public data only.
+  Change : SSFECDSAPubKeyFromPrivKey: one exit, the pattern SSFECDSASign uses:
+               bool ok = false;
+               if (!SSFBNFromBytes(..)) goto cleanup;
+               if (!_SSFECDSAPrivKeyIsValid(&d, c)) goto cleanup;
+               _SSFECDSAScalarMulBase(&Q, &d, curve);
+               ok = SSFECPointEncode(&Q, curve, pubKey, pubKeySize, pubKeyLen);
+           cleanup: SSFBNZeroize d, Q.x, Q.y, Q.z (SSFBNZeroize clears to cap, so the
+           not-yet-written Q on the early paths is cleared too); test exit hook; return ok.
+           SSFECDSAKeyGen: add SSFBNZeroize(&Q.x/y/z) to its existing cleanup.
+           Test-only hooks (SSF_CONFIG_ECDSA_UNIT_TEST): new
+           _SSFECDSAPubKeyTestExitHook(ctx, d, Q) + Ctx, fired after the wipe, before return;
+           the KeyGen hook gains a Q argument. NULL in production, as for the other hooks.
+           ssfecdsa.md: the zeroization note names Q as well as d.
+  Test   : TDD: the new audits fail on the current code (d left as n on the refused path; Q
+           non-zero after a successful KeyGen and PubKeyFromPrivKey), then pass.
+           Exit-hook audit of d, Q.x, Q.y, Q.z (every limb up to cap) for PubKeyFromPrivKey with
+           a valid scalar, 0, n, n + 1 and all 0xFF, on P-256 and P-384 (each where enabled);
+           refused cases return false and leave pubKey and *pubKeyLen untouched. KeyGen audit
+           extended to Q. Existing ssfecdsa, ssfpkey, ssftls and ssftlsc vectors unchanged.
+  Done   : ./ssf and ASan pass; tools/coverage 100% of the changed lines; features.sh (signoff,
+           p256off, p384off rows exercise the guards); ARM M4 / M0+ and XC32 no new warnings;
+           size change recorded (expected tens of bytes).
+  Result : Implemented 2026-11-27, TDD. Red: with hook plumbing only, the extended KeyGen
+           audit failed (Q left non-zero, ssfecdsa_ut.c:932); with the KeyGen fix alone the new
+           PubKeyFromPrivKey audit failed (ssfecdsa_ut.c:623), and still failed with Q wiped
+           but d not (d's limbs above the curve width hold stale stack data since 79ed6a6
+           stopped zero-filling SSFBN_DEFINE, so even d = 0 left residue). Green after the
+           single-exit rewrite.
+           Coverage: every changed line runs; the only untaken branch is the unreachable
+           SSFBNFromBytes failure (pre-existing). The hook runs 12 times (6 scalars x P-256,
+           P-384). Mutants: 10/11 killed: each of the 4 PubKeyFromPrivKey wipes and 3 KeyGen
+           wipes removed, d wiped only when ok or zero (so only d = n / n + 1 / all 0xFF can
+           catch it), ok forced true, invalid scalar not refused. Survivor (equivalent):
+           ignoring SSFECPointEncode's result, which cannot fail once the SSF_REQUIREs and a
+           valid d have passed.
+           Sizes (production config, unit-test hooks off, -Os, .text by function): +32 B M4,
+           +28 B M0+, +28 B XC32 (KeyGen +20 / PubKeyFromPrivKey +12 on M4). Stack unchanged
+           (M4 KeyGen 360 B, PubKeyFromPrivKey 272 B; M0+ 344 / 264).
+           Audit: no new findings in ssfecdsa. Every return of KeyGen, PubKeyFromPrivKey,
+           Sign and ECDH now wipes d and the projective point; refused scalars leave pubKey and
+           *pubKeyLen untouched (tested). Test-only hooks are compiled only under
+           SSF_CONFIG_ECDSA_UNIT_TEST, like the existing three. The early goto lines keep the
+           one-line style SSFECDSASign uses in the same file.
+           Verified: ./ssf 63/63, 0 warnings; ASan/UBSan ecdsa, pkey, tls, tlsc, x509;
+           features.sh all 23 rows build with 0 warnings and pass (ECDSA in every row); ARM M4 /
+           M0+ and XC32 0 warnings (the 3 pre-existing ARM failed files unchanged).
+  Not in G08: SSFECPointToAffine (ssfec.c:651) leaves zInv, zInv2, zInv3 on its stack; they
+           reveal Z, so the same projective leak survives one frame deeper (Sign's R, ECDH's
+           S, and the Q above all pass through it). That is ssfec, a separate module; proposed
+           as G13 below, needs its own approval.
 
-AWSPROV-G09  ssfx509: refuse subject / issuer strings that are not valid UTF-8
+AWSPROV-G09  ssfutf8: new UTF-8 codec module; ssfx509 refuses Name strings that are not UTF-8
   Why    : Found in the G03 audit (pre-existing). The generator writes every Name value except
            countryName as a UTF8String but only bounds its length (SSFStrLen); the bytes are
            never checked. Invalid UTF-8 (a stray 0x80, an overlong form, a surrogate, a value
            above U+10FFFF, a truncated sequence) gives a non-conforming certificate or CSR that
            strict parsers refuse (Python cryptography does; AWS may). Names usually come from
            device data (serial numbers, thing names), so this is a data error to report.
-  Change : A strict RFC 3629 validator, e.g. static _SSFX509IsUTF8(str, len), applied in
-           _SSFX509EncDNAttr to every UTF8String value; on failure both passes return false,
-           as for an over-long value. No SSF module validates UTF-8 today (checked: none in
-           _codec, ssfjson, ssfmqttc); if another module needs it later, it can move to a
-           shared helper. The RFC 5280 bounds stay in bytes, as now.
-  Test   : Accept: ASCII, 2/3/4-byte forms, U+FFFF, U+10FFFF, the existing fixtures. Refuse in
-           EncodeTBS, EncodeCert, EncodeCSRInfo and EncodeCSR, measure and write: lone
-           continuation byte, C0/C1 overlong forms, E0 80..9F, ED A0..BF (surrogates), F0 80..8F,
-           F4 90+ and F5..FF, a sequence cut off by the NUL. Exhaustive check of every 1- and
-           2-byte string and every 3-byte lead/continuation combination against a reference.
-  Done   : ./ssf and ASan pass; coverage 100% of the new lines; features.sh passes; ARM / XC32
-           no new warnings; ssfx509.md says values must be valid UTF-8. Needs approval (ssfx509).
+           No SSF module handles UTF-8 today, and three more document the gap: ssfmqttc
+           (inbound topics unchecked, outbound strings limited to ASCII; MQTT 1.5.3), ssfnetws
+           (Close reason unchecked; RFC 6455 7.1.7) and ssfjson (a G10 \u decode needs code
+           point -> UTF-8). So the check goes in its own module, not a private ssfx509 helper.
+  Cost   : Measured on a prototype (-Os, -ffunction-sections, with SSF_REQUIRE), flash bytes:
+             function                 M0+   M4  XC32
+             SSFUTF8DecodeNext        208  216   408
+             SSFUTF8IsValid            68   64   144
+             SSFUTF8EncodeCP          136  124   260
+             SSFUTF8FromUTF16Pair      72   64   144
+             SSFUTF8Count              72   68   164
+             total                    556  536  1120
+           No RAM, no tables. ssfx509 links DecodeNext + IsValid only: ~280 bytes ARM, ~550
+           XC32. Unused functions are dropped by --gc-sections.
+  Change : New module (no approval needed; adds files only):
+             _codec/ssfutf8.{h,c,md}, _codec/ssfutf8_ut.c
+             SSFUTF8DecodeNext(str, strLen, cpOut, seqLenOut)  one code point; strict RFC 3629
+                                                     (lead C2..F4, second-byte ranges for
+                                                     E0, ED, F0, F4)
+             SSFUTF8IsValid(str, strLen, allowNul)   whole string; allowNul false refuses
+                                                     U+0000 (MQTT 1.5.3 forbids it)
+             SSFUTF8EncodeCP(cp, out, outSize, outLenOut)  shortest form; false for a
+                                                     surrogate, > U+10FFFF, or out too small
+             SSFUTF8FromUTF16Pair(hi, lo, cpOut)     for JSON \uD83D\uDE00 (G10)
+             SSFUTF8Count(str, strLen, countOut)     code points; false if ill-formed
+           All return bool and write their outputs only on success (claude.ssf: a function
+           that can fail returns bool; length arguments end in Len).
+           Build wiring: build.ninja, build-linux.ninja, build-asan.ninja, build scripts,
+           ssf.vcxproj(.filters), main.c unit-test list, _codec/README.md, README.md.
+           ssfx509 (approved 2026-11-27): _SSFX509EncDNAttr calls
+           SSFUTF8IsValid(value, len, false) on every UTF8String value; on failure both passes
+           return false, as for an over-long value. The RFC 5280 bounds stay in bytes.
+  Test   : ssfutf8_ut.c: exhaustive check of every 1- and 2-byte string and every 3-byte lead /
+           continuation combination against an independent reference decoder (written as a
+           table of the RFC 3629 well-formed byte sequences); 4-byte boundaries U+10000,
+           U+10FFFF, F4 90 80 80, F5..FF; lone continuation byte; C0/C1 overlong forms,
+           E0 80..9F, ED A0..BF (surrogates), F0 80..8F; truncated sequences at every length;
+           len 0; allowNul both ways. EncodeCP: every code point 0..0x10FFFF round trips
+           through DecodeNext; surrogates and 0x110000 refused; out one byte short refused.
+           FromUTF16Pair: all four range edges of each half. Count: ASCII, mixed, ill-formed.
+           DBC: NULL pointers assert. Fuzz target tools/fuzz/fuzz_utf8.c (DecodeNext vs.
+           IsValid vs. EncodeCP round trip).
+           ssfx509_ut.c: accept ASCII, 2/3/4-byte forms, U+FFFF, U+10FFFF, existing fixtures;
+           refuse a lone continuation byte, an overlong form, a surrogate, F4 90, and a sequence
+           cut off by the NUL, in EncodeTBS, EncodeCert, EncodeCSRInfo and EncodeCSR, measure
+           and write passes.
+  Done   : ./ssf and ASan pass; coverage 100% of ssfutf8.c and the new ssfx509 lines;
+           features.sh passes; ARM / XC32 no new warnings and sizes recorded in ssfutf8.md;
+           ssfx509.md says values must be valid UTF-8; fuzz target in tools/fuzz/README.md.
+  Result : Implemented 2026-11-27, TDD (both test sets red against a stub / the old ssfx509).
+           ssfutf8.c: 100% lines (gcov), every branch but the never-taken SSF_ENSURE failures.
+           Exhaustive: all 1-, 2- and 3-byte inputs and 6.5M 4-byte boundary inputs agree with a
+           table-driven reference decoder (Unicode Table 3-7); every code point 0..0x10FFFF round
+           trips. Mutants: 28/28 non-equivalent killed; 5 equivalent survivors (lead / trail masks
+           widened over a bit that is always 0 for that byte class, and removal of an SSF_ENSURE
+           that cannot fire). Differential: 300,000 random inputs agree with Python's strict UTF-8
+           decoder (33,080 valid). Fuzz: tools/fuzz/fuzz_utf8.c (self-consistency, no OpenSSL
+           side), 20M inputs under ASan/UBSan with a gcc driver; it catches seeded E0 / ED /
+           truncation bugs. libFuzzer itself was not run: run.sh needs Docker, and this host's
+           podman refuses the short image name gcc:latest without a TTY (pre-existing, not changed
+           here).
+           ssfx509: one SSFUTF8IsValid(.., false) call in _SSFX509EncDNAttr; tests check 9
+           valid strings in every Name field (cert re-parses to the same bytes, CSR accepted)
+           and 16 invalid ones in each of CN, O, OU, ST, L and the issuer, in EncodeTBS,
+           EncodeCert, EncodeCSRInfo and EncodeCSR, measure and write passes.
+           Sizes (-Os, with the 17-byte assert file name): ssfutf8 553 B M4, 617 B M0+, 1061 B
+           XC32; validator only (DecodeNext + IsValid) 285 B M4, 317 B M0+; ssfx509 +5 B M4,
+           +17 B M0+. Stack 64 B peak (M0+). API changed from the size_t returns planned
+           above to bool returns with *LenOut outputs, per claude.ssf (see Change).
+           Audit: no findings. Reads never pass len (checked before the trail loop); outputs
+           are written only on success; the encoder writes only shortest forms; the x509 value
+           length is already bounded by SSFStrLen. Behaviour change: a caller passing Latin-1
+           or other non-UTF-8 Name bytes now gets false (documented in ssfx509.md). The bounds
+           stay in bytes, which is stricter than RFC 5280's character count. The parser still
+           does not check UTF-8 (documented).
+           Verified: ./ssf 63/63; ASan/UBSan utf8, x509, cms; ARM M4 / M0+ and XC32 0 warnings
+           (the 3 pre-existing ARM failed files unchanged); features.sh all 23 rows build with 0
+           warnings and pass; md code examples compile.
+           claude.ssf pass (2026-11-27): one-line if / else-if chains in DecodeNext and EncodeCP
+           braced with Question / Yes / No comments; SSF_ENSURE((n >= 1u) && (n <= strLen))
+           invariant before each length step in IsValid and Count; u-suffixed initialisers.
+           Unit test: one field per line (named Good / Bad row types), len -> strLen, nested
+           ternary parenthesised, braced conditional. No behaviour change; all checks rerun.
+
+AWSPROV-G11  (optional, not AWS) ssfmqttc: UTF-8 topics and inbound validation via ssfutf8
+  Why    : MQTT 1.5.3: a receiver must close the connection on ill-formed UTF-8 or U+0000;
+           ssfmqttc passes inbound topics through unchecked and limits outbound strings to
+           ASCII because it had no validator (ssfmqttc.md "ASCII only", "Inbound UTF-8 is not
+           validated").
+  Change : Validate inbound topics with SSFUTF8IsValid(.., false) (close with PROTOCOL);
+           accept non-ASCII UTF-8 in outbound topics, filters, client ids and user names.
+  Done   : After G09. Needs approval (ssfmqttc). Not needed for ssfawsprov.
+
+AWSPROV-G12  (optional, not AWS) ssfnetws: fail on a Close reason that is not UTF-8
+  Why    : RFC 6455 7.1.7; ssfnetws.md "A Close reason is not checked for UTF-8".
+  Change : Check the reason with SSFUTF8IsValid(.., true); fail the connection (1007) if bad.
+  Done   : After G09. Needs approval (ssfnetws). Not needed for ssfawsprov.
+
+AWSPROV-G13  ssfec: wipe the Z inverses in SSFECPointToAffine
+  Why    : Found while planning G08 (pre-existing). zInv = Z^-1, zInv2, zInv3 are left on the
+           stack on every return (ssfec.c:654-656). Z of a scalar-multiplication result leaks
+           scalar bits (see G08), and ToAffine is called on k * G (Sign), d * Q (ECDH) and
+           d * G (KeyGen, PubKeyFromPrivKey via SSFECPointEncode).
+  Change : SSFBNZeroize zInv, zInv2, zInv3 before each return (one exit). Check the other
+           ssfec helpers that take a secret-derived point for the same gap.
+  Test   : Test-only exit hook auditing the three locals on success and on the Z = 0 refusal;
+           existing ssfec / ssfecdsa vectors unchanged.
+  Done   : After G08. Needs approval (ssfec). Best before field deployment, with G08.
 
 No gap for ssftlsc: TLS 1.3, mutual TLS, SNI and ALPN already cover AWS (1.2).
 No gap for ssfmqttc routing: its rx and event callbacks are bound at SSFMQTTCInit, and
@@ -806,5 +964,6 @@ AWSPROV-V03  End-to-end with ssfawsprov
   V02 before M04/M05 fixtures are final.
   M07 needs M02..M06 and G05.  M08 needs G02 and M07.  M09, M10 after M08.  V03 last.
   G06 only if requested; G07 must land before G06 (or anything else that encodes a secret).
-  G08 is independent; best before field deployment of G02.
+  G08 is independent; best before field deployment of G02. G13 (ssfec) after G08.
   G09 is independent; best before M03 puts device data into CSR subjects.
+  G10 (if V02 needs it) after G09.  G11, G12 optional, after G09, not needed for ssfawsprov.

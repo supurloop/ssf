@@ -29,6 +29,7 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
 - [`ssfport.h`](../ssfport.h)
 - [`ssfasn1`](ssfasn1.md) — DER decoding and encoding
 - [`ssfstr`](ssfstr.md) — bounded C-string length for every name the API receives as a string
+- [`ssfutf8`](ssfutf8.md) — checks that every generated Name value is well-formed UTF-8
 - [`ssfsha2`](../_crypto/ssfsha2.md) — SHA-256 / SHA-384 / SHA-512 TBS digests for signature verification
 - [`ssfecdsa`](../_crypto/ssfecdsa.md) — ECDSA signature verification over P-256 / P-384
 - [`ssfrsa`](../_crypto/ssfrsa.md) — RSA PKCS#1 v1.5 and RSA-PSS signature verification; an
@@ -50,6 +51,15 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   C exactly 2), any `dNSName` over 253 octets, and any key identifier over 64 octets (the longest
   RFC 7093 method, SHA-512). Values are emitted as `UTF8String`, except `countryName`, which is
   a `PrintableString` (RFC 5280 Appendix A).
+  **Name values must be well-formed UTF-8** (RFC 3629, checked with
+  [`SSFUTF8IsValid()`](ssfutf8.md#ssfutf8isvalid)): a stray continuation byte, an overlong
+  form, a surrogate (U+D800..U+DFFF), a value above U+10FFFF, or a multi-byte character cut off
+  by the terminating NUL is refused with `0` from both passes, in certificates and CSRs alike,
+  so the encoders never emit a `UTF8String` that strict parsers reject. Device data such as a
+  serial number or thing name is therefore a data error to report, not a value to pass through.
+  The bounds count bytes, not characters: a CN of 64 two-byte characters (128 bytes) is
+  refused, which is stricter than RFC 5280's character count and never non-conforming.
+  The parser does not check UTF-8: parsed name fields are the certificate's bytes as given.
   String lengths are measured with a bounded scan of at most the limit plus one byte, so an
   over-long or unterminated value is refused without reading past its bound; the same bound caps
   the `hostnameStr` scan in [`SSFX509VerifyChain()`](#ssfx509verifychain), where a hostname over

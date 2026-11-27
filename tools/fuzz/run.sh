@@ -1,11 +1,12 @@
 #!/bin/sh
-# Build + run libFuzzer differential-fuzz harnesses for AES-CTR and ECDSA verify.
+# Build + run libFuzzer harnesses: AES-CTR and ECDSA verify (differential against OpenSSL) and
+# the UTF-8 codec (self-consistency: decode, validate, count and re-encode must agree).
 # Each harness compares SSF against OpenSSL on the same input; any divergence
 # (one accepts, the other rejects, or outputs differ) aborts. ASan + UBSan also
 # instrument both sides, so memory bugs and UB on adversarial inputs surface.
 #
 # Usage:  ./tools/fuzz/run.sh [<harness>] [<seconds>]
-#         <harness> ∈ aes_ctr | ecdsa_verify | all   (default: all)
+#         <harness> ∈ aes_ctr | ecdsa_verify | utf8 | all   (default: all)
 #         <seconds> — wall-clock budget per harness  (default: 60)
 #
 # Runs inside a gcc:latest Docker container with clang + libssl-dev installed
@@ -21,8 +22,9 @@ set -eu
 harness=${1:-all}
 seconds=${2:-60}
 
-if [ "$harness" != "all" ] && [ "$harness" != "aes_ctr" ] && [ "$harness" != "ecdsa_verify" ]; then
-    echo "usage: $0 [aes_ctr | ecdsa_verify | all] [seconds]" >&2
+if [ "$harness" != "all" ] && [ "$harness" != "aes_ctr" ] && [ "$harness" != "ecdsa_verify" ] &&
+   [ "$harness" != "utf8" ]; then
+    echo "usage: $0 [aes_ctr | ecdsa_verify | utf8 | all] [seconds]" >&2
     exit 64
 fi
 
@@ -30,8 +32,8 @@ script_dir=$(cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(cd -- "$script_dir/../.." && pwd)
 cd "$repo_root"
 
-mkdir -p build/fuzz/aes_ctr build/fuzz/ecdsa_verify
-mkdir -p tools/fuzz/seed_aes_ctr tools/fuzz/seed_ecdsa_verify
+mkdir -p build/fuzz/aes_ctr build/fuzz/ecdsa_verify build/fuzz/utf8
+mkdir -p tools/fuzz/seed_aes_ctr tools/fuzz/seed_ecdsa_verify tools/fuzz/seed_utf8
 
 # Seed corpus: a single representative input per harness is enough to start —
 # libFuzzer's mutator finds new coverage from there. (More seeds would speed
@@ -45,6 +47,14 @@ if [ ! -f tools/fuzz/seed_ecdsa_verify/seed1 ]; then
     # ECDSA: pubkey(65) + hash(32) + sig(70) all zeros — gives the harness
     # something to mutate. Almost certainly rejects on both sides initially.
     head -c 167 /dev/zero > tools/fuzz/seed_ecdsa_verify/seed1
+fi
+
+if [ ! -f tools/fuzz/seed_utf8/seed1 ]; then
+    # UTF-8: one sequence of each length, then the edges of the ill-formed ranges.
+    printf 'a\303\251\342\202\254\360\237\230\200\355\237\277\364\217\277\277' \
+        > tools/fuzz/seed_utf8/seed1
+    printf '\300\200\340\237\277\355\240\200\360\217\277\277\364\220\200\200\365' \
+        > tools/fuzz/seed_utf8/seed2
 fi
 
 run_one() {
@@ -84,4 +94,7 @@ if [ "$harness" = "all" ] || [ "$harness" = "aes_ctr" ]; then
 fi
 if [ "$harness" = "all" ] || [ "$harness" = "ecdsa_verify" ]; then
     run_one ecdsa_verify
+fi
+if [ "$harness" = "all" ] || [ "$harness" = "utf8" ]; then
+    run_one utf8
 fi

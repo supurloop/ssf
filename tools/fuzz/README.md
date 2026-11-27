@@ -1,11 +1,12 @@
 # Differential Fuzzing — SSF vs OpenSSL
 
-Two libFuzzer harnesses that compare SSF cryptographic primitives against
-OpenSSL's reference implementations on randomly-mutated inputs. Any divergence
+Two libFuzzer harnesses compare SSF cryptographic primitives against
+OpenSSL's reference implementations on randomly-mutated inputs, and a third
+checks the UTF-8 codec against itself (see `fuzz_utf8` below). Any divergence
 (SSF accepts and OpenSSL rejects, or outputs differ on the same input) aborts
 immediately and writes the triggering input to disk for triage.
 
-Both harnesses run under ASan + UBSan, so any memory bug or undefined
+All harnesses run under ASan + UBSan, so any memory bug or undefined
 behavior either side hits on adversarial input also surfaces as an abort.
 
 ## Targets
@@ -16,6 +17,12 @@ behavior either side hits on adversarial input also surfaces as an abort.
 - `fuzz_ecdsa_verify` — compares `SSFECDSAVerify(P-256, pubkey, hash, sig)`
   against `ECDSA_verify` for random `(pubkey, hash, sig)` triples. Catches
   disagreements on the boundary of valid/invalid.
+- `fuzz_utf8` — self-consistency of the [`ssfutf8`](../../_codec/ssfutf8.md)
+  codec on arbitrary bytes (no OpenSSL side): `SSFUTF8IsValid` is true exactly
+  when `SSFUTF8DecodeNext` walks the whole input, `SSFUTF8Count` agrees with the
+  walk, `allowNul` false refuses exactly the inputs holding U+0000, and every
+  decoded code point is a scalar value that `SSFUTF8EncodeCP` re-encodes to the
+  very bytes it came from (so only shortest forms decode).
 
 ## Running
 
@@ -25,6 +32,7 @@ Driver: `tools/fuzz/run.sh [<target>] [<seconds>]`
 ./tools/fuzz/run.sh                       # all targets, 60s each (default)
 ./tools/fuzz/run.sh aes_ctr 300           # AES-CTR for 5 min
 ./tools/fuzz/run.sh ecdsa_verify 86400    # ECDSA-verify for 24 hr
+./tools/fuzz/run.sh utf8 300              # UTF-8 codec for 5 min
 ```
 
 Builds inside a `gcc:latest` Docker container (apt-installs clang +
@@ -50,9 +58,10 @@ pubkey decode early, exiting the verify path before the curve arithmetic.
 
 ## Seed corpus
 
-`tools/fuzz/seed_aes_ctr/` and `tools/fuzz/seed_ecdsa_verify/` hold seed
-inputs the fuzzer mutates from. The driver creates a single zero-filled
-seed if neither directory has one. To accelerate a campaign:
+`tools/fuzz/seed_aes_ctr/`, `tools/fuzz/seed_ecdsa_verify/` and
+`tools/fuzz/seed_utf8/` hold seed inputs the fuzzer mutates from. The driver
+creates a single zero-filled seed (for `utf8`, one sequence of each length and
+the edges of the ill-formed ranges) if a directory has none. To accelerate a campaign:
 
 - Copy NIST CAVS / RFC 3686 vectors into `seed_aes_ctr/` (one file per
   test case, raw byte layout matching the harness's input parser).

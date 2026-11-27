@@ -138,6 +138,7 @@ extern "C" {
 #define SSF_CONFIG_LPTASK_UNIT_TEST  (1u)
 
 /* _net */
+#define SSF_CONFIG_AWSPROV_UNIT_TEST (1u)
 #define SSF_CONFIG_HTTPHDR_UNIT_TEST (1u)
 #define SSF_CONFIG_MQTTPKT_UNIT_TEST (1u)
 #define SSF_CONFIG_MQTTC_UNIT_TEST   (1u)
@@ -197,6 +198,7 @@ extern "C" {
     /* _fsm */ \
     (SSF_CONFIG_SM_UNIT_TEST == 1) || \
     /* _net */ \
+    (SSF_CONFIG_AWSPROV_UNIT_TEST == 1) || \
     (SSF_CONFIG_HTTPHDR_UNIT_TEST == 1) || \
     (SSF_CONFIG_MQTTPKT_UNIT_TEST == 1) || \
     (SSF_CONFIG_MQTTC_UNIT_TEST == 1) || \

@@ -69,6 +69,7 @@ extern "C" {
 #include "ssfnetsock_opt.h"
 #include "ssfnetws_opt.h"
 #include "ssftlsc_opt.h"
+#include "ssfawsprov_opt.h"
 #include "ssfprng_opt.h"
 #include "ssfrs_opt.h"
 #include "ssfrsa_opt.h"

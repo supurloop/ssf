@@ -19,8 +19,8 @@ Sources    : AWS docs read on 2026-11-26. Each fact in section 1 names its page.
 Status     : G01 done (commit 9041eba, 2026-11-26). G02 done (commit d510ab3, 2026-11-26).
              G03 done (commit 0557f94, 2026-11-26). G04 done (commit 7900292, 2026-11-26).
              G05 done (commit d4bcd2d, 2026-11-26). G06 skipped (2026-11-26).
-             G09 done (commit f16516a, 2026-11-27). G08 done (commit 5030e65,
-             2026-11-27). G13 implemented (2026-11-27), not yet committed.
+             G08 done (commit 5030e65, 2026-11-27). G09 done (commit f16516a, 2026-11-27).
+             G13 done (commit 7697f67, 2026-11-27).
              Everything else is plan only.
 
 Layout
@@ -843,14 +843,100 @@ Layer 1 (M02..M06) is pure functions with no I/O. Layer 2 (M07..M08) is a state 
 of ssfmqttc. JSON payload format only.
 
 AWSPROV-M01  Skeleton and build wiring
-  Change : Empty header and source with SSFAWSProvUnitTest(); _opt/ssfawsprov_opt.h with
-           template name size (37), token buffer size, rx copy size, per-step timeouts;
-           #error checks against SSF_JSON_CONFIG_MAX_IN_LEN, SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE
-           and SSF_MQTTC_CONFIG_MAX_CLIENT_ID_SIZE. Add to build.ninja, build-linux.ninja,
-           build-asan.ninja, build scripts, ssf.vcxproj(.filters), main.c unit-test list,
-           _net/README.md.
-  Test   : ./ssf runs the empty unit test on Linux; ARM and XC32 builds have no warnings.
-  Done   : Every build target compiles.
+  Found in the code (2026-11-27)
+    - ssfjson's default SSF_JSON_CONFIG_MAX_IN_LEN is 2047. The default build compiles every
+      module, so an unconditional ssfawsprov #error (MAX_IN_LEN >= 4095) breaks ./ssf and 22 of
+      the 23 features.sh rows.
+    - features.sh sets a row's options by rewriting the "#define" line in the module's opt
+      header. A port-level override in ssfport.h would silently win over that rewrite (the opt
+      headers use #ifndef), so the json rows would build at the wrong limit.
+    - The mqttcsmall row sets MAX_CLIENT_ID_SIZE 64, which is below the 129 that a 128-byte
+      thingName needs.
+    - The preprocessor can't evaluate sizeof, so the longest-topic size has to be a number in
+      the header, checked against the real topic strings by the unit test.
+    - build-arm.sh and tools/coverage/run.sh take their source lists from build-linux.ninja.
+      build-linux.sh and build-macos.sh only call ninja. Neither needs editing.
+
+  Decision (needs approval)
+    A (recommended) _opt/ssfjson_opt.h default MAX_IN_LEN 2047 -> 4095. One line. G04 showed
+      no RAM cost: MAX_IN_LEN only bounds the NUL scan. Documents of 2048..4095 bytes that
+      used to be refused are now accepted. ssfjson.md and the G04 note get updated. The json4k
+      row becomes json2k (MAX_IN_LEN 2047 with AWSPROV_CONFIG_RX_SIZE 2048), so the old
+      default still compiles and its tests still run.
+    B (no ssfjson change) ssfport.h sets MAX_IN_LEN 4095 under #ifndef, and features.sh
+      learns to apply a JSON row with -D instead of the header rewrite. There are then two
+      places that set the default, and the matrix gets a special case.
+
+  Change
+    _net/ssfawsprov.h
+      - SSF_AWSPROV_TEMPLATE_NAME_SIZE (37u): AWS fixes this [API], so it isn't an option.
+      - SSF_AWSPROV_MAX_TOPIC_SIZE (89u): 28 + 36 + 24 + NUL.
+      - Cross-module checks:
+          #error if SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE < SSF_AWSPROV_MAX_TOPIC_SIZE
+          #error if SSF_MQTTC_CONFIG_MAX_CLIENT_ID_SIZE < SSF_AWSPROV_CONFIG_THING_NAME_SIZE
+          #error if SSF_JSON_CONFIG_MAX_IN_LEN < (SSF_AWSPROV_CONFIG_RX_SIZE - 1u)
+        JSON has to accept a full rx copy, which is the payload plus its NUL.
+      - void SSFAWSProvUnitTest(void) under SSF_CONFIG_AWSPROV_UNIT_TEST.
+    _net/ssfawsprov.c
+      - Includes only, plus the file banner.
+    _opt/ssfawsprov_opt.h (#ifndef overrides, #error ranges, the ssfmqttc_opt.h style)
+      - SSF_AWSPROV_CONFIG_RX_SIZE (4096u, range 2..65536): the NUL-terminated copy of one
+        response payload. V02 settles the real size.
+      - SSF_AWSPROV_CONFIG_THING_NAME_SIZE (129u, range 2..129): AWS allows up to 128 bytes.
+        A smaller size makes M05 refuse longer names.
+      - The token buffer size and the per-step timeouts are added in M04 and M07, with the
+        tests that use them. A setting with no test now would only be a guess.
+    _net/ssfawsprov_ut.c
+      - Builds the longest request and response topics from the M02 literal pieces (the pieces
+        are defined here for now). Checks that strlen + 1 == SSF_AWSPROV_MAX_TOPIC_SIZE and that
+        the template-name length is SSF_AWSPROV_TEMPLATE_NAME_SIZE - 1.
+      - Asserts at run time the same relations the #errors enforce, so a build with the
+        #errors edited out still fails.
+    Wiring
+      - ssfoptions.h: include ssfawsprov_opt.h after ssfmqttc_opt.h and ssfjson_opt.h.
+      - ssfport.h: SSF_CONFIG_AWSPROV_UNIT_TEST (1u), and add it to the aggregate list.
+      - main.c: _net table entry { "ssfawsprov", "AWS IoT Fleet Provisioning", ... }.
+      - build.ninja, build-linux.ninja, build-asan.ninja and
+        tools/cross-test/build-cross.ninja.in: two cc_obj lines and the link list.
+      - ssf.vcxproj (.c, _ut.c, .h, opt .h) and ssf.vcxproj.filters.
+      - README.md module table row, and _net/README.md row (no .md link until M09).
+    features.sh
+      - _opt_header case for SSF_AWSPROV_CONFIG_*.
+      - mqttcsmall adds SSF_AWSPROV_CONFIG_THING_NAME_SIZE=64.
+      - Each row also runs SSFAWSProvUnitTest.
+      - json4k -> json2k (option A only).
+  Test (TDD)
+    - Red: main.c entry and an empty-bodied test that asserts the topic and name sizes. This
+      fails to link, then fails on the asserts.
+    - Green: header constants.
+    - Each #error fires when its relation is broken by -D: topic 88, client id 128,
+      MAX_IN_LEN 4094, RX_SIZE 1, 65537, THING_NAME_SIZE 1, 130.
+  Done
+    - ./ssf passes (64 tests); ASan build clean.
+    - features.sh all rows pass.
+    - ./build-arm.sh: no new failed files, still only the 3 pre-existing socket ones.
+    - XC32 compiles ssfawsprov.c and _ut.c with 0 warnings.
+    - The new files follow claude.ssf.
+    - One commit.
+  Approved: option A (ssfjson default 4095), 2026-11-27.
+  Result (2026-11-27)
+    - TDD red: the test failed to compile on the missing constants. Green with the header.
+      Mutants 36/38 for the name size and 88/90 for the topic size each fail the test (4/4).
+    - Each #error fires one past its boundary and passes at it: topic 88/89, client id
+      128/129 (64 passes with THING_NAME_SIZE 64), MAX_IN_LEN 4094/4095 (2047 passes with
+      RX_SIZE 2048, fails with 2049), RX_SIZE 0/1/2 and 65536/65537, THING_NAME_SIZE 1/2/130.
+      An RX_SIZE left undefined (opt header not included) evaluates as 0 and also stops the
+      build.
+    - ./ssf passes 64/64, 0 warnings. ASan: ssfawsprov, ssfjson, ssfgobj clean.
+    - ARM M4 and M0+: 0 warnings, the same 3 socket-header files as before.
+    - XC32: ssfawsprov.c, ssfawsprov_ut.c and ssfjson.c compile with 0 warnings.
+    - Size: ssfawsprov.o is 0 bytes in production. ssfjson .text is the same at 2047 and 4095
+      (6039 B M4, 6467 B M0+, 11883 B XC32).
+    - Audit: SSF_JSON_CONFIG_MAX_IN_LEN only bounds the NUL scan in ssfjson.c (uint32_t
+      counter), and no production buffer is sized from it. No other production module parses
+      JSON. 4095 is below SIZE_MAX / 2 on 16-bit targets. On a 16-bit size_t the JSON range
+      check (<= 32767) also caps RX_SIZE at 32768.
+    - The top-level README.md lists no _net modules, so only _net/README.md got a row.
 
 AWSPROV-M02  Topic names and subscription set
   Change : SSFAWSProvTemplateNameIsValid() (1..36, [0-9A-Za-z_-]); builders for the two request

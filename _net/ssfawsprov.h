@@ -35,6 +35,8 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 #include "ssfport.h"
+#include "ssf.h"
+#include "ssfmqttc.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Defines                                                                                       */
@@ -54,6 +56,41 @@ extern "C" {
 #if SSF_JSON_CONFIG_MAX_IN_LEN < (SSF_AWSPROV_CONFIG_RX_SIZE - 1u)
 #error SSF_JSON_CONFIG_MAX_IN_LEN must be at least SSF_AWSPROV_CONFIG_RX_SIZE - 1.
 #endif
+
+/* CreateCertificateFromCsr request topic and its response topics, JSON payload format */
+#define SSF_AWSPROV_TOPIC_CSR          "$aws/certificates/create-from-csr/json"
+#define SSF_AWSPROV_TOPIC_CSR_ACCEPTED "$aws/certificates/create-from-csr/json/accepted"
+#define SSF_AWSPROV_TOPIC_CSR_REJECTED "$aws/certificates/create-from-csr/json/rejected"
+
+/* Entries of SSFAWSProvTopics_t.subs, in subscription order */
+#define SSF_AWSPROV_SUB_CSR_ACCEPTED  (0u)
+#define SSF_AWSPROV_SUB_CSR_REJECTED  (1u)
+#define SSF_AWSPROV_SUB_PROV_ACCEPTED (2u)
+#define SSF_AWSPROV_SUB_PROV_REJECTED (3u)
+#define SSF_AWSPROV_SUB_COUNT         (4u)
+
+#if SSF_MQTTC_CONFIG_MAX_SUBSCRIPTIONS < SSF_AWSPROV_SUB_COUNT
+#error SSF_MQTTC_CONFIG_MAX_SUBSCRIPTIONS must be at least SSF_AWSPROV_SUB_COUNT.
+#endif
+
+/* --------------------------------------------------------------------------------------------- */
+/* Typedefs                                                                                      */
+/* --------------------------------------------------------------------------------------------- */
+/* RegisterThing topics and the four response filters; subs point into this instance, no copies */
+typedef struct
+{
+    char provReq[SSF_AWSPROV_MAX_TOPIC_SIZE];
+    char provAccepted[SSF_AWSPROV_MAX_TOPIC_SIZE];
+    char provRejected[SSF_AWSPROV_MAX_TOPIC_SIZE];
+    SSFMQTTCSub_t subs[SSF_AWSPROV_SUB_COUNT];
+} SSFAWSProvTopics_t;
+
+/* --------------------------------------------------------------------------------------------- */
+/* External interface                                                                            */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFAWSProvTemplateNameIsValid(SSFCStrIn_t nameStr, size_t nameSize);
+bool SSFAWSProvTopicsInit(SSFAWSProvTopics_t *topicsOut, SSFCStrIn_t templateNameStr,
+                          size_t templateNameSize);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */

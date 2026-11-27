@@ -20,7 +20,8 @@ Status     : G01 done (commit 9041eba, 2026-11-26). G02 done (commit d510ab3, 20
              G03 done (commit 0557f94, 2026-11-26). G04 done (commit 7900292, 2026-11-26).
              G05 done (commit d4bcd2d, 2026-11-26). G06 skipped (2026-11-26).
              G08 done (commit 5030e65, 2026-11-27). G09 done (commit f16516a, 2026-11-27).
-             G13 done (commit 7697f67, 2026-11-27).
+             G13 done (commit 7697f67, 2026-11-27). M01 done (commit bbd7bfa, 2026-11-27).
+             M02 done (2026-11-27).
              Everything else is plan only.
 
 Layout
@@ -939,13 +940,100 @@ AWSPROV-M01  Skeleton and build wiring
     - The top-level README.md lists no _net modules, so only _net/README.md got a row.
 
 AWSPROV-M02  Topic names and subscription set
-  Change : SSFAWSProvTemplateNameIsValid() (1..36, [0-9A-Za-z_-]); builders for the two request
-           topics and the four response filters; a function that fills an SSFMQTTCSub_t[4] with
-           QoS 1.
-  Test   : Valid names of length 1 and 36; length 0, 37, and each bad character fail; exact
-           topic strings for a fixed name; buffer one byte short fails; topics pass ssfmqttc's
-           own topic validation.
-  Done   : ./ssf passes.
+  Found in the code (2026-11-27)
+    - SSFMQTTCSub_t is {SSFCStrIn_t filter; SSFMQTTCQoS_t qos}. SSFMQTTCStart copies the opts
+      struct, but the filter strings stay app owned and must outlive the connection. Building
+      them into caller buffers would leave the lifetime to every caller. A struct that owns the
+      strings and the SSFMQTTCSub_t[4] that points into it keeps them together.
+    - SSFMQTTCStart REQUIREs SSFMQTTPktIsValidFilter on every filter, and txPublish refuses a
+      topic that fails SSFMQTTPktIsValidTopic(.., MAX_TOPIC_SIZE). So the module's strings have
+      to pass both.
+    - SSF_MQTTC_CONFIG_MAX_SUBSCRIPTIONS (default 8, a plain #define) must be >= 4.
+    - SSFStrLen, SSFStrCpy and SSFStrCat do the bounded length and copy work, so no ad hoc
+      string code is needed.
+    - The template name is put into topic strings. The [API] character set has no '/', '+',
+      '#', '$' or NUL, so a name that passes cannot add topic levels or wildcards (no topic
+      injection). The check uses explicit ASCII ranges, not isalnum, so locale can't change it.
+
+  Change (_net/ssfawsprov.h/.c)
+    - Public string macros:
+        SSF_AWSPROV_TOPIC_CSR            "$aws/certificates/create-from-csr/json"
+        SSF_AWSPROV_TOPIC_CSR_ACCEPTED   ".../json/accepted"
+        SSF_AWSPROV_TOPIC_CSR_REJECTED   ".../json/rejected"
+      The template-topic pieces stay private in the .c.
+    - SSF_AWSPROV_SUB_COUNT (4u) and index constants (CSR_ACCEPTED 0, CSR_REJECTED 1,
+      PROV_ACCEPTED 2, PROV_REJECTED 3). M07 maps SUBACK results by index.
+    - #error if SSF_MQTTC_CONFIG_MAX_SUBSCRIPTIONS < SSF_AWSPROV_SUB_COUNT.
+    - typedef struct {
+          char provReq[SSF_AWSPROV_MAX_TOPIC_SIZE];
+          char provAccepted[SSF_AWSPROV_MAX_TOPIC_SIZE];
+          char provRejected[SSF_AWSPROV_MAX_TOPIC_SIZE];
+          SSFMQTTCSub_t subs[SSF_AWSPROV_SUB_COUNT];
+      } SSFAWSProvTopics_t;
+      Size on a 32-bit core is 299 B.
+    - bool SSFAWSProvTemplateNameIsValid(SSFCStrIn_t nameStr, size_t nameSize)
+      - true for 1..36 bytes of [0-9A-Za-z_-] followed by a NUL within nameSize;
+      - REQUIRE nameStr != NULL.
+    - bool SSFAWSProvTopicsInit(SSFAWSProvTopics_t *topics, SSFCStrIn_t templateNameStr,
+                                size_t templateNameSize)
+      - false (topics untouched) if the name is invalid;
+      - else fills the three template topics and subs[] (all QoS 1, filters pointing at the
+        CSR macros and at topics->provAccepted/provRejected);
+      - ENSURE the copy calls succeed (they can't fail once the name is valid);
+      - REQUIRE topics and the name != NULL.
+    - The M01 unit-test literals are replaced by the public macros and the struct.
+
+  Test (TDD: tests first, red on link, then green)
+    - Name accepted:
+      - lengths 1 and 36;
+      - each of the 64 allowed characters alone and in a 36-character name;
+      - a nameSize larger than the string.
+    - Name refused:
+      - length 0 and 37;
+      - every byte 0x01..0xFF outside the set, at the first, a middle and the last position;
+      - no NUL within nameSize (nameSize == strlen), and nameSize 0.
+    - TopicsInit with a fixed name ("Tmpl_1-x"):
+      - exact strings for the three topics and the four filters;
+      - subs[] order, QoS 1 each, pointers into the struct.
+    - With a 36-character name:
+      - provAccepted and provRejected are exactly SSF_AWSPROV_MAX_TOPIC_SIZE - 1 long;
+      - every topic passes SSFMQTTPktIsValidTopic(.., SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE), and
+        every filter passes SSFMQTTPktIsValidFilter.
+    - A refused name leaves a canary-filled struct unchanged.
+    - DBC: NULL topics and NULL name assert (SSF_ASSERT_TEST).
+  Audit
+    - Mutants on the length bounds and each character range edge ('0'-1, '9'+1, 'A'-1,
+      'Z'+1, 'a'-1, 'z'+1, dropping '_' or '-'), on the QoS, and on the subs order.
+    - Coverage 100% of the new lines.
+    - Size on M4, M0+ and XC32, estimated under 300 B.
+    - features.sh, ASan, ARM and XC32 with 0 new warnings.
+  Done
+    - ./ssf passes. One commit.
+    - Docs stay in M09; the API notes go into the header comments only.
+
+  Result (2026-11-27)
+    - TDD red: the tests linked against missing functions. Green with the implementation.
+    - Mutants 28/31 killed:
+      - every character-range edge, both off by one and off by a boundary;
+      - dropping '_' or '-';
+      - both length bounds, the loop bounds, a dropped SSFStrLen check or name check;
+      - QoS, filter order, topic spelling.
+      The 3 survivors each drop a NULL REQUIRE that a lower-level REQUIRE (IsValid,
+      SSFStrLen, the topic builder) also catches. They're equivalent.
+    - gcov: 100% of 37 lines, every branch executed. The branches never taken are the
+      assertion failures and the copy failures that ENSURE rules out.
+    - Size (-Os .text per function):
+        M4   IsValid 80, TopicsInit 164, builder 80           = 324 B
+        M0+  84, 184, 84                                      = 352 B
+        XC32 896 B object total, including ~200 B of topic strings
+      This is over the 300 B estimate. Stack: TopicsInit 24 + builder 32 + SSFStrCat.
+    - ASan clean. ARM M4/M0+ 0 warnings, the same 3 socket files. XC32 0 warnings.
+    - Audit:
+      - The whitelist keeps '/', '+', '#', '$' and bytes >= 0x80 (signed or unsigned char)
+        out of topics. Every byte value is tested at three positions.
+      - Nothing is written on refusal.
+      - The subs[] pointers make the struct non-copyable. The header says so; M09 documents
+        it with the lifetime (it must outlive the MQTT connection).
 
 AWSPROV-M03  CreateCertificateFromCsr request
   Change : SSFAWSProvBuildCsrRequest(curve, priv, subject, out, outSize, outLen): pub from

@@ -5,7 +5,7 @@ Scope      : run time of RSA sign / verify / keygen and the ssfbn code under the
              speedup costs in code size, RAM and security properties. Code at commit e9cd857
              (branch mqtt). Nothing here is applied to the tree; all numbers are from
              prototypes in a scratch copy.
-Status     : R5 implemented in the working tree (not committed); every other item OPEN.
+Status     : R5 DONE (f8b3342); R1 implemented in the working tree; others OPEN.
 
 SUMMARY
 -------
@@ -76,7 +76,7 @@ WHERE THE TIME GOES (base, RSA-2048, ARM instructions)
 
 FINDINGS
 --------
-R1. Row kernel for the Montgomery inner loops (portable C)                            OPEN
+R1. Row kernel for the Montgomery inner loops (portable C)                     DONE (tree)
     Change: one static helper _SSFBNMulAddRow(r, x, b, a, n, carry) computes
     r[j] = low(a * b[j] + x[j] + carry) with a 32-bit carry and a uint32_t count. MontMul (both
     CIOS loops; the reduction writes r = x - 1 to fuse the word shift), MontSquare (triangle
@@ -88,6 +88,104 @@ R1. Row kernel for the Montgomery inner loops (portable C)                      
     -12.2% in C and -28.7% with UMAAL, against -14.9% and -31.9% for the row kernel.
     Unit tests: the _SSFBNMontMulIters / _SSFBNMontSqrCarryIters counters must be counted per
     row (n per call) to keep their exact-count asserts.
+
+    R1 IMPLEMENTATION PLAN
+    Design:
+      - New static helper in ssfbn.c:
+          static SSFBNLimb_t _SSFBNMulAddRow(SSFBNLimb_t *r, const SSFBNLimb_t *x,
+                                             const SSFBNLimb_t *b, SSFBNLimb_t a,
+                                             uint32_t n, SSFBNLimb_t carry);
+        r[j] = low(a * b[j] + x[j] + carry), carry = high(...), for j = 0..n-1; returns the
+        final carry. a * b + x + carry <= 2^64 - 1, so a 32-bit carry is exact. One odd limb
+        first, then pairs (unroll by 2). n may be 0. r may equal x, or be x - 1 (each x[j] is
+        read before r[j] is written, and r[j] = x[j - 1] was read one step earlier).
+      - Callers (no change in results or operation count):
+          SSFBNMontMul    row t += a[i] * b: MulAddRow(t, t, b, a[i], n, 0)
+                          reduction: carry of word 0 computed inline, then
+                          MulAddRow(t, &t[1], &m[1], u, n - 1, c), which writes t[j - 1]
+                          (the word shift stays fused)
+          SSFBNMontSquare triangle row i: MulAddRow(&t[2i+1], &t[2i+1], &a[i+1], a[i],
+                          n - i - 1, 0); reduction row i: MulAddRow(&t[i], &t[i], m, u, n, 0)
+          _SSFBNSchoolbookMulRaw  row i: MulAddRow(&r[i], &r[i], b, a[i], nb, 0)
+          (SSFBNMul, Karatsuba and the NIST fast path go through the schoolbook routine, so
+          ECC benefits too.)
+      - Constant time: no data-dependent branch; every row runs its full length, as before.
+      - DBC: the helper is the innermost hot loop, called with pointers and lengths that the
+        callers have already checked, so it has no argument checks. It gets the
+        "No argument checks by design" comment pointing at dbc_hot_audit.txt, and an entry
+        in ssfbn.md's DBC exception list.
+      - Unit-test counters: _SSFBNMontMulIters keeps its 2n^2 - n count (the caller adds n
+        and n - 1 per row). _SSFBNMontSqrCarryIters is unchanged (those loops stay).
+    Steps (TDD):
+      1. Red: add test-only _SSFBNMulAddRowTest() (ssfbn.h prototype) and ssfbn_ut.c tests
+         against a simple reference loop:
+           n = 0..9 (empty, odd, even); carry-in 0, 1, 0xFFFFFFFF; operands all zero,
+           all 0xFFFFFFFF (every product and carry maximal), and pseudo-random;
+           r separate, r == x, and r == x - 1 (the shifted reduction case);
+           limbs outside r[0..n-1] left untouched.
+         Build fails: the entry point does not exist.
+      2. Green: add the helper and the test entry; the new tests pass. MontMul etc. are
+         still unchanged.
+      3. Switch MontMul, MontSquare and _SSFBNSchoolbookMulRaw to the helper. The existing
+         BN-O1..O3 tests (exact vs ModMul over 1..33 limbs, the carry-extreme grids, NIST
+         primes, 2048-bit, and the work counters), SSFBNMul / Karatsuba tests and the RSA,
+         EC and ECDSA unit tests must pass unchanged.
+      4. Docs: ssfbn.md MontMul / MontSquare text and the DBC exception entry.
+      5. Measure before (HEAD 730f420) and after: every RSA / ECDSA / ECDH / 25519 sign and
+         verify path, M0+ BN instruction counts, client image (M4, M0+, with and without
+         LTO), static RAM, painted peak stack.
+      6. Only if asked: full suites, commit.
+
+    R1 RESULTS
+    TDD: step 1 tests (row kernel against a reference loop, n = 0..10, carry-in 0 / 1 / max,
+    zero, all-ones and random operands, r apart / r == x / r == x - 1, guard limbs) failed
+    to link, as expected. Step 2 helper added; tests pass. Step 3 MontMul, MontSquare and
+    the schoolbook multiply switched; BN (including the unchanged BN-O1..O3 exact and
+    work-counter tests), EC, ECDSA and RSA unit tests pass. Host and ARM builds: 0 warnings
+    (the same 3 POSIX-only files fail on ARM as before). Full suites not run yet.
+    Files: ssfbn.c (_SSFBNMulAddRow, test entry, _SSF_BN_COUNT_ADD, three callers),
+    ssfbn.h (test prototype), ssfbn_ut.c (row-kernel tests), ssfbn.md (DBC entry, MontMul).
+
+    Speed: ARM instructions, before = 730f420, after = 730f420 + R1, method as for R5.
+      Operation                    Before          After        Delta
+      RSA-2048 sign PKCS#1       86,613,601     73,758,518    -14.84%
+      RSA-2048 verify PKCS#1      2,158,627      1,802,734    -16.49%
+      RSA-2048 sign PSS          86,777,071     73,921,988    -14.81%
+      RSA-2048 verify PSS         2,199,840      1,843,947    -16.18%
+      RSA-4096 sign PKCS#1      547,730,648    447,742,301    -18.26%
+      RSA-4096 verify PKCS#1      8,267,791      6,788,314    -17.89%
+      RSA-4096 sign PSS         547,927,479    447,939,132    -18.25%
+      RSA-4096 verify PSS         8,347,182      6,867,705    -17.72%
+      RSA-2048 keygen         7,046,019,325  5,950,306,214    -15.55%  (same key generated)
+      P-256 keygen / sign       4,402,853 / 5,285,801   4,339,389 / 5,155,881   -1.44 / -2.46%
+      P-256 verify / ECDH     16,055,668 /15,319,516  15,989,212 /15,256,052   -0.41 / -0.41%
+      P-384 keygen / sign     11,054,100 /13,524,925  10,806,260 /13,021,213   -2.24 / -3.72%
+      P-384 verify / ECDH     41,162,742 /38,498,029  40,906,870 /38,250,189   -0.62 / -0.64%
+      X25519, Ed25519 keygen / sign / verify          identical (no ssfbn code)
+
+    Cortex-M0+ (ssfbn compiled for ARMv6-M, rest of the harness ARMv7; totals incl. setup):
+      RSA-2048 sign       356,218,351 -> 359,470,096   +0.91%
+      RSA-2048 verify      10,381,995 ->  10,436,322   +0.52%
+      RSA-4096 verify      40,684,052 ->  40,817,771   +0.33%
+      P-256 sign           14,725,526 ->  14,883,586   +1.07%
+      P-384 sign           42,033,696 ->  42,397,652   +0.87%
+    M0+ is about 1% slower: each limb product there is still an __aeabi_lmul call, and the
+    shared kernel spills more of the r0-r7 registers than the old per-caller loops. A
+    one-limb-per-iteration kernel is worse still on M0+ (RSA-2048 sign +9.1%). The fix
+    for M0+ is R7 (an ARMv6-M assembly kernel), not this C kernel.
+
+    Code size: arm-none-eabi-gcc 15.2.0 -Os, client image (text + data, bytes).
+      Image                Before     After   Delta
+      Cortex-M4           103,136   103,008    -128
+      Cortex-M0+          112,268   112,132    -136
+      Cortex-M4, LTO       84,935    84,823    -112
+      Cortex-M0+, LTO      90,079    89,947    -132
+      ssfbn.o: -126 B (M4), -136 B (M0+).
+
+    RAM: static data / bss 96 / 1,052 (LTO 96 / 984) before and after. Painted peak stack
+    (ARM): RSA sign, PSS sign, verify and keygen -16 B (21,552 -> 21,536; 22,360 -> 22,344;
+    9,680 -> 9,664; 26,288 -> 26,272); P-256 / P-384 keygen and sign -8 B; ECC verify,
+    ECDH, X25519, Ed25519 unchanged.
 
 R2. UMAAL in the row kernel (ARMv7E-M: M4, M7, M33/M55 with DSP; ARMv6+ A/R)           OPEN
     Change: the R1 helper body becomes one "umaal lo, carry, a, b[j]" per limb (GCC/Clang

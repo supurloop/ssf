@@ -96,9 +96,11 @@ uint32_t _SSFBNSlowPathCalls = 0u;
 /* Test-only count of SSFBNMod's variable-time shift-and-subtract reductions */
 uint32_t _SSFBNModShiftCalls = 0u;
 #define _SSF_BN_COUNT(c) do { (c)++; } while (0)
+#define _SSF_BN_COUNT_ADD(c, n) do { (c) += (n); } while (0)
 #else
 #define _SSF_BN_SCRUB_HOOK(p, n) do { } while (0)
 #define _SSF_BN_COUNT(c) do { } while (0)
+#define _SSF_BN_COUNT_ADD(c, n) do { } while (0)
 #endif /* SSF_CONFIG_BN_UNIT_TEST */
 
 /* --------------------------------------------------------------------------------------------- */
@@ -900,13 +902,69 @@ SSFBNLimb_t SSFBNSubUint32(SSFBN_t *r, const SSFBN_t *a, uint32_t b)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* r[j] = low(a * b[j] + x[j] + carry) over n limbs; returns the carry out. r may be x or x - 1. */
+/* --------------------------------------------------------------------------------------------- */
+static SSFBNLimb_t _SSFBNMulAddRow(SSFBNLimb_t *r, const SSFBNLimb_t *x, const SSFBNLimb_t *b,
+                                   SSFBNLimb_t a, uint32_t n, SSFBNLimb_t carry)
+{
+    SSFBNDLimb_t prod;
+
+    /* No argument checks by design: innermost hot loop, callers pass checked limb arrays. */
+    /* See dbc_hot_audit.txt before adding any. a * b + x + carry <= 2^64 - 1, so it is exact. */
+
+    /* Is n odd? */
+    if ((n & 1u) != 0u)
+    {
+        /* Yes, do the odd limb first so the loop below runs in pairs */
+        prod = (((SSFBNDLimb_t)a * (SSFBNDLimb_t)b[0]) + (SSFBNDLimb_t)x[0]) +
+               (SSFBNDLimb_t)carry;
+        r[0] = (SSFBNLimb_t)prod;
+        carry = (SSFBNLimb_t)(prod >> SSF_BN_LIMB_BITS);
+        r++;
+        x++;
+        b++;
+    }
+
+    /* Each x[j] is read before r[j] is written, so r == x - 1 shifts the result down safely */
+    for (n >>= 1; n > 0u; n--)
+    {
+        prod = (((SSFBNDLimb_t)a * (SSFBNDLimb_t)b[0]) + (SSFBNDLimb_t)x[0]) +
+               (SSFBNDLimb_t)carry;
+        r[0] = (SSFBNLimb_t)prod;
+        carry = (SSFBNLimb_t)(prod >> SSF_BN_LIMB_BITS);
+        prod = (((SSFBNDLimb_t)a * (SSFBNDLimb_t)b[1]) + (SSFBNDLimb_t)x[1]) +
+               (SSFBNDLimb_t)carry;
+        r[1] = (SSFBNLimb_t)prod;
+        carry = (SSFBNLimb_t)(prod >> SSF_BN_LIMB_BITS);
+        r += 2;
+        x += 2;
+        b += 2;
+    }
+    return carry;
+}
+
+#if SSF_CONFIG_BN_UNIT_TEST == 1
+/* --------------------------------------------------------------------------------------------- */
+/* Test-only entry to _SSFBNMulAddRow.                                                           */
+/* --------------------------------------------------------------------------------------------- */
+SSFBNLimb_t _SSFBNMulAddRowTest(SSFBNLimb_t *r, const SSFBNLimb_t *x, const SSFBNLimb_t *b,
+                                SSFBNLimb_t a, uint32_t n, SSFBNLimb_t carry)
+{
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(x != NULL);
+    SSF_REQUIRE(b != NULL);
+
+    return _SSFBNMulAddRow(r, x, b, a, n, carry);
+}
+#endif /* SSF_CONFIG_BN_UNIT_TEST */
+
+/* --------------------------------------------------------------------------------------------- */
 /* Schoolbook multiply on raw limb pointers; r is overwritten with na + nb limbs.                */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFBNSchoolbookMulRaw(SSFBNLimb_t *r, const SSFBNLimb_t *a, uint16_t na,
                                    const SSFBNLimb_t *b, uint16_t nb)
 {
     uint16_t i;
-    uint16_t j;
 
     SSF_REQUIRE(r != NULL);
     SSF_REQUIRE(a != NULL);
@@ -917,25 +975,16 @@ static void _SSFBNSchoolbookMulRaw(SSFBNLimb_t *r, const SSFBNLimb_t *a, uint16_
 
     memset(r, 0, (size_t)(na + nb) * sizeof(SSFBNLimb_t));
 
+    /* No zero-limb skip: secret-data paths require timing independent of operand bits. */
     for (i = 0; i < na; i++)
     {
-        SSFBNDLimb_t carry = 0;
-        SSFBNLimb_t ai = a[i];
-
-        /* No zero-limb skip: secret-data paths require timing independent of operand bits. */
-        for (j = 0; j < nb; j++)
-        {
-            SSFBNDLimb_t prod = (((SSFBNDLimb_t)ai * (SSFBNDLimb_t)b[j]) +
-                                 (SSFBNDLimb_t)r[i + j]) + carry;
-            r[i + j] = (SSFBNLimb_t)prod;
-            carry = prod >> SSF_BN_LIMB_BITS;
-        }
+        SSFBNLimb_t carry = _SSFBNMulAddRow(&r[i], &r[i], b, a[i], nb, 0u);
 /* Disable false positive Visual Studio Code Analysis warning */
 #ifdef _WIN32
 #pragma warning(push)
 #pragma warning(disable:6385)
 #endif
-        r[i + nb] += (SSFBNLimb_t)carry;
+        r[i + nb] += carry;
 #ifdef _WIN32
 #pragma warning(pop)
 #endif
@@ -2766,38 +2815,29 @@ void SSFBNMontMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBNMon
 
     for (i = 0; i < n; i++)
     {
-        SSFBNDLimb_t carry = 0;
+        SSFBNLimb_t carry;
         SSFBNLimb_t u;
-        uint16_t j;
+        SSFBNDLimb_t sum;
 
         /* t += a[i] * b */
-        for (j = 0; j < n; j++)
-        {
-            SSFBNDLimb_t prod = (((SSFBNDLimb_t)a->limbs[i] * (SSFBNDLimb_t)b->limbs[j]) +
-                                 (SSFBNDLimb_t)t[j]) + carry;
-            t[j] = (SSFBNLimb_t)prod;
-            carry = prod >> SSF_BN_LIMB_BITS;
-            _SSF_BN_COUNT(_SSFBNMontMulIters);
-        }
-        t[n] += (SSFBNLimb_t)carry;
-        t[n + 1u] = (SSFBNLimb_t)(((SSFBNDLimb_t)t[n] < carry) ? 1u : 0u);
+        carry = _SSFBNMulAddRow(t, t, b->limbs, a->limbs[i], n, 0u);
+        _SSF_BN_COUNT_ADD(_SSFBNMontMulIters, n);
+        sum = (SSFBNDLimb_t)t[n] + (SSFBNDLimb_t)carry;
+        t[n] = (SSFBNLimb_t)sum;
+        t[n + 1u] = (SSFBNLimb_t)(sum >> SSF_BN_LIMB_BITS);
 
         /* t = (t + (t[0] * mp mod 2^32) * m) / 2^32, the word shift fused in */
         u = t[0] * ctx->mp;
 
         /* Word 0 of t + u * m is zero by the choice of u; only its carry is kept */
-        carry = (((SSFBNDLimb_t)u * (SSFBNDLimb_t)ctx->mod.limbs[0]) + (SSFBNDLimb_t)t[0]) >>
-                SSF_BN_LIMB_BITS;
-        for (j = 1u; j < n; j++)
+        carry = (SSFBNLimb_t)((((SSFBNDLimb_t)u * (SSFBNDLimb_t)ctx->mod.limbs[0]) +
+                               (SSFBNDLimb_t)t[0]) >> SSF_BN_LIMB_BITS);
+
+        /* Words 1..n-1 land one limb down: t[j - 1] = low(u * m[j] + t[j] + carry) */
+        carry = _SSFBNMulAddRow(t, &t[1], &ctx->mod.limbs[1], u, (uint32_t)n - 1u, carry);
+        _SSF_BN_COUNT_ADD(_SSFBNMontMulIters, (uint32_t)n - 1u);
         {
-            SSFBNDLimb_t prod = (((SSFBNDLimb_t)u * (SSFBNDLimb_t)ctx->mod.limbs[j]) +
-                                 (SSFBNDLimb_t)t[j]) + carry;
-            t[j - 1u] = (SSFBNLimb_t)prod;
-            carry = prod >> SSF_BN_LIMB_BITS;
-            _SSF_BN_COUNT(_SSFBNMontMulIters);
-        }
-        {
-            SSFBNDLimb_t sum = (SSFBNDLimb_t)t[n] + carry;
+            sum = (SSFBNDLimb_t)t[n] + (SSFBNDLimb_t)carry;
             t[n - 1u] = (SSFBNLimb_t)sum;
 /* Disable false positive Visual Studio Code Analysis warning */
 #ifdef _WIN32
@@ -2866,19 +2906,9 @@ void SSFBNMontSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBNMont_t *ctx)
     /* Step 1: accumulate strict upper triangle a[i]*a[j] (i<j) without doubling. */
     for (i = 0; (uint16_t)(i + 1u) < n; i++)
     {
-        SSFBNDLimb_t carry = 0;
-        uint16_t j;
-        SSFBNLimb_t ai = a->limbs[i];
-
-        /* No zero-limb skip -- see _SSFBNSchoolbookMulRaw for rationale. */
-        for (j = (uint16_t)(i + 1u); j < n; j++)
-        {
-            SSFBNDLimb_t prod = (((SSFBNDLimb_t)ai * (SSFBNDLimb_t)a->limbs[j]) +
-                                 (SSFBNDLimb_t)t[i + j]) + carry;
-            t[i + j] = (SSFBNLimb_t)prod;
-            carry = prod >> SSF_BN_LIMB_BITS;
-        }
-        t[i + n] += (SSFBNLimb_t)carry;
+        /* Row i adds a[i] * a[i+1..n-1] at t[2i+1]; no zero-limb skip (see the schoolbook mul) */
+        t[i + n] += _SSFBNMulAddRow(&t[(2u * i) + 1u], &t[(2u * i) + 1u], &a->limbs[i + 1u],
+                                    a->limbs[i], ((uint32_t)n - (uint32_t)i) - 1u, 0u);
     }
 
     /* Step 2: double via shift-left-by-1 across 2n limbs; t[2n-1]'s top bit is 0 after step 1. */
@@ -2926,20 +2956,13 @@ void SSFBNMontSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBNMont_t *ctx)
         for (i = 0; i < n; i++)
         {
             SSFBNLimb_t u = (SSFBNLimb_t)(t[i] * ctx->mp);
-            SSFBNDLimb_t carry = 0;
+            SSFBNLimb_t carry;
             SSFBNDLimb_t sum;
-            uint16_t j;
 
             /* t[i..i+n-1] += u * m (low n limbs of the product). */
-            for (j = 0; j < n; j++)
-            {
-                SSFBNDLimb_t prod = (((SSFBNDLimb_t)u * (SSFBNDLimb_t)ctx->mod.limbs[j]) +
-                                     (SSFBNDLimb_t)t[i + j]) + carry;
-                t[i + j] = (SSFBNLimb_t)prod;
-                carry = prod >> SSF_BN_LIMB_BITS;
-            }
+            carry = _SSFBNMulAddRow(&t[i], &t[i], ctx->mod.limbs, u, n, 0u);
             /* Add this row's carry and the previous row's deferred carry at t[i + n] */
-            sum = ((SSFBNDLimb_t)t[i + n] + carry) + (SSFBNDLimb_t)hi;
+            sum = ((SSFBNDLimb_t)t[i + n] + (SSFBNDLimb_t)carry) + (SSFBNDLimb_t)hi;
             t[i + n] = (SSFBNLimb_t)sum;
             hi = (SSFBNLimb_t)(sum >> SSF_BN_LIMB_BITS);
             _SSF_BN_COUNT(_SSFBNMontSqrCarryIters);

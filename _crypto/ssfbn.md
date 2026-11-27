@@ -148,6 +148,9 @@ other big-integer libraries.
   per arithmetic step and carry no parameter asserts; their callers validate every argument.
   `_SSFBNMulCore` is the body of [`SSFBNMul()`](#ssfbnmul) without its checks; `SSFBNMul()`
   and the P-256 / P-384 fast multiply call it after checking (measured in dbc_hot_audit.txt).
+  `_SSFBNMulAddRow` (one row of `r[j] = low(a × b[j] + x[j] + carry)`) is the innermost loop
+  of `SSFBNMontMul`, `SSFBNMontSquare` and the schoolbook multiply and carries no parameter
+  asserts; every caller passes limb arrays and lengths it has already checked.
 
 <a id="configuration"></a>
 
@@ -845,7 +848,10 @@ void SSFBNMontMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBNMon
 ```
 `r = a × b × R⁻¹ mod m`. Both `a` and `b` must already be in Montgomery form; the result is
 also in Montgomery form. Constant-time. `r` may alias `a` or `b`. CIOS, with the one-word
-shift of each row folded into its reduction pass. The `t` scratch, which ends holding the
+shift of each row folded into its reduction pass. Every row, here, in
+[`SSFBNMontSquare`](#montsquare) and in the schoolbook multiply under
+[`SSFBNMul`](#ssfbnmul), runs one shared multiply-accumulate loop with a 32-bit carry,
+processed two limbs at a time. The `t` scratch, which ends holding the
 unreduced result, is zeroized before returning, since during RSA key generation it holds `p − 1` and
 `q⁻¹ mod p`.
 

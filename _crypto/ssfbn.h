@@ -330,6 +330,10 @@ uint32_t _SSFBNModUint16Test(const SSFBN_t *a, uint32_t d);
 /* Test-only: SSFBNGenPrime's trial division; true if no odd prime 3..1613 divides p. */
 bool _SSFBNTrialDivPassTest(const SSFBN_t *p);
 
+/* Test-only: r[j] = low(a * b[j] + x[j] + carry) over n limbs; returns the carry out. */
+SSFBNLimb_t _SSFBNMulAddRowTest(SSFBNLimb_t *r, const SSFBNLimb_t *x, const SSFBNLimb_t *b,
+                                SSFBNLimb_t a, uint32_t n, SSFBNLimb_t carry);
+
 /* Test-only count of SSFBNGenPrime candidates rejected by trial division. */
 extern uint32_t _SSFBNTrialDivRejects;
 

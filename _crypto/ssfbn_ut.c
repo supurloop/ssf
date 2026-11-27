@@ -1781,6 +1781,78 @@ static void _SSFBNUTCheckMontInitR2(const SSFBN_t *m)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Reference row: out[j] = low(a * b[j] + x[j] + carry) over n limbs, returns the carry out.     */
+/* --------------------------------------------------------------------------------------------- */
+static SSFBNLimb_t _SSFBNUTRefMulAddRow(SSFBNLimb_t *out, const SSFBNLimb_t *x,
+                                        const SSFBNLimb_t *b, SSFBNLimb_t a, uint32_t n,
+                                        SSFBNLimb_t carry)
+{
+    uint32_t j;
+
+    SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE(x != NULL);
+    SSF_REQUIRE(b != NULL);
+
+    for (j = 0u; j < n; j++)
+    {
+        SSFBNDLimb_t p = (((SSFBNDLimb_t)a * (SSFBNDLimb_t)b[j]) + (SSFBNDLimb_t)x[j]) +
+                         (SSFBNDLimb_t)carry;
+        out[j] = (SSFBNLimb_t)p;
+        carry = (SSFBNLimb_t)(p >> SSF_BN_LIMB_BITS);
+    }
+    return carry;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Checks _SSFBNMulAddRowTest for r apart from x, r == x and r == x - 1 against the reference.   */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFBNUTCheckMulAddRow(const SSFBNLimb_t *x, const SSFBNLimb_t *b, SSFBNLimb_t a,
+                                   uint32_t n, SSFBNLimb_t carry)
+{
+    SSFBNLimb_t ref[12];
+    SSFBNLimb_t buf[12];
+    SSFBNLimb_t c;
+    SSFBNLimb_t refC;
+    uint32_t j;
+
+    SSF_REQUIRE(x != NULL);
+    SSF_REQUIRE(b != NULL);
+    SSF_REQUIRE(n <= 10u);
+
+    refC = _SSFBNUTRefMulAddRow(ref, x, b, a, n, carry);
+
+    /* r apart from x: r[0..n-1] written, the guard limbs around it untouched */
+    for (j = 0u; j < 12u; j++) buf[j] = 0xA5A5A5A5u;
+    c = _SSFBNMulAddRowTest(&buf[1], x, b, a, n, carry);
+    SSF_ASSERT(c == refC);
+    SSF_ASSERT(buf[0] == 0xA5A5A5A5u);
+    for (j = 0u; j < n; j++) SSF_ASSERT(buf[j + 1u] == ref[j]);
+    SSF_ASSERT(buf[n + 1u] == 0xA5A5A5A5u);
+
+    /* r == x (in place) */
+    buf[0] = 0xA5A5A5A5u;
+    for (j = 0u; j < n; j++) buf[j + 1u] = x[j];
+    buf[n + 1u] = 0xA5A5A5A5u;
+    c = _SSFBNMulAddRowTest(&buf[1], &buf[1], b, a, n, carry);
+    SSF_ASSERT(c == refC);
+    SSF_ASSERT(buf[0] == 0xA5A5A5A5u);
+    for (j = 0u; j < n; j++) SSF_ASSERT(buf[j + 1u] == ref[j]);
+    SSF_ASSERT(buf[n + 1u] == 0xA5A5A5A5u);
+
+    /* r == x - 1 (the shifted Montgomery reduction): result lands one limb down */
+    buf[0] = 0xA5A5A5A5u;
+    for (j = 0u; j < n; j++) buf[j + 1u] = x[j];
+    buf[n + 1u] = 0xA5A5A5A5u;
+    c = _SSFBNMulAddRowTest(&buf[0], &buf[1], b, a, n, carry);
+    SSF_ASSERT(c == refC);
+    for (j = 0u; j < n; j++) SSF_ASSERT(buf[j] == ref[j]);
+    /* n == 0 writes nothing; otherwise the top source limb keeps its old value */
+    if (n == 0u) SSF_ASSERT(buf[0] == 0xA5A5A5A5u);
+    else SSF_ASSERT(buf[n] == x[n - 1u]);
+    SSF_ASSERT(buf[n + 1u] == 0xA5A5A5A5u);
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Asserts SSFBNMontInit(m) runs exactly dbl modular doublings and sqr Montgomery squarings.     */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFBNUTCheckMontInitCounts(const SSFBN_t *m, uint32_t dbl, uint32_t sqr)
@@ -3692,6 +3764,56 @@ void SSFBNUnitTest(void)
         _SSFBNUTCheckMontInitR2(&m);
         _SSFBNUTCheckMontInitCounts(&m, 129u, 5u);
 #endif
+    }
+
+    /* ---- Row kernel: _SSFBNMulAddRow vs a reference loop: all lengths, aliasing, extremes --- */
+    {
+        static const SSFBNLimb_t carries[] = { 0u, 1u, 0xFFFFFFFFu };
+        static const SSFBNLimb_t multipliers[] = { 0u, 1u, 0x80000000u, 0xFFFFFFFFu };
+        SSFBNLimb_t x[10];
+        SSFBNLimb_t b[10];
+        SSFBNLimb_t ones[10];
+        SSFBNLimb_t zeros[10];
+        uint32_t seed = 12345u;
+        uint32_t n;
+        uint32_t ci;
+        uint32_t ai;
+        uint32_t j;
+
+        for (j = 0u; j < 10u; j++)
+        {
+            ones[j] = 0xFFFFFFFFu;
+            zeros[j] = 0u;
+        }
+        for (n = 0u; n <= 10u; n++)
+        {
+            for (ci = 0u; ci < (sizeof(carries) / sizeof(carries[0])); ci++)
+            {
+                for (ai = 0u; ai < (sizeof(multipliers) / sizeof(multipliers[0])); ai++)
+                {
+                    /* Extremes: every product, addend and carry maximal; and all zero */
+                    _SSFBNUTCheckMulAddRow(ones, ones, multipliers[ai], n, carries[ci]);
+                    _SSFBNUTCheckMulAddRow(zeros, ones, multipliers[ai], n, carries[ci]);
+                    _SSFBNUTCheckMulAddRow(ones, zeros, multipliers[ai], n, carries[ci]);
+
+                    /* Pseudo-random operands */
+                    for (j = 0u; j < 10u; j++)
+                    {
+                        seed = (seed * 1664525u) + 1013904223u;
+                        x[j] = seed;
+                        seed = (seed * 1664525u) + 1013904223u;
+                        b[j] = seed;
+                    }
+                    _SSFBNUTCheckMulAddRow(x, b, multipliers[ai], n, carries[ci]);
+                    _SSFBNUTCheckMulAddRow(x, b, seed ^ 0x5A5A5A5Au, n, carries[ci]);
+                }
+            }
+        }
+
+        /* Maximal row: (2^32-1)^2 + 2 * (2^32-1) == 2^64 - 1: every limb and carry is maximal */
+        SSF_ASSERT(_SSFBNMulAddRowTest(x, ones, ones, 0xFFFFFFFFu, 10u, 0xFFFFFFFFu) ==
+                   0xFFFFFFFFu);
+        for (j = 0u; j < 10u; j++) SSF_ASSERT(x[j] == 0xFFFFFFFFu);
     }
 
     /* ---- OPTIMIZE BN-O2 / BN-O3: MontMul / MontSquare exact; 2n^2 - n and 2n step counts ---- */

@@ -37,6 +37,17 @@ extern "C" {
 }
 extern HANDLE gssfsmWakeSem;
 #else /* WIN32 */
+/* 1 to time wake waits on CLOCK_MONOTONIC (recommended), 0 to use CLOCK_REALTIME */
+#ifndef SSF_SM_THREAD_PTHREAD_CLOCK_MONOTONIC
+/* Does the platform lack pthread_condattr_setclock()? */
+#if defined(__APPLE__)
+/* Yes, fall back to CLOCK_REALTIME */
+#define SSF_SM_THREAD_PTHREAD_CLOCK_MONOTONIC (0u)
+#else
+/* No, use CLOCK_MONOTONIC */
+#define SSF_SM_THREAD_PTHREAD_CLOCK_MONOTONIC (1u)
+#endif
+#endif
 #include <pthread.h>
 #define SSF_SM_THREAD_WAKE_DECLARATION \
     bool gssfsmIsWakeSignalled; \

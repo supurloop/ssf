@@ -63,6 +63,7 @@ Options live in [`_opt/ssfsm_opt.h`](../_opt/ssfsm_opt.h) (aggregated into the b
 |--------|---------|-------------|
 | `SSF_SM_MAX_ACTIVE_EVENTS` | `16` | Maximum number of simultaneously queued events across all state machines; increase if events are dropped under peak load. The ssfmqttc client alone can have about eight outstanding (API, pump and decoded packet events); the rest is margin for other machines sharing the pool |
 | `SSF_SM_MAX_ACTIVE_TIMERS` | `8` | Maximum number of simultaneously running timers across all state machines. The ssfmqttc client runs up to three at once during a session; the rest is margin for other machines |
+| `SSF_SM_THREAD_PTHREAD_CLOCK_MONOTONIC` | `1` (`0` on macOS) | pthread builds only. `1` times `SSF_SM_THREAD_WAKE_WAIT()` on `CLOCK_MONOTONIC`; `0` uses `CLOCK_REALTIME`, for platforms without `pthread_condattr_setclock()`. With `CLOCK_REALTIME`, a backward step of the wall clock (NTP, RTC sync, manual set) lengthens a pending wait by the size of the step, stalling timers until an event is posted. Define before `ssfsm_opt.h` is included to override |
 
 The following enumerations are **required** in [`_opt/ssfsm_opt.h`](../_opt/ssfsm_opt.h):
 

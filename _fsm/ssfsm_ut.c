@@ -38,6 +38,12 @@
 
 #if SSF_CONFIG_SM_UNIT_TEST == 1
 
+#if (SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1) && !defined(_WIN32)
+#ifndef SSF_SM_THREAD_PTHREAD_CLOCK_MONOTONIC
+#error SSF_SM_THREAD_PTHREAD_CLOCK_MONOTONIC must be defined by ssfsm_opt.h
+#endif
+#endif
+
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
 #define SSFSM_UT_MAX_EVENTS (5u)
 #else
@@ -47,16 +53,16 @@
 #define SSFSM_UT_NUM_SMS (SSF_SM_UNIT_TEST_2 + 1u)
 #define SSFSM_UT_NUM_HANDLERS (2u)
 #define SSFSM_UT_NUM_EVENTS (SSF_SM_EVENT_UTX_2 + 1u)
+/* Host OS scheduling delay tolerated on top of a requested wait */
+#define SSFSM_UT_SCHED_SLACK (SSF_TICKS_PER_SEC * 2u)
+/* Wait so long that a missed wake signal cannot pass for scheduling delay */
+#define SSFSM_UT_SIGNALLED_WAIT (SSF_TICKS_PER_SEC * 10u)
 #define SSF_ASSERT_CLEAR(sm, sh, ev) \
     SSF_ASSERT(_ssfsmFlags[sm][sh][ev]); \
     _ssfsmFlags[sm][sh][ev] = false;
 
 static bool _ssfsmFlags[SSFSM_UT_NUM_SMS][SSFSM_UT_NUM_HANDLERS][SSFSM_UT_NUM_EVENTS];
 static uint8_t _utTrace[255];
-/* Host OS scheduling delay tolerated on top of a requested wait */
-#define SSFSM_UT_SCHED_SLACK (SSF_TICKS_PER_SEC * 2u)
-/* Wait so long that a missed wake signal cannot pass for scheduling delay */
-#define SSFSM_UT_SIGNALLED_WAIT (SSF_TICKS_PER_SEC * 10u)
 static uint16_t _utTraceIndex;
 
 /* --------------------------------------------------------------------------------------------- */
@@ -653,12 +659,12 @@ void SSFSMUnitTest(void)
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
     start = SSFPortGetTick64();
-    SSF_SM_THREAD_WAKE_WAIT(SSF_TICKS_PER_SEC);
+    SSF_SM_THREAD_WAKE_WAIT(SSFSM_UT_SIGNALLED_WAIT);
     delta = SSFPortGetTick64() - start;
     SSF_ASSERT(delta < SSFSM_UT_SCHED_SLACK);
 
     start = SSFPortGetTick64();
-    SSF_SM_THREAD_WAKE_WAIT(SSFSM_UT_SIGNALLED_WAIT);
+    SSF_SM_THREAD_WAKE_WAIT(SSF_TICKS_PER_SEC);
     delta = SSFPortGetTick64() - start;
     SSF_ASSERT((delta > (SSF_TICKS_PER_SEC * 0.9)) &&
                (delta < (SSF_TICKS_PER_SEC + SSFSM_UT_SCHED_SLACK)));
@@ -893,12 +899,12 @@ void SSFSMUnitTest(void)
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
     start = SSFPortGetTick64();
-    SSF_SM_THREAD_WAKE_WAIT(SSF_TICKS_PER_SEC);
+    SSF_SM_THREAD_WAKE_WAIT(SSFSM_UT_SIGNALLED_WAIT);
     delta = SSFPortGetTick64() - start;
     SSF_ASSERT(delta < SSFSM_UT_SCHED_SLACK);
 
     start = SSFPortGetTick64();
-    SSF_SM_THREAD_WAKE_WAIT(SSFSM_UT_SIGNALLED_WAIT);
+    SSF_SM_THREAD_WAKE_WAIT(SSF_TICKS_PER_SEC);
     delta = SSFPortGetTick64() - start;
     SSF_ASSERT((delta > (SSF_TICKS_PER_SEC * 0.9)) &&
                (delta < (SSF_TICKS_PER_SEC + SSFSM_UT_SCHED_SLACK)));

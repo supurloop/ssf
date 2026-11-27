@@ -1257,7 +1257,8 @@ NETSOCK-03  STATIC  -384 B bss on glibc (2 x 192), -768 B on Windows (WCHAR), wi
             SSF_NETSOCK_CONFIG_MAX_HOST_SIZE 64                                            E
   Location : _opt/ssfnetsock_opt.h (MAX_HOST_SIZE 256); _net/ssfnetsock.c:167, 178
   What     : each lookup slot copies the host into a 256 B buffer, but ssfmqttc never
-             passes more than SSF_MQTTC_CONFIG_MAX_HOST_SIZE (64).
+             passes more than SSF_MQTTC_CONFIG_MAX_HOST_SIZE (64; 256 since AWSPROV-G05,
+             so this applies only to a build that lowers it).
   Change   : config only: size it to the application's largest host, or a compile-time
              check that it is at least SSF_MQTTC_CONFIG_MAX_HOST_SIZE.
   Risk     : low; config dependent.

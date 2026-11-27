@@ -19,6 +19,13 @@
 #   jsonbig      SSF_JSON_CONFIG_MAX_IN_LEN 65534
 #   jsondepth8   SSF_JSON_CONFIG_MAX_IN_DEPTH 8
 #
+# MQTT client string limits (ssfmqttc), these rows also run the ssfmqttc / ssfmqttpkt tests:
+#
+#   mqttcsmall   the pre-AWSPROV-G05 defaults: client id, host, user name, password 64; topic 128
+#   mqttcbig     client id, topic, user name 65536; password 65535 (the protocol maximums;
+#                no inbound topic is too long, so the too-long-topic tests are skipped)
+#   mqttctopic64k topic 65535, the largest at which an inbound topic can still be too long
+#
 # The curve / RSA-size combinations and crypto profiles of run.sh (which needs MSBuild on
 # Windows and runs the full suite), here with the targeted tests:
 #
@@ -32,8 +39,8 @@
 #
 # Each variant is exported from the working tree (including uncommitted edits and new
 # untracked files) into its own directory under build-cov/variants/, so the working tree is
-# never modified. Only the RSA/EC-dependent and JSON unit tests run, one process each, so a
-# full sweep takes a few minutes on a multi-core host.
+# never modified. Only the RSA/EC-dependent and JSON unit tests run (and the MQTT tests in the
+# mqttc rows), one process each, so a full sweep takes a few minutes on a multi-core host.
 #
 # Usage:  ./tools/config-matrix/features.sh [variant ...]   (default: all)
 #
@@ -46,6 +53,7 @@ script_dir=$(cd -- "$(dirname -- "$0")" && pwd)
 R=$(cd -- "$script_dir/../.." && pwd)
 V=$R/build-cov/variants
 TESTS="SSFRSAUnitTest SSFECUnitTest SSFECDSAUnitTest SSFX509UnitTest SSFCMSUnitTest SSFTLSUnitTest SSFPKeyUnitTest SSFTLSCUnitTest SSFJsonUnitTest SSFGObjUnitTest"
+MQTTC_TESTS="SSFMQTTPktUnitTest SSFMQTTCUnitTest"
 
 case "$(uname -s)" in
     Linux)  ninja_file=build-linux.ninja ;;
@@ -67,6 +75,9 @@ fb384off|SSF_EC_CONFIG_FIXED_BASE_P384=0
 json4k|SSF_JSON_CONFIG_MAX_IN_LEN=4095
 jsonbig|SSF_JSON_CONFIG_MAX_IN_LEN=65534
 jsondepth8|SSF_JSON_CONFIG_MAX_IN_DEPTH=8
+mqttcsmall|SSF_MQTTC_CONFIG_MAX_CLIENT_ID_SIZE=64 SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE=128 SSF_MQTTC_CONFIG_MAX_HOST_SIZE=64 SSF_MQTTC_CONFIG_MAX_USERNAME_SIZE=64 SSF_MQTTC_CONFIG_MAX_PASSWORD_LEN=64
+mqttctopic64k|SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE=65535
+mqttcbig|SSF_MQTTC_CONFIG_MAX_CLIENT_ID_SIZE=65536 SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE=65536 SSF_MQTTC_CONFIG_MAX_USERNAME_SIZE=65536 SSF_MQTTC_CONFIG_MAX_PASSWORD_LEN=65535
 ecc-both|$RSA_OFF
 ecc-p256|$RSA_OFF SSF_EC_CONFIG_ENABLE_P384=0
 ecc-p384|$RSA_OFF SSF_EC_CONFIG_ENABLE_P256=0
@@ -86,6 +97,7 @@ _opt_header() {
         SSF_EC_CONFIG_*)    echo _opt/ssfec_opt.h ;;
         SSF_CRYPT_CONFIG_*) echo _opt/ssfcrypt_opt.h ;;
         SSF_JSON_CONFIG_*)  echo _opt/ssfjson_opt.h ;;
+        SSF_MQTTC_CONFIG_*) echo _opt/ssfmqttc_opt.h ;;
         *)                  echo "" ;;
     esac
 }
@@ -124,13 +136,15 @@ for name in $(echo "$VARIANTS" | cut -d'|' -f1); do
         fail=1; continue
     fi
     [ "$warns" -ne 0 ] && fail=1
+    vt=$TESTS
+    case "$name" in mqttc*) vt="$TESTS $MQTTC_TESTS" ;; esac
     # One-test-per-process harness linked against the variant's own objects
     {
         echo '#include <stdio.h>'
         echo '#include <string.h>'
-        for t in $TESTS; do echo "void $t(void);"; done
+        for t in $vt; do echo "void $t(void);"; done
         echo 'int main(int c, char **v){'
-        for t in $TESTS; do echo "    if ((c == 2) && (strcmp(v[1], \"$t\") == 0)) { $t(); return 0; }"; done
+        for t in $vt; do echo "    if ((c == 2) && (strcmp(v[1], \"$t\") == 0)) { $t(); return 0; }"; done
         echo '    return 2; }'
     } > "$d/h.c"
     if ! (cd "$d" && gcc -O1 -c h.c -o h.o && \
@@ -139,7 +153,7 @@ for name in $(echo "$VARIANTS" | cut -d'|' -f1); do
         echo "[$name] harness link failed (see $d/build.log)"; fail=1; continue
     fi
     res=""
-    for t in $TESTS; do
+    for t in $vt; do
         if (cd "$d" && ./h "$t" > "$t.log" 2>&1); then
             res="$res ${t%UnitTest}=ok"
         else

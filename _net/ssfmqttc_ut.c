@@ -64,7 +64,25 @@
 #define SSF_MQTTC_UT_RX_BLOCK_SIZE   (128u)
 #define SSF_MQTTC_UT_BROKER_HOST     "test.mosquitto.org"
 #define SSF_MQTTC_UT_BROKER_PORT     (1883u)
-#define SSF_MQTTC_UT_MOCK_BUF_SIZE   (2048u)
+#define SSF_MQTTC_UT_MAX2(a, b)      (((a) > (b)) ? (a) : (b))
+#define SSF_MQTTC_UT_LIM_STR_SIZE    SSF_MQTTC_UT_MAX2( \
+                                     SSF_MQTTC_UT_MAX2(SSF_MQTTC_CONFIG_MAX_CLIENT_ID_SIZE, \
+                                                       SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE), \
+                                     SSF_MQTTC_UT_MAX2(SSF_MQTTC_CONFIG_MAX_HOST_SIZE, \
+                                                       SSF_MQTTC_CONFIG_MAX_USERNAME_SIZE))
+#define SSF_MQTTC_UT_LIM_TX_SIZE     (SSF_MQTTC_UT_LIM_STR_SIZE + \
+                                      SSF_MQTTC_CONFIG_MAX_PASSWORD_LEN + 64u)
+#define SSF_MQTTC_UT_BIG_SIZE        (SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE + 384u)
+#define SSF_MQTTC_UT_HAS_LONG_TOPIC  (SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE <= 65535u)
+#if SSF_MQTTC_UT_HAS_LONG_TOPIC
+#define SSF_MQTTC_UT_LONG_TOPIC_LEN  (SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE)
+#else
+#define SSF_MQTTC_UT_LONG_TOPIC_LEN  (65535u)
+#endif
+#define SSF_MQTTC_UT_MOCK_BUF_SIZE   (2048u + SSF_MQTTC_UT_LIM_TX_SIZE)
+#define SSF_MQTTC_UT_MOCK_RX_SIZE    (SSF_MQTTC_UT_MOCK_BUF_SIZE + \
+                                      ((SSF_MQTTC_CONFIG_RX_PUBLISH_QUEUE_DEPTH + 4u) * \
+                                       SSF_MQTTC_UT_BIG_SIZE))
 #define SSF_MQTTC_UT_PUMP_ITERATIONS (10u)
 #define SSF_MQTTC_UT_EVENT_LOG_SIZE  (16u)
 #define SSF_MQTTC_UT_SHORT_TICKS     (50u)              /* Timeouts the scenarios wait out */
@@ -102,7 +120,7 @@ typedef struct
     uint16_t port;
     uint8_t tx[SSF_MQTTC_UT_MOCK_BUF_SIZE];
     size_t txLen;
-    uint8_t rx[SSF_MQTTC_UT_MOCK_BUF_SIZE];
+    uint8_t rx[SSF_MQTTC_UT_MOCK_RX_SIZE];
     size_t rxLen;
     size_t rxPos;
     size_t rxPadPos;                  /* rx offset at which rxPadLeft filler bytes are served */
@@ -498,6 +516,23 @@ static void _SSFMQTTCUTOptsInit(SSFMQTTCOpts_t *opts)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Creates a fresh state machine, mock and STOPPED client with the given block sizes.            */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTBeginTxRx(uint32_t txBlocks, uint32_t txBlockSize, uint32_t rxBlockSize)
+{
+    SSF_REQUIRE(txBlocks > 0);
+    SSF_REQUIRE(txBlockSize > 0);
+    SSF_REQUIRE(rxBlockSize > 0);
+
+    SSFSMInit(SSF_SM_MAX_ACTIVE_EVENTS, SSF_SM_MAX_ACTIVE_TIMERS);
+    _SSFMQTTCUTMockReset();
+    _SSFMQTTCUTRecordReset();
+    SSFMQTTCInit(&_utMock.transport, txBlocks, txBlockSize, rxBlockSize, _SSFMQTTCUTRxPublish,
+                 &_utRxPublishCtx, _SSFMQTTCUTEvent, &_utEventCtx);
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_STOPPED);
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Creates a fresh state machine, mock and STOPPED client with the given rx block size.          */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTBeginRx(uint32_t txBlocks, uint32_t rxBlockSize)
@@ -505,12 +540,7 @@ static void _SSFMQTTCUTBeginRx(uint32_t txBlocks, uint32_t rxBlockSize)
     SSF_REQUIRE(txBlocks > 0);
     SSF_REQUIRE(rxBlockSize > 0);
 
-    SSFSMInit(SSF_SM_MAX_ACTIVE_EVENTS, SSF_SM_MAX_ACTIVE_TIMERS);
-    _SSFMQTTCUTMockReset();
-    _SSFMQTTCUTRecordReset();
-    SSFMQTTCInit(&_utMock.transport, txBlocks, SSF_MQTTC_UT_TX_BLOCK_SIZE, rxBlockSize,
-                 _SSFMQTTCUTRxPublish, &_utRxPublishCtx, _SSFMQTTCUTEvent, &_utEventCtx);
-    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_STOPPED);
+    _SSFMQTTCUTBeginTxRx(txBlocks, SSF_MQTTC_UT_TX_BLOCK_SIZE, rxBlockSize);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -1576,6 +1606,7 @@ static size_t _SSFMQTTCUTBuildPublish(uint8_t *buf, size_t size, uint8_t b0, siz
     size_t n = 0;
 
     SSF_REQUIRE(buf != NULL);
+    SSF_REQUIRE(topicLen <= 65535u);
     SSF_REQUIRE(payloadWritten <= payloadLen);
     SSF_REQUIRE(hdrLenOut != NULL);
     SSF_ASSERT((5 + 2 + topicLen + 2 + payloadWritten) <= size);
@@ -1683,12 +1714,12 @@ static void _SSFMQTTCUTScenarioRxTopicTooLong(void)
     static const SSFMQTTCUTEventRec_t dropped[] =
     { { SSF_MQTTC_EVENT_RX_PUBLISH_DROPPED, SSF_MQTTC_REASON_RX_PUBLISH_TOPIC_TOO_LONG } };
     static const uint8_t ack[] = { 0x40, 0x02, 0x0A, 0x0B, 0x40, 0x02, 0x00, 0x07 };
-    uint8_t pkt[512];
+    uint8_t pkt[SSF_MQTTC_UT_BIG_SIZE];
     size_t len;
     size_t hdrLen;
     SSFMQTTCOpts_t opts;
 
-    _SSFMQTTCUTBeginRx(SSF_MQTTC_UT_TX_BLOCKS, 512);
+    _SSFMQTTCUTBeginRx(SSF_MQTTC_UT_TX_BLOCKS, SSF_MQTTC_UT_BIG_SIZE);
     _SSFMQTTCUTOptsInit(&opts);
     _SSFMQTTCUTGoReady(&opts);
 
@@ -1701,6 +1732,7 @@ static void _SSFMQTTCUTScenarioRxTopicTooLong(void)
     SSF_ASSERT(_utRx.topicLen == (SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE - 1));
     SSF_ASSERT(_utEventCount == 0);
 
+#if SSF_MQTTC_UT_HAS_LONG_TOPIC
     /* One byte longer is dropped, acknowledged, and the next packet still arrives */
     len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x32, SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE, 0x0A0B,
                                   1, 1, &hdrLen);
@@ -1712,6 +1744,10 @@ static void _SSFMQTTCUTScenarioRxTopicTooLong(void)
     SSF_ASSERT(strcmp(_utRxTopic, "v") == 0);
     _SSFMQTTCUTExpectEvents(dropped, 1);
     _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(ack));
+#else
+    (void)dropped;
+    (void)ack;
+#endif
     _SSFMQTTCUTEnd();
 }
 
@@ -1937,7 +1973,7 @@ static void _SSFMQTTCUTScenarioRxPublishBeforeConnAck(void)
 {
     static const SSFMQTTCUTEventRec_t failed[] =
     { { SSF_MQTTC_EVENT_CONNECT_FAILED, SSF_MQTTC_REASON_PROTOCOL } };
-    uint8_t pkt[512];
+    uint8_t pkt[SSF_MQTTC_UT_BIG_SIZE];
     size_t len = 0;
     size_t hdrLen;
     uint32_t i;
@@ -1945,7 +1981,7 @@ static void _SSFMQTTCUTScenarioRxPublishBeforeConnAck(void)
 
     for (i = 0; i < 4; i++)
     {
-        if (i == 3) _SSFMQTTCUTBeginRx(SSF_MQTTC_UT_TX_BLOCKS, 512);
+        if (i == 3) _SSFMQTTCUTBeginRx(SSF_MQTTC_UT_TX_BLOCKS, SSF_MQTTC_UT_BIG_SIZE);
         else _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
         _SSFMQTTCUTOptsInit(&opts);
         switch (i)
@@ -1959,8 +1995,8 @@ static void _SSFMQTTCUTScenarioRxPublishBeforeConnAck(void)
         case 2:     /* Oversized QoS 1, which would otherwise be skipped as it arrives */
             len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x32, 3, 0x1234, 200, 200, &hdrLen);
             break;
-        default:    /* QoS 1 that fits but whose topic is too long */
-            len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x32, SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE,
+        default:    /* QoS 1 that fits but whose topic is too long, or the longest possible */
+            len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x32, SSF_MQTTC_UT_LONG_TOPIC_LEN,
                                           0x1234, 1, 1, &hdrLen);
             break;
         }
@@ -2428,6 +2464,7 @@ static void _SSFMQTTCUTScenarioRxHoldTimeout(void)
     _SSFMQTTCUTEnd();
 }
 
+#if SSF_MQTTC_UT_HAS_LONG_TOPIC
 /* --------------------------------------------------------------------------------------------- */
 /* Tests a PINGRESP held past its timeout keeps the link; a dead uplink still ends it.           */
 /* --------------------------------------------------------------------------------------------- */
@@ -2441,7 +2478,7 @@ static void _SSFMQTTCUTScenarioRxHoldKeepAlive(void)
         { SSF_MQTTC_EVENT_DISCONNECTED, SSF_MQTTC_REASON_KEEPALIVE },
     };
     uint8_t pkt[7];
-    uint8_t big[512];
+    uint8_t big[SSF_MQTTC_UT_BIG_SIZE];
     size_t len;
     size_t hdrLen;
     uint32_t i;
@@ -2557,7 +2594,7 @@ static void _SSFMQTTCUTScenarioRxPubAckOwed(void)
     { { SSF_MQTTC_EVENT_RX_PUBLISH_DROPPED, SSF_MQTTC_REASON_RX_PUBLISH_HOLD_TIMEOUT } };
     const uint32_t depth = SSF_MQTTC_CONFIG_RX_PUBLISH_QUEUE_DEPTH;
     uint8_t pkt[7];
-    uint8_t big[512];
+    uint8_t big[SSF_MQTTC_UT_BIG_SIZE];
     uint8_t acks[128];
     size_t acksLen;
     size_t len;
@@ -2732,7 +2769,7 @@ static void _SSFMQTTCUTScenarioRxHoldLifetime(void)
         { SSF_MQTTC_EVENT_DISCONNECTED, SSF_MQTTC_REASON_TRANSPORT_ERROR },
     };
     uint8_t pkt[7];
-    uint8_t big[512];
+    uint8_t big[SSF_MQTTC_UT_BIG_SIZE];
     size_t len;
     size_t hdrLen;
     uint32_t i;
@@ -2871,7 +2908,7 @@ static void _SSFMQTTCUTScenarioRxHoldEdges(void)
 {
     const uint32_t depth = SSF_MQTTC_CONFIG_RX_PUBLISH_QUEUE_DEPTH;
     uint8_t pkt[7];
-    uint8_t big[512];
+    uint8_t big[SSF_MQTTC_UT_BIG_SIZE];
     size_t len;
     size_t hdrLen;
     size_t base;
@@ -3054,6 +3091,7 @@ static void _SSFMQTTCUTScenarioRxHoldEdges(void)
     _utMock.txLen = 0;
     _SSFMQTTCUTEnd();
 }
+#endif /* SSF_MQTTC_UT_HAS_LONG_TOPIC */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Tests a peer close while READY.                                                               */
@@ -3721,6 +3759,214 @@ static void _SSFMQTTCUTScenarioGracefulClose(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* String size limits                                                                            */
+/* --------------------------------------------------------------------------------------------- */
+static char _utLimStr[SSF_MQTTC_UT_LIM_STR_SIZE + 1u];
+static char _utLimStr2[SSF_MQTTC_UT_LIM_STR_SIZE + 1u];
+static uint8_t _utLimPw[SSF_MQTTC_CONFIG_MAX_PASSWORD_LEN + 1u];
+static uint8_t _utLimConnect[SSF_MQTTC_UT_LIM_TX_SIZE];
+static SSFMQTTCOpts_t _utLimOpts;
+static SSFMQTTCSub_t _utLimSub;
+static SSFMQTTCWill_t _utLimWill;
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns _utLimStr holding len 'a' characters.                                                 */
+/* --------------------------------------------------------------------------------------------- */
+static SSFCStrIn_t _SSFMQTTCUTLimStr(size_t len)
+{
+    SSF_REQUIRE(len < sizeof(_utLimStr));
+
+    memset(_utLimStr, 'a', len);
+    _utLimStr[len] = 0;
+    return _utLimStr;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Starts a fresh client with _utLimOpts, which Start must accept, then stops it.                */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTLimStartOk(void)
+{
+    _SSFMQTTCUTBeginTxRx(2, SSF_MQTTC_UT_LIM_TX_SIZE, SSF_MQTTC_UT_RX_BLOCK_SIZE);
+    SSFMQTTCStart(&_utLimOpts);
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(_utMock.openCount == 1);
+    SSF_ASSERT(strcmp(_utMock.host, _utLimOpts.host) == 0);
+    SSF_ASSERT(_utMock.txLen > 0);
+    _utMock.txLen = 0;
+    _SSFMQTTCUTEnd();
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Starts a fresh client with _utLimOpts, which Start must refuse.                               */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTLimStartBad(void)
+{
+    _SSFMQTTCUTBeginTxRx(2, SSF_MQTTC_UT_LIM_TX_SIZE, SSF_MQTTC_UT_RX_BLOCK_SIZE);
+    SSF_ASSERT_TEST(SSFMQTTCStart(&_utLimOpts));
+    SSF_ASSERT(SSFMQTTCIsStarted() == false);
+    _SSFMQTTCUTEnd();
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Tests that a client id of idLen 'a' characters is sent intact in CONNECT.                     */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTLimConnectId(size_t idLen)
+{
+    static const uint8_t fixed[] =
+    { 0x00, 0x04, 'M', 'Q', 'T', 'T', 0x04, 0x02, 0x00, 0x78 };
+    size_t remaining = sizeof(fixed) + 2u + idLen;
+    size_t n = 0;
+
+    SSF_REQUIRE((idLen > 0) && (idLen < SSF_MQTTC_CONFIG_MAX_CLIENT_ID_SIZE));
+    SSF_ASSERT((5u + remaining) <= sizeof(_utLimConnect));
+
+    _utLimConnect[n++] = 0x10;
+    do
+    {
+        uint8_t b = (uint8_t)(remaining & 0x7Fu);
+        remaining >>= 7;
+        if (remaining > 0) b |= 0x80u;
+        _utLimConnect[n++] = b;
+    } while (remaining > 0);
+    memcpy(&_utLimConnect[n], fixed, sizeof(fixed));
+    n += sizeof(fixed);
+    _utLimConnect[n++] = (uint8_t)(idLen >> 8);
+    _utLimConnect[n++] = (uint8_t)(idLen & 0xFFu);
+    memset(&_utLimConnect[n], 'a', idLen);
+    n += idLen;
+
+    _SSFMQTTCUTOptsInit(&_utLimOpts);
+    _utLimOpts.clientId = _SSFMQTTCUTLimStr(idLen);
+    _SSFMQTTCUTBeginTxRx(2, SSF_MQTTC_UT_LIM_TX_SIZE, SSF_MQTTC_UT_RX_BLOCK_SIZE);
+    SSFMQTTCStart(&_utLimOpts);
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTING);
+    _SSFMQTTCUTExpectTx(_utLimConnect, n);
+    _SSFMQTTCUTEnd();
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Tests each string option at size - 1 (accepted) and size (refused), and the password length.  */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTScenarioStringLimits(void)
+{
+    size_t len;
+
+    /* Client id */
+    _SSFMQTTCUTLimConnectId(SSF_MQTTC_CONFIG_MAX_CLIENT_ID_SIZE - 1u);
+    _SSFMQTTCUTOptsInit(&_utLimOpts);
+    _utLimOpts.clientId = _SSFMQTTCUTLimStr(SSF_MQTTC_CONFIG_MAX_CLIENT_ID_SIZE);
+    _SSFMQTTCUTLimStartBad();
+
+    /* Host */
+    _SSFMQTTCUTOptsInit(&_utLimOpts);
+    _utLimOpts.host = _SSFMQTTCUTLimStr(SSF_MQTTC_CONFIG_MAX_HOST_SIZE - 1u);
+    _SSFMQTTCUTLimStartOk();
+    SSF_ASSERT(SSFStrLen(_utMock.host, sizeof(_utMock.host), &len));
+    SSF_ASSERT(len == (SSF_MQTTC_CONFIG_MAX_HOST_SIZE - 1u));
+    _utLimOpts.host = _SSFMQTTCUTLimStr(SSF_MQTTC_CONFIG_MAX_HOST_SIZE);
+    _SSFMQTTCUTLimStartBad();
+
+    /* User name */
+    _SSFMQTTCUTOptsInit(&_utLimOpts);
+    _utLimOpts.usernameOpt = _SSFMQTTCUTLimStr(SSF_MQTTC_CONFIG_MAX_USERNAME_SIZE - 1u);
+    _SSFMQTTCUTLimStartOk();
+    _utLimOpts.usernameOpt = _SSFMQTTCUTLimStr(SSF_MQTTC_CONFIG_MAX_USERNAME_SIZE);
+    _SSFMQTTCUTLimStartBad();
+
+    /* Password, binary: MAX_PASSWORD_LEN bytes accepted, one more refused */
+    _SSFMQTTCUTOptsInit(&_utLimOpts);
+    memset(_utLimPw, 'p', sizeof(_utLimPw));
+    _utLimOpts.usernameOpt = "u";
+    _utLimOpts.passwordOpt = _utLimPw;
+    _utLimOpts.passwordLen = (uint16_t)SSF_MQTTC_CONFIG_MAX_PASSWORD_LEN;
+    _SSFMQTTCUTLimStartOk();
+#if SSF_MQTTC_CONFIG_MAX_PASSWORD_LEN < 65535u
+    _utLimOpts.passwordLen = (uint16_t)(SSF_MQTTC_CONFIG_MAX_PASSWORD_LEN + 1u);
+    _SSFMQTTCUTLimStartBad();
+#endif
+
+    /* Subscription filter */
+    _SSFMQTTCUTOptsInit(&_utLimOpts);
+    _utLimSub.filter = _SSFMQTTCUTLimStr(SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE - 1u);
+    _utLimSub.qos = SSF_MQTTC_QOS_1;
+    _utLimOpts.subsOpt = &_utLimSub;
+    _utLimOpts.subCount = 1;
+    _SSFMQTTCUTLimStartOk();
+    _utLimSub.filter = _SSFMQTTCUTLimStr(SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE);
+    _SSFMQTTCUTLimStartBad();
+
+    /* Will topic */
+    _SSFMQTTCUTOptsInit(&_utLimOpts);
+    memset(&_utLimWill, 0, sizeof(_utLimWill));
+    _utLimWill.topic = _SSFMQTTCUTLimStr(SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE - 1u);
+    _utLimWill.qos = SSF_MQTTC_QOS_0;
+    _utLimOpts.willOpt = &_utLimWill;
+    _SSFMQTTCUTLimStartOk();
+    _utLimWill.topic = _SSFMQTTCUTLimStr(SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE);
+    _SSFMQTTCUTLimStartBad();
+
+    /* TxPublish topic */
+    _SSFMQTTCUTBeginTxRx(SSF_MQTTC_UT_TX_BLOCKS, SSF_MQTTC_UT_LIM_TX_SIZE,
+                         SSF_MQTTC_UT_RX_BLOCK_SIZE);
+    _SSFMQTTCUTOptsInit(&_utLimOpts);
+    _SSFMQTTCUTGoReady(&_utLimOpts);
+    len = SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE - 1u;
+    SSF_ASSERT(SSFMQTTCTxPublish(_SSFMQTTCUTLimStr(len), (const uint8_t *)"x", 1,
+                                 SSF_MQTTC_QOS_0, false, NULL, NULL));
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(_utMock.txLen == SSFMQTTPktPublishLen(len, 1, SSF_MQTTC_QOS_0));
+    SSF_ASSERT(memcmp(&_utMock.tx[_utMock.txLen - 1u - len], _utLimStr, len) == 0);
+    SSF_ASSERT(_utMock.tx[_utMock.txLen - 1u] == 'x');
+    _utMock.txLen = 0;
+    SSF_ASSERT(SSFMQTTCTxPublish(_SSFMQTTCUTLimStr(SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE),
+                                 (const uint8_t *)"x", 1, SSF_MQTTC_QOS_0, false, NULL,
+                                 NULL) == false);
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectTx(NULL, 0);
+    _SSFMQTTCUTEnd();
+}
+
+#if (SSF_MQTTC_CONFIG_MAX_CLIENT_ID_SIZE >= 129u) && (SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE >= 257u)
+/* --------------------------------------------------------------------------------------------- */
+/* Tests AWS IoT sizes: a 128-byte client id (thing name) and topics built from it.              */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTScenarioAwsSizes(void)
+{
+    static const char shadowPre[] = "$aws/things/";
+    static const char shadowPost[] = "/shadow/name/";
+    static const char shadowAccepted[] = "/update/accepted";
+    size_t n = 0;
+
+    /* 128-byte client id, the AWS maximum */
+    _SSFMQTTCUTLimConnectId(128u);
+
+    /* Named shadow topic of a 128-byte thing name and a 64-byte shadow name, 233 bytes */
+    memcpy(&_utLimStr2[n], shadowPre, sizeof(shadowPre) - 1u);
+    n += sizeof(shadowPre) - 1u;
+    memset(&_utLimStr2[n], 't', 128u);
+    n += 128u;
+    memcpy(&_utLimStr2[n], shadowPost, sizeof(shadowPost) - 1u);
+    n += sizeof(shadowPost) - 1u;
+    memset(&_utLimStr2[n], 's', 64u);
+    n += 64u;
+    memcpy(&_utLimStr2[n], shadowAccepted, sizeof(shadowAccepted));
+    n += sizeof(shadowAccepted) - 1u;
+    SSF_ASSERT(n == 233u);
+    _SSFMQTTCUTOptsInit(&_utLimOpts);
+    _utLimSub.filter = _utLimStr2;
+    _utLimSub.qos = SSF_MQTTC_QOS_1;
+    _utLimOpts.subsOpt = &_utLimSub;
+    _utLimOpts.subCount = 1;
+    _SSFMQTTCUTLimStartOk();
+
+    /* 256-byte topic, the AWS maximum */
+    _utLimSub.filter = _SSFMQTTCUTLimStr(256u);
+    _SSFMQTTCUTLimStartOk();
+}
+#endif
+
+/* --------------------------------------------------------------------------------------------- */
 /* Layer 3: round trip against a public broker over the real socket transport                    */
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_CONFIG_MQTTC_UNIT_TEST_BROKER == 1
@@ -4088,10 +4334,12 @@ void SSFMQTTCUnitTest(void)
     _SSFMQTTCUTScenarioKeepAliveUnsolicitedPingResp();
     _SSFMQTTCUTScenarioRxBackPressure();
     _SSFMQTTCUTScenarioRxHoldTimeout();
+#if SSF_MQTTC_UT_HAS_LONG_TOPIC
     _SSFMQTTCUTScenarioRxHoldKeepAlive();
     _SSFMQTTCUTScenarioRxPubAckOwed();
     _SSFMQTTCUTScenarioRxHoldLifetime();
     _SSFMQTTCUTScenarioRxHoldEdges();
+#endif
     _SSFMQTTCUTScenarioPeerClosed();
     _SSFMQTTCUTScenarioConnectFailures();
     _SSFMQTTCUTScenarioSessionTimeouts();
@@ -4099,6 +4347,10 @@ void SSFMQTTCUnitTest(void)
     _SSFMQTTCUTScenarioWill();
     _SSFMQTTCUTScenarioStopPaths();
     _SSFMQTTCUTScenarioGracefulClose();
+    _SSFMQTTCUTScenarioStringLimits();
+#if (SSF_MQTTC_CONFIG_MAX_CLIENT_ID_SIZE >= 129u) && (SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE >= 257u)
+    _SSFMQTTCUTScenarioAwsSizes();
+#endif
 #if SSF_CONFIG_MQTTC_UNIT_TEST_BROKER == 1
     _SSFMQTTCUTBrokerEcho();
 #endif

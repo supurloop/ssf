@@ -49,7 +49,9 @@ process the single block, then securely wipe the schedule.
 - This module is used internally by [`ssfaesgcm`](ssfaesgcm.md).
 - DBC exception (timing-critical): `_SSFAESEncryptRounds` and `_SSFAESDecryptRounds` run per
   block or per arithmetic step and carry no parameter asserts; their callers validate every
-  argument.
+  argument. `_SSFAESKSBlockEncryptNoCheck()` (declared in `ssfaes.h`, internal to `ssfaesgcm`,
+  `ssfaesccm` and `ssfaesctr`) is `SSFAESKSBlockEncrypt()` without its checks, for their
+  per-block loops; applications use `SSFAESKSBlockEncrypt()`.
 
 <a id="configuration"></a>
 

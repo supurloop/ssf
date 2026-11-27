@@ -59,7 +59,9 @@ static void _SSFAESCCMXorBlock(uint8_t *dst, const uint8_t *src)
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFAESCCMEncBlock(const SSFAESKeySchedule_t *ks, const uint8_t *in, uint8_t *out)
 {
-    SSFAESKSBlockEncrypt(ks, in, SSF_AESCCM_BLOCK_SIZE, out, SSF_AESCCM_BLOCK_SIZE);
+    /* No argument checks by design: ks is built by the caller and in / out are 16-byte blocks. */
+    /* See dbc_hot_audit.txt item C before adding any back. */
+    _SSFAESKSBlockEncryptNoCheck(ks, in, out);
 }
 
 /* --------------------------------------------------------------------------------------------- */

@@ -347,6 +347,16 @@ void SSFAESKSBlockEncrypt(const SSFAESKeySchedule_t *ks, const uint8_t *pt, size
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Encrypts one 16-byte block for the ssfaes* modes; SSFAESKSBlockEncrypt without checks.        */
+/* --------------------------------------------------------------------------------------------- */
+void _SSFAESKSBlockEncryptNoCheck(const SSFAESKeySchedule_t *ks, const uint8_t *pt, uint8_t *ct)
+{
+    /* No argument checks by design: called per block by GCM, CCM and CTR with a schedule they */
+    /* just built or checked and 16-byte local buffers. See dbc_hot_audit.txt item C. */
+    _SSFAESEncryptRounds(ks->w, ks->nr, pt, ct);
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Decrypt one 16-byte block using a precomputed schedule.                                       */
 /* --------------------------------------------------------------------------------------------- */
 void SSFAESKSBlockDecrypt(const SSFAESKeySchedule_t *ks, const uint8_t *ct, size_t ctLen,

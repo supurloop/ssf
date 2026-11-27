@@ -85,22 +85,13 @@ void SSFFE25519UnitTest(void)
     uint16_t k;
 
     /* ---- Contracts ---- */
-    SSF_ASSERT_TEST(SSFFE25519Mul(NULL, &_utX, &_utX));
-    SSF_ASSERT_TEST(SSFFE25519Mul(&r, NULL, &_utX));
-    SSF_ASSERT_TEST(SSFFE25519Mul(&r, &_utX, NULL));
-    SSF_ASSERT_TEST(SSFFE25519Sqr(NULL, &_utX));
-    SSF_ASSERT_TEST(SSFFE25519Sqr(&r, NULL));
-    SSF_ASSERT_TEST(SSFFE25519Reduce(NULL));
+    /* Mul, Sqr, Reduce, CSwap and Copy have no argument checks by design (dbc_hot_audit.txt A) */
     SSF_ASSERT_TEST(SSFFE25519Inv(NULL, &_utX));
     SSF_ASSERT_TEST(SSFFE25519Inv(&r, NULL));
     SSF_ASSERT_TEST(SSFFE25519ToBytes(NULL, &_utX));
     SSF_ASSERT_TEST(SSFFE25519ToBytes(bytes, NULL));
-    SSF_ASSERT_TEST(SSFFE25519CSwap(NULL, &a, 1u));
-    SSF_ASSERT_TEST(SSFFE25519CSwap(&a, NULL, 1u));
     SSF_ASSERT_TEST(SSFFE25519SetZero(NULL));
     SSF_ASSERT_TEST(SSFFE25519SetOne(NULL));
-    SSF_ASSERT_TEST(SSFFE25519Copy(NULL, &_utX));
-    SSF_ASSERT_TEST(SSFFE25519Copy(&r, NULL));
 
     /* ---- Mul / Sqr: fully reduced results, inputs up to 2^256 - 1 (Ed25519's lazy adds) ---- */
     SSFFE25519Mul(&r, &_utMax, &_utMax);

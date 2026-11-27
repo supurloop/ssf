@@ -69,8 +69,8 @@ static void _SSFAESCTRNextKeystream(SSFAESCTRContext_t *ctx)
     SSF_REQUIRE(ctx != NULL);
     SSF_REQUIRE(ctx->magic == SSF_AESCTR_CONTEXT_MAGIC);
 
-    SSFAESKSBlockEncrypt(&ctx->sched, ctx->counter, SSF_AESCTR_BLOCK_SIZE,
-                         ctx->ks, SSF_AESCTR_BLOCK_SIZE);
+    /* ctx magic checked above; its schedule is set with it at init. dbc_hot_audit.txt item C */
+    _SSFAESKSBlockEncryptNoCheck(&ctx->sched, ctx->counter, ctx->ks);
     _SSFAESCTRIncCounter(ctx->counter);
     ctx->ksOff = 0u;
 }

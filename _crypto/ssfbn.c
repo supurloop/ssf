@@ -1020,29 +1020,16 @@ static void _SSFBNKaratsubaMul(SSFBNLimb_t *r, const SSFBNLimb_t *a, const SSFBN
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* r = a * b; Karatsuba for same-size even-length operands at threshold, else schoolbook.        */
+/* r = a * b without argument checks; Karatsuba at threshold for same-size even lengths.         */
 /* --------------------------------------------------------------------------------------------- */
-void SSFBNMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b)
+static void _SSFBNMulCore(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b)
 {
     uint16_t rLen;
     uint16_t i;
 
-    SSF_REQUIRE(r != NULL);
-    SSF_REQUIRE(r->limbs != NULL);
-    SSF_REQUIRE(a != NULL);
-    SSF_REQUIRE(a->limbs != NULL);
-    SSF_REQUIRE(b != NULL);
-    SSF_REQUIRE(b->limbs != NULL);
-    SSF_REQUIRE(r != a);
-    SSF_REQUIRE(r != b);
-    SSF_REQUIRE(a->len >= 1u);
-    SSF_REQUIRE(b->len >= 1u);
-    SSF_REQUIRE(a->len <= a->cap);
-    SSF_REQUIRE(b->len <= b->cap);
-    SSF_REQUIRE(((uint32_t)a->len + (uint32_t)b->len) <= (uint32_t)SSF_BN_MAX_LIMBS);
-
+    /* No argument checks by design: SSFBNMul and _SSFBNModMulNISTFast check before calling. */
+    /* See dbc_hot_audit.txt item B before adding any back. */
     rLen = (uint16_t)(a->len + b->len);
-    SSF_REQUIRE(rLen <= r->cap);
 
     /* Is this a same-size, even-length multiply at or above the Karatsuba threshold? */
     if ((a->len == b->len) &&
@@ -1082,6 +1069,29 @@ void SSFBNMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b)
 #pragma warning(pop)
 #endif
     }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* r = a * b; Karatsuba for same-size even-length operands at threshold, else schoolbook.        */
+/* --------------------------------------------------------------------------------------------- */
+void SSFBNMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b)
+{
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(r->limbs != NULL);
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(a->limbs != NULL);
+    SSF_REQUIRE(b != NULL);
+    SSF_REQUIRE(b->limbs != NULL);
+    SSF_REQUIRE(r != a);
+    SSF_REQUIRE(r != b);
+    SSF_REQUIRE(a->len >= 1u);
+    SSF_REQUIRE(b->len >= 1u);
+    SSF_REQUIRE(a->len <= a->cap);
+    SSF_REQUIRE(b->len <= b->cap);
+    SSF_REQUIRE(((uint32_t)a->len + (uint32_t)b->len) <= (uint32_t)SSF_BN_MAX_LIMBS);
+    SSF_REQUIRE(((uint32_t)a->len + (uint32_t)b->len) <= (uint32_t)r->cap);
+
+    _SSFBNMulCore(r, a, b);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -2353,7 +2363,11 @@ static void _SSFBNModMulNISTFast(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b,
     SSFBN_DEFINE(prod, 16u);
 #endif
 
-    SSFBNMul(&prod, a, b);
+    /* Callers checked pointers, limbs and a->len == b->len == p->len; prod holds 2 * p->len. */
+    /* Only len <= cap is not yet established. See dbc_hot_audit.txt item B. */
+    SSF_REQUIRE(a->len <= a->cap);
+    SSF_REQUIRE(b->len <= b->cap);
+    _SSFBNMulCore(&prod, a, b);
 #if SSF_BN_CONFIG_MAX_BITS >= 768
     /* Is p the P-384 prime? */
     if (p == &SSF_BN_NIST_P384)

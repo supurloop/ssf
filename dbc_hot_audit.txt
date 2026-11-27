@@ -1,0 +1,146 @@
+SSF DBC CHECKS IN HOT CODE: REDUNDANT OR IMPOSSIBLE ASSERTIONS
+==============================================================
+Audit date : 2026-11-27
+Scope      : SSF_REQUIRE / SSF_ASSERT / SSF_ENSURE checks inside the functions that dominate
+             run time, and whether removing redundant or impossible ones is worth it.
+             Code at commit 6389bda (branch mqtt).
+Status     : items A, B, C implemented (see RESULTS); everything else is KEEP by measurement.
+
+SUMMARY
+-------
+  - Every hot check costs little. Removing all checks in SSF (upper bound) makes no measured
+    operation more than 0.8% faster, and it makes RSA 8.6-9.1% and P-256/P-384 0.5-3.9% SLOWER.
+  - SSFPortAssert is noreturn, so after a check passes the compiler may assume it holds
+    (e.g. "n <= SSF_BN_MAX_MOD_LIMBS" proves that uint16_t loop indices cannot wrap). Several
+    redundant checks therefore make the code faster and must stay.
+  - Three groups have a measurable cost and are removed: A (ssffe25519), B (SSFBNMul on the
+    NIST fast path), C (the AES block function on the GCM / CCM / CTR paths).
+
+METHOD
+------
+Profile : the 12 benchmark operations of bnzero_report.txt run under qemu-arm with
+          -d in_asm,exec,nochain; executed instructions summed per function. Functions with
+          >= 1% of an operation's instructions are "hot": 41 functions, 30 with checks
+          (about 190 checks).
+Removal : a scratch tree per function group in which the group's checks become
+          "(void)(x)" (the expression is still evaluated: some library asserts have side
+          effects, e.g. SSF_ASSERT(SSFBNFromBytes(...)) in ssfecdsa.c). Unit tests off.
+Counts  : arm-linux-gnueabihf-gcc 14, -mthumb -march=armv7-a+fp -Os, static; setup work
+          subtracted as in bnzero_report.txt.
+
+ALL CHECKS REMOVED (upper bound)
+--------------------------------
+  RSA-2048 sign / verify           8.6% / 9.1% SLOWER
+  P-256 / P-384                    0.5 - 3.9% SLOWER
+  X25519, Ed25519                  0.4 - 0.8% faster
+  AES-GCM/CCM, SHA-2, ChaCha20-Poly1305   0.01 - 0.7% faster
+
+PER FUNCTION GROUP (negative = faster without the checks)
+---------------------------------------------------------
+  Group                               Checks  Verdict      Effect of removal
+  A SSFFE25519Mul/Reduce/Sqr/           10    impossible   Ed25519 -0.78%, X25519 -0.44%
+    CSwap/Copy                                (callers pass locals, point fields or
+                                              already-dereferenced pointers; Sqr
+                                              repeated Mul's checks)
+  B SSFBNMul                            14    redundant    ECC -0.38 to -0.65%
+                                              (hot caller _SSFBNModMulNISTFast gets operands
+                                              its caller already checked)
+  C SSFAESKSBlockEncrypt + GCM/CCM      29    impossible   GCM -0.52%, CCM -0.23%
+    internals                                 per block (local arrays, sizeof(cb) == 16;
+                                              schedule built just before)
+    SSFBNMontMul                        15    redundant    RSA -0.51%, ECC <= -0.31%
+    _SSFBNReduceP256/P384,              18    redundant    ECC -0.17 to -0.27%
+    _SSFBNModMulNISTFast                      (+ SSF_ASSERT(e == 0): fails only if the
+                                              reduction math is wrong)
+    SHA/Poly1305 update,                23    mostly once  <= -0.24%
+    SSFCryptSecureZero                        per call
+    _SSFBNNistFold                       4    impossible   ECC -0.12 to -0.20%
+                                              (coef static, n literal 8/12, c within
+                                              [-4,6] P-256 / [-3,7] P-384, then {-1,0,1})
+    _SSFBNRawAdd/RawSub/RawCmp          11    redundant    SLOWER: ECC +1.0 to +1.9%
+    SSFBNCondCopy                        5    redundant    SLOWER: ECC +0.9 to +2.6%
+    SSFBNMontSquare                     11    redundant    SLOWER: RSA +9.5%, ECC +0.3 to +1.8%
+
+DECISIONS
+---------
+  KEEP  _SSFBNRawAdd/RawSub/RawCmp, SSFBNCondCopy, SSFBNMontSquare: redundant but they speed
+        the code up. Do not remove them in a future audit.
+  KEEP  SSF_ASSERT(e == 0) in the NIST reductions: one compare per reduction, guards a real
+        math invariant.
+  KEEP  SSFBNMontMul, the NIST reductions, _SSFBNNistFold, SHA/Poly1305 update: each saves
+        under ~0.5% and only on some operations; not worth the churn.
+  DONE  A, B, C below. Each removal site carries a comment pointing here, so the checks are
+        not added back.
+
+ITEMS DONE
+----------
+  A  ssffe25519 (internal module, header says "not a public API"): no argument checks in
+     SSFFE25519Mul, Sqr, Reduce, CSwap, Copy. Their SSF_ASSERT_TEST contract tests removed.
+     Inv, ToBytes, SetZero, SetOne keep theirs (not hot).
+  B  ssfbn: SSFBNMul's body moved to static _SSFBNMulCore. SSFBNMul keeps all 14 checks.
+     _SSFBNModMulNISTFast calls the core directly and keeps only a->len <= a->cap and
+     b->len <= b->cap, the two facts its callers do not establish.
+  C  ssfaes: new _SSFAESKSBlockEncryptNoCheck() for the ssfaes* modes. GCTR (GCM), CCM and
+     CTR call it per block; SSFAESKSBlockEncrypt keeps its checks for external callers.
+     _SSFAESGCMMulH (static, called per block by _SSFAESGCMAbsorb, which checks the same
+     pointers) drops its two NULL checks.
+
+RESULTS (A + B + C together)
+----------------------------
+Before = commit 6389bda, after = 6389bda plus A, B and C. Unit tests off.
+
+Speed: ARM instructions, method as above (setup subtracted).
+  Operation                 Before (instr)   After (instr)      Delta
+  RSA-2048 sign                 88,235,509      88,245,419     +0.01%
+  RSA-2048 verify                2,479,708       2,479,802     +0.00%
+  RSA-4096 sign                555,292,386     555,330,532     +0.01%
+  RSA-4096 verify                9,766,401       9,766,495     +0.00%
+  P-256 keygen / sign       4,418,815 / 5,313,630   4,406,426 / 5,301,183   -0.28% / -0.23%
+  P-256 verify / ECDH     16,127,287 / 15,382,281 16,067,105 / 15,323,414   -0.37% / -0.38%
+  P-384 keygen / sign     11,076,873 / 13,558,443 11,057,294 / 13,538,791   -0.18% / -0.14%
+  P-384 verify / ECDH     41,269,166 / 38,593,015 41,173,042 / 38,501,548   -0.23% / -0.24%
+  X25519 keygen / ECDH      4,224,953 / 4,224,934   4,206,338 / 4,206,254   -0.44% / -0.44%
+  Ed25519 keygen                 7,848,743       7,786,362     -0.79%
+  Ed25519 sign                  16,073,779      15,948,239     -0.78%
+  Ed25519 verify                 8,112,026       8,049,064     -0.78%
+  AES-128-GCM enc, 16 KB         2,390,123       2,375,823     -0.60%
+  AES-256-GCM enc, 16 KB         2,792,895       2,778,610     -0.51%
+  AES-128-CCM enc, 16 KB         2,627,647       2,594,892     -1.25%
+  SHA-256 / SHA-384 / HMAC, ChaCha20-Poly1305                  within +-0.01%
+
+  B gains less than its trial (-0.38 to -0.65%): _SSFBNModMulNISTFast, which used to be
+  inlined into its two callers, is now an out-of-line function, and it keeps two cap checks.
+  RSA is +0.01%: SSFBNMul is now a wrapper that calls _SSFBNMulCore.
+
+Code size: arm-none-eabi-gcc 15.2.0 -Os, MQTT/TLS client image (text + data, bytes).
+  Image                      Before     After    Delta
+  Cortex-M4                 103,088   103,104      +16
+  Cortex-M0+                112,208   112,228      +20
+  Cortex-M4, LTO             84,775    84,903     +128
+  Cortex-M0+, LTO            89,867    90,039     +172
+  Objects (M4 / M0+): ssfbn +78 / +132, ssffe25519 -86 / -112, ssfed25519 -12 / -20,
+  ssfaes +28 / +24, ssfaesgcm -12 / -12, ssfaesccm -16 / -14, ssfaesctr -8 / -12.
+
+RAM:
+  Static (data / bss)        96 / 1,052 before and after (LTO: 96 / 984). No change.
+  Peak stack (ARM, painted)  unchanged for every operation except P-256 verify and ECDH,
+                             +32 B (6,336 -> 6,368 and 6,288 -> 6,320): the out-of-line
+                             _SSFBNModMulNISTFast frame.
+
+Checks: host build and build-arm.sh 0 warnings (the same 3 POSIX-only files fail as before);
+full ./ssf suite 62/62 passed.
+
+OTHER FINDINGS (not DBC checks)
+-------------------------------
+  - SSFCryptSecureZero is 8.6% of SHA-256 and 6.2% of SHA-384 (each block wipes its 256-byte
+    message schedule), 4.2% of ChaCha20-Poly1305 and 2-3% of AES-GCM/CCM. This buys secret
+    hygiene; changing it is a security trade-off, not a cleanup.
+  - Some library asserts do work inside the check (ssfecdsa.c:189, ssfjson.c:746, ssfsm.c:277,
+    ssfnetws.c:106/613, ssflptask_opt.h). Fine while asserts are always on; any future assert
+    mode (codesize_audit.txt #2) must still evaluate the expression.
+
+TODO
+----
+  - Add an option to disable stack scrubbing (the RSA end-of-call scrub, and possibly the
+    per-call wipes of SSFCryptSecureZero), for ports that do not need secret hygiene on the
+    stack and want the speed or the peak-stack saving. Default stays on.

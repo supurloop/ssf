@@ -95,6 +95,10 @@ void SSFAESKSBlockEncrypt(const SSFAESKeySchedule_t *ks, const uint8_t *pt, size
 void SSFAESKSBlockDecrypt(const SSFAESKeySchedule_t *ks, const uint8_t *ct, size_t ctLen,
                           uint8_t *pt, size_t ptSize);
 
+/* Internal to ssfaesgcm, ssfaesccm and ssfaesctr: SSFAESKSBlockEncrypt without argument checks */
+/* (16-byte pt and ct, ks initialized). Not a public API; see dbc_hot_audit.txt item C.         */
+void _SSFAESKSBlockEncryptNoCheck(const SSFAESKeySchedule_t *ks, const uint8_t *pt, uint8_t *ct);
+
 #if SSF_CONFIG_AES_UNIT_TEST == 1
 void SSFAESUnitTest(void);
 #endif /* SSF_CONFIG_AES_UNIT_TEST */

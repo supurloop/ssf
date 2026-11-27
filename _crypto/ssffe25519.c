@@ -48,9 +48,8 @@ void SSFFE25519Mul(SSFFE25519_t *r, const SSFFE25519_t *a, const SSFFE25519_t *b
     uint8_t i;
     uint8_t j;
 
-    SSF_REQUIRE(r != NULL);
-    SSF_REQUIRE(a != NULL);
-    SSF_REQUIRE(b != NULL);
+    /* No argument checks by design: hot path, callers pass validated or local operands. */
+    /* See dbc_hot_audit.txt item A before adding any back. */
 
     /* Schoolbook multiply: a * b -> t[0..15] */
     memset(t, 0, sizeof(t));
@@ -104,9 +103,8 @@ void SSFFE25519Mul(SSFFE25519_t *r, const SSFFE25519_t *a, const SSFFE25519_t *b
 /* --------------------------------------------------------------------------------------------- */
 void SSFFE25519Sqr(SSFFE25519_t *r, const SSFFE25519_t *a)
 {
-    SSF_REQUIRE(r != NULL);
-    SSF_REQUIRE(a != NULL);
-
+    /* No argument checks by design: hot path, callers pass validated or local operands. */
+    /* See dbc_hot_audit.txt item A before adding any back. */
     SSFFE25519Mul(r, a, a);
 }
 
@@ -122,7 +120,8 @@ void SSFFE25519Reduce(SSFFE25519_t *a)
     uint32_t mask;
     uint8_t i;
 
-    SSF_REQUIRE(a != NULL);
+    /* No argument checks by design: hot path, callers pass validated or local operands. */
+    /* See dbc_hot_audit.txt item A before adding any back. */
 
     /* If bit 255 is set, clear it and add 19 (since 2^255 = 19 mod p). */
     carry = (uint64_t)(a->v[7] >> 31) * 19u;
@@ -188,8 +187,8 @@ void SSFFE25519CSwap(SSFFE25519_t *a, SSFFE25519_t *b, uint32_t swap)
     uint32_t mask = (uint32_t)(0u - (swap & 1u));
     uint8_t i;
 
-    SSF_REQUIRE(a != NULL);
-    SSF_REQUIRE(b != NULL);
+    /* No argument checks by design: hot path, callers pass validated or local operands. */
+    /* See dbc_hot_audit.txt item A before adding any back. */
 
     for (i = 0; i < 8u; i++)
     {

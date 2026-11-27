@@ -86,8 +86,8 @@ static inline void SSFFE25519SetOne(SSFFE25519_t *r)
 /* --------------------------------------------------------------------------------------------- */
 static inline void SSFFE25519Copy(SSFFE25519_t *r, const SSFFE25519_t *a)
 {
-    SSF_REQUIRE(r != NULL);
-    SSF_REQUIRE(a != NULL);
+    /* No argument checks by design: hot path, callers pass validated or local operands. */
+    /* See dbc_hot_audit.txt item A before adding any back. */
 
     memcpy(r->v, a->v, sizeof(r->v));
 }

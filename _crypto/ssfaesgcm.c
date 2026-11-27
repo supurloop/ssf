@@ -251,9 +251,8 @@ static void _SSFAESGCMMulH(_SSFAESGCMWork_t *w, const _SSFAESGCMHKey_t *hk)
     uint32_t ab_cd64[2];
     const uint32_t *x;
 
-    SSF_REQUIRE(w != NULL);
-    SSF_REQUIRE(hk != NULL);
-
+    /* No argument checks by design: only _SSFAESGCMAbsorb calls this, per block, after checking */
+    /* w and hk. See dbc_hot_audit.txt item C before adding any back. */
     x = w->x;
     _SSFAESGCMCarryless32Mult(x[0], hk->y[0], &ac64[1], &ac64[0]);
     _SSFAESGCMCarryless32Mult(x[1], hk->y[1], &bd64[1], &bd64[0]);
@@ -419,9 +418,11 @@ static void _SSFAESGCMGCTR(const uint8_t *in, size_t inLen, const SSFAESKeySched
     /* No, in place; out already holds the input. */
 
     n = inLen & (~(size_t)0xFu);
+    /* Per-block encrypts skip the argument checks: ks was built by the caller, cb and buf are */
+    /* 16-byte locals. See dbc_hot_audit.txt item C before adding any back. */
     for (i = 0; i < n; i += 16u)
     {
-        SSFAESKSBlockEncrypt(ks, cb, sizeof(cb), buf, sizeof(buf));
+        _SSFAESKSBlockEncryptNoCheck(ks, cb, buf);
         BLOCK_XOR(&out[i], buf);
         _SSFAESGCMBlockInc32(cb);
     }
@@ -430,7 +431,7 @@ static void _SSFAESGCMGCTR(const uint8_t *in, size_t inLen, const SSFAESKeySched
     if (i < inLen)
     {
         /* Yes, encrypt one more keystream block and XOR only the leftover bytes. */
-        SSFAESKSBlockEncrypt(ks, cb, sizeof(cb), buf, sizeof(buf));
+        _SSFAESKSBlockEncryptNoCheck(ks, cb, buf);
 
         for (i = 0; i < (inLen & (size_t)0xFu); i++)
         {

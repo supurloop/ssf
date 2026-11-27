@@ -146,6 +146,8 @@ other big-integer libraries.
   decryption intermediate).
 - DBC exception (timing-critical): `_SSFBNModShift` and `_SSFBNModMulCTShift` run per block or
   per arithmetic step and carry no parameter asserts; their callers validate every argument.
+  `_SSFBNMulCore` is the body of [`SSFBNMul()`](#ssfbnmul) without its checks; `SSFBNMul()`
+  and the P-256 / P-384 fast multiply call it after checking (measured in dbc_hot_audit.txt).
 
 <a id="configuration"></a>
 

@@ -4162,23 +4162,59 @@ void SSFBNUnitTest(void)
             SSF_ASSERT(SSFBNModInvSmall(&r, &a, &m) == false);
         }
 
-        /* Composite odd moduli: gcd(a, m) != 1, and a Fermat-failing coprime a (as ModInv) */
+        /* Composite odd moduli: gcd(a, m) != 1 fails; a coprime a now inverts (safegcd, R3(c)) */
+        /* where Fermat (SSFBNModInv) cannot */
         SSFBNSetUint32(&m, 15u, 1u);
         SSFBNSetUint32(&a, 5u, 1u);
         SSF_ASSERT(SSFBNModInvSmall(&r, &a, &m) == false);
         SSFBNSetUint32(&a, 2u, 1u);
-        SSF_ASSERT(SSFBNModInvSmall(&r, &a, &m) == false);
+        SSF_ASSERT(SSFBNModInvSmall(&r, &a, &m) == true);
+        SSF_ASSERT((r.len == 1u) && (r.limbs[0] == 8u));
         SSF_ASSERT(SSFBNModInv(&r, &a, &m) == false);
+
+        /* Constant-time safegcd at curve width: the fixed batch count of a 256-bit modulus */
+        SSFBNCopy(&m, &SSF_BN_NIST_P256);
+        _SSFBNUTFillBelow(&a, &m, 99u);
+        _SSFBNModInvCTBatches = 0u;
+        SSF_ASSERT(SSFBNModInvSmall(&r, &a, &m) == true);
+        SSF_ASSERT(_SSFBNModInvCTBatches == 25u);
+
+        /* Unreduced a (as SSFECPointToAffine may mi): a = m fails, a = m + 1 and all ones */
+        /* invert as their residues do */
+        for (mi = 0u; mi < 2u; mi++)
+        {
+            /* P-256, then 49 (a one-limb composite; 7 does not divide 2^32 - 1, all ones) */
+            if (mi == 0u) SSFBNCopy(&m, &SSF_BN_NIST_P256);
+            else SSFBNSetUint32(&m, 49u, 1u);
+            SSFBNCopy(&a, &m);
+            SSF_ASSERT(SSFBNModInvSmall(&r, &a, &m) == false);
+            SSF_ASSERT(SSFBNModInvCT(&r, &a, &m) == false);
+            /* Is m + 1 representable at m's width (not for P-256, whose low limb is all ones)? */
+            if (m.limbs[0] != 0xFFFFFFFFu)
+            {
+                /* Yes, a = m + 1 inverts to 1 */
+                a.limbs[0] += 1u;
+                SSF_ASSERT((SSFBNModInvSmall(&r, &a, &m) == true) && SSFBNIsOne(&r));
+                SSF_ASSERT((SSFBNModInvCT(&r, &a, &m) == true) && SSFBNIsOne(&r));
+            }
+            /* No */
+            for (k = 0u; k < m.len; k++) a.limbs[k] = 0xFFFFFFFFu;
+            SSFBNMod(&b, &a, &m);
+            SSF_ASSERT(SSFBNModInvSmall(&ref, &b, &m) == true);
+            SSF_ASSERT((SSFBNModInvSmall(&r, &a, &m) == true) && (SSFBNCmp(&r, &ref) == 0));
+            SSF_ASSERT((SSFBNModInvCT(&r, &a, &m) == true) && (SSFBNCmp(&r, &ref) == 0));
+        }
 
         /* Even modulus: no Fermat inverse, rejected as SSFBNModInv does (AUDIT BN-3) */
         SSFBNSetUint32(&m, 14u, 1u);
         SSFBNSetUint32(&a, 3u, 1u);
         SSF_ASSERT(SSFBNModInvSmall(&r, &a, &m) == false);
 
-        /* m == 1 has no Fermat exponent m - 2: rejected, as SSFBNModInv rejects it */
+        /* m == 1 (only a = 0 is below it) is rejected, as SSFBNModInv rejects it */
         SSFBNSetOne(&m, 1u);
-        SSFBNSetOne(&a, 1u);
+        SSFBNSetZero(&a, 1u);
         SSF_ASSERT(SSFBNModInvSmall(&r, &a, &m) == false);
+        SSFBNSetOne(&a, 1u);
         SSF_ASSERT(SSFBNModInv(&r, &a, &m) == false);
 
         /* Secret-derived locals are wiped before return (BN-11 scrub hook) */
@@ -4188,9 +4224,10 @@ void SSFBNUnitTest(void)
         _scrubCalls = 0u;
         _scrubDirty = 0u;
         _SSFBNScrubTestHook = _ScrubCheck;
-        /* ModInvSmall: table, acc, aR, e, ctx.mod, ctx.rr (MontInit keeps no copy, BN-09) */
+        /* ModInvSmall: f, g, d, e, m's copy; the a * r check (ModMulSmall's three, its product); */
+        /* a's copy                                                                                */
         SSF_ASSERT(SSFBNModInvSmall(&r, &a, &m) == true);
-        SSF_ASSERT(_scrubCalls == 6u);
+        SSF_ASSERT(_scrubCalls == 10u);
         /* ModMulSmall: t, ctx.mod, ctx.rr */
         _scrubCalls = 0u;
         SSFBNModMulSmall(&r, &a, &b, &m);
@@ -4321,29 +4358,34 @@ void SSFBNUnitTest(void)
         /* ModMulCT: t, ctx.mod, ctx.rr (MontInit keeps no copy, BN-09) */
         SSFBNModMulCT(&r, &a, &b, &m);
         SSF_ASSERT(_scrubCalls == 3u);
-        /* ModInvExt: u, v, x1, x2 */
+        /* ModInvExt (odd m, the safegcd): f, g, d, e and m's copy (m may be a secret prime) */
         _scrubCalls = 0u;
         SSF_ASSERT(SSFBNModInvExt(&r, &a, &m) == true);
-        SSF_ASSERT(_scrubCalls == 4u);
+        SSF_ASSERT(_scrubCalls == 5u);
         _SSFBNScrubTestHook = NULL;
         SSF_ASSERT(_scrubDirty == 0u);
     }
 
-    /* ---- RSA-PERF R3: the binary-GCD inverse shrinks u, v and halves x in one pass ---- */
+    /* ---- RSA-PERF R3(c) P4: ModInvOdd and ModInvExt with odd m run the safegcd core ---- */
     {
-        static const uint16_t widths[] = { 64u, SSF_BN_MAX_MOD_LIMBS };
+        static const uint16_t widths[] = { 1u, 2u, 3u, 16u, 64u, SSF_BN_MAX_MOD_LIMBS };
         SSFBN_DEFINE(m, SSF_BN_MAX_MOD_LIMBS);
         SSFBN_DEFINE(a, SSF_BN_MAX_MOD_LIMBS);
         SSFBN_DEFINE(r, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(ref, SSF_BN_MAX_MOD_LIMBS);
         SSFBN_DEFINE(check, SSF_BN_MAX_MOD_LIMBS);
         SSFBN_DEFINE(g, SSF_BN_MAX_MOD_LIMBS);
         SSFBN_DEFINE(k, SSF_BN_MAX_MOD_LIMBS);
         SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS);
         uint32_t s = 0x2545F491u;
+        uint32_t steps;
+        uint32_t batches;
         uint16_t w;
         uint16_t n;
         uint16_t i;
         uint16_t gl;
+        uint8_t pass;
+        bool ok;
 
         for (w = 0u; w < (uint16_t)(sizeof(widths) / sizeof(widths[0])); w++)
         {
@@ -4354,53 +4396,83 @@ void SSFBNUnitTest(void)
                 /* Yes, skip it */
                 continue;
             }
-            /* No, random odd full-width m and random a < m */
-            SSFBNSetZero(&m, n);
+            /* No, the fixed safegcd batch count of an n-limb modulus */
+            steps = ((32u * (uint32_t)n) >= 46u) ? (((49u * 32u * (uint32_t)n) + 80u) / 17u) :
+                                                   (((49u * 32u * (uint32_t)n) + 57u) / 17u);
+            batches = (steps + 29u) / 30u;
+
+            for (pass = 0u; pass < 4u; pass++)
+            {
+                /* Random odd full-width m; a random below m, 2, m - 2, or 3 (m = 3k on pass 3) */
+                SSFBNSetZero(&m, n);
+                SSFBNSetZero(&a, n);
+                for (i = 0u; i < n; i++)
+                {
+                    s ^= s << 13; s ^= s >> 17; s ^= s << 5;
+                    m.limbs[i] = s;
+                    s ^= s << 13; s ^= s >> 17; s ^= s << 5;
+                    a.limbs[i] = s;
+                }
+                m.limbs[0] |= 1u;
+                m.limbs[n - 1u] |= 0x80000000u;
+                a.limbs[n - 1u] &= 0x7FFFFFFFu;
+                if (pass == 1u) SSFBNSetUint32(&a, 2u, n);
+                if (pass == 2u) (void)SSFBNSubUint32(&a, &m, 2u);
+                if (pass == 3u)
+                {
+                    while (SSFBNModUint32(&m, 3u) != 0u) (void)SSFBNAddUint32(&m, &m, 2u);
+                    SSFBNSetUint32(&a, 3u, n);
+                }
+
+                /* The extended-Euclid oracle (independent of safegcd) */
+                ok = _SSFBNModInvEuclidTest(&ref, &a, &m);
+                SSF_ASSERT(((pass != 1u) && (pass != 2u)) || ok);
+                SSF_ASSERT((pass != 3u) || (ok == false));
+
+                /* ModInvOdd: the safegcd's fixed batch count, the oracle's answer */
+                _SSFBNModInvCTBatches = 0u;
+                SSF_ASSERT(SSFBNModInvOdd(&r, &a, &m) == ok);
+                SSF_ASSERT(_SSFBNModInvCTBatches == batches);
+                SSF_ASSERT((!ok) || ((r.len == n) && (SSFBNCmp(&r, &ref) == 0)));
+
+                /* ModInvExt, odd m: the same, never the slow Euclid path */
+                _SSFBNModInvCTBatches = 0u;
+                _SSFBNSlowPathCalls = 0u;
+                SSF_ASSERT(SSFBNModInvExt(&r, &a, &m) == ok);
+                SSF_ASSERT(_SSFBNModInvCTBatches == batches);
+                SSF_ASSERT(_SSFBNSlowPathCalls == 0u);
+                SSF_ASSERT((!ok) || ((r.len == n) && (SSFBNCmp(&r, &ref) == 0)));
+                /* Is a invertible? */
+                if (ok)
+                {
+                    /* Yes, a * r == 1 mod m */
+                    SSFBNModMul(&check, &a, &r, &m);
+                    SSF_ASSERT(SSFBNIsOne(&check));
+                }
+                /* No */
+            }
+
+            /* ModInvExt, odd m, unreduced a = all ones (>= m unless m is all ones): a mod m */
+            for (i = 0u; i < n; i++) a.limbs[i] = 0xFFFFFFFFu;
+            a.len = n;
+            SSFBNMod(&check, &a, &m);
+            ok = _SSFBNModInvEuclidTest(&ref, &check, &m);
+            _SSFBNModInvCTBatches = 0u;
+            _SSFBNSlowPathCalls = 0u;
+            SSF_ASSERT(SSFBNModInvExt(&r, &a, &m) == ok);
+            SSF_ASSERT(_SSFBNModInvCTBatches == batches);
+            SSF_ASSERT(_SSFBNSlowPathCalls == 0u);
+            SSF_ASSERT((!ok) || ((r.len == n) && (SSFBNCmp(&r, &ref) == 0)));
+
+            /* a = 0 is never invertible, at the same batch count */
             SSFBNSetZero(&a, n);
-            for (i = 0u; i < n; i++)
-            {
-                s ^= s << 13; s ^= s >> 17; s ^= s << 5;
-                m.limbs[i] = s;
-                s ^= s << 13; s ^= s >> 17; s ^= s << 5;
-                a.limbs[i] = s;
-            }
-            m.limbs[0] |= 1u;
-            m.limbs[n - 1u] |= 0x80000000u;
-            a.limbs[n - 1u] &= 0x7FFFFFFFu;
-
-            _SSFBNModInvUVSteps = 0u;
-            _SSFBNModInvUVLimbs = 0u;
-            _SSFBNHalveModCalls = 0u;
-            _SSFBNHalveModPasses = 0u;
-            /* Does a have an inverse? */
-            if (SSFBNModInvOdd(&r, &a, &m))
-            {
-                /* Yes, a * r == 1 mod m */
-                SSFBNModMul(&check, &a, &r, &m);
-                SSF_ASSERT(SSFBNIsOne(&check));
-            }
-            /* No, the counts below hold either way */
-
-            /* u and v lose limbs as they shrink: average working length below 0.6 * n */
-            SSF_ASSERT(_SSFBNModInvUVSteps > 0u);
-            SSF_ASSERT(((uint64_t)_SSFBNModInvUVLimbs * 10u) <
-                       ((uint64_t)_SSFBNModInvUVSteps * (uint64_t)n * 6u));
-            /* Every halving of x1 or x2 is one pass, odd x included */
-            SSF_ASSERT(_SSFBNHalveModCalls > 0u);
-            SSF_ASSERT(_SSFBNHalveModPasses == _SSFBNHalveModCalls);
-
-            /* a = 2 (one limb in a full-width m) and a = m - 2 both invert (m is odd) */
-            SSFBNSetUint32(&a, 2u, n);
-            SSF_ASSERT(SSFBNModInvOdd(&r, &a, &m) == true);
-            SSFBNModMul(&check, &a, &r, &m);
-            SSF_ASSERT(SSFBNIsOne(&check));
-            (void)SSFBNSubUint32(&a, &m, 2u);
-            SSF_ASSERT(SSFBNModInvOdd(&r, &a, &m) == true);
-            SSFBNModMul(&check, &a, &r, &m);
-            SSF_ASSERT(SSFBNIsOne(&check));
+            _SSFBNModInvCTBatches = 0u;
+            SSF_ASSERT(SSFBNModInvOdd(&r, &a, &m) == false);
+            SSF_ASSERT(SSFBNModInvExt(&r, &a, &m) == false);
+            SSF_ASSERT(_SSFBNModInvCTBatches == (2u * batches));
         }
 
-        /* gcd(a, m) of 2 and 3 limbs, and a dividing m: no inverse, and the loop still ends */
+        /* gcd(a, m) of 2 and 3 limbs, and a dividing m: no inverse */
         for (gl = 2u; gl <= 3u; gl++)
         {
             n = 16u;
@@ -4443,6 +4515,280 @@ void SSFBNUnitTest(void)
             SSF_ASSERT(SSFBNModInvOdd(&r, &a, &m) == false);
             SSF_ASSERT(SSFBNModInvExt(&r, &a, &m) == false);
         }
+    }
+
+    /* ---- RSA-PERF R3(c) P1: SSFBNModInvCT (constant-time safegcd) ---- */
+    {
+        static const uint16_t widths[] = { 1u, 2u, 3u, 5u, 8u, 9u, 12u, 16u, 32u, 33u, 64u,
+                                           SSF_BN_MAX_MOD_LIMBS };
+        SSFBN_DEFINE(m, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(a, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(r, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(ref, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(check, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(g, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(k, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS);
+        uint32_t s = 0x6A09E667u;
+        uint32_t steps;
+        uint32_t batches;
+        uint16_t w;
+        uint16_t n;
+        uint16_t i;
+        uint16_t pass;
+        uint16_t gl;
+        bool ok;
+
+        /* d and e stay in (-2m, m) after every batch, whatever the inputs (checked throughout) */
+        _SSFBNModInvCTRangeErrs = 0u;
+        for (w = 0u; w < (uint16_t)(sizeof(widths) / sizeof(widths[0])); w++)
+        {
+            n = widths[w];
+            /* Is this width beyond the configured maximum? */
+            if (n > SSF_BN_MAX_MOD_LIMBS)
+            {
+                /* Yes, skip it */
+                continue;
+            }
+            /* No, the fixed batch count: ceil(steps / 30), steps from Bernstein-Yang Thm 11.2 */
+            steps = ((32u * (uint32_t)n) >= 46u) ? (((49u * 32u * (uint32_t)n) + 80u) / 17u) :
+                                                   (((49u * 32u * (uint32_t)n) + 57u) / 17u);
+            batches = (steps + 29u) / 30u;
+
+            for (pass = 0u; pass < 8u; pass++)
+            {
+                /* Odd m: random full width, all ones, 2^(32n-1) + 1, or random with a small top */
+                SSFBNSetZero(&m, n);
+                SSFBNSetZero(&a, n);
+                for (i = 0u; i < n; i++)
+                {
+                    s ^= s << 13; s ^= s >> 17; s ^= s << 5;
+                    m.limbs[i] = s;
+                    s ^= s << 13; s ^= s >> 17; s ^= s << 5;
+                    a.limbs[i] = s;
+                }
+                m.limbs[n - 1u] |= 0x80000000u;
+                if (pass == 1u) for (i = 0u; i < n; i++) m.limbs[i] = 0xFFFFFFFFu;
+                if (pass == 2u)
+                {
+                    SSFBNSetZero(&m, n);
+                    m.limbs[n - 1u] = 0x80000000u;
+                }
+                if (pass == 3u) m.limbs[n - 1u] = (m.limbs[n - 1u] & 0xFFu) | 1u;
+                m.limbs[0] |= 1u;
+                /* Is m one (one limb, top only), which has no meaningful inverse? */
+                if (SSFBNIsOne(&m))
+                {
+                    /* Yes, it is rejected */
+                    SSFBNSetZero(&a, n);
+                    SSF_ASSERT(SSFBNModInvCT(&r, &a, &m) == false);
+                    continue;
+                }
+                /* No, a below m: random, 1, m - 1, m - 2, 2^(32n-1) mod m, all ones mod m */
+                a.limbs[n - 1u] = (SSFBNLimb_t)(a.limbs[n - 1u] % m.limbs[n - 1u]);
+                if (pass == 4u) SSFBNSetOne(&a, n);
+                if (pass == 5u) (void)SSFBNSubUint32(&a, &m, 1u);
+                if ((pass == 6u) && (SSFBNCmpUint32(&m, 2u) > 0)) (void)SSFBNSubUint32(&a, &m, 2u);
+                if (pass == 7u)
+                {
+                    SSFBNSetZero(&check, n);
+                    for (i = 0u; i < n; i++) check.limbs[i] = 0xFFFFFFFFu;
+                    SSFBNMod(&a, &check, &m);
+                }
+
+                /* Same answer as extended Euclid; fixed batch count whatever a is */
+                _SSFBNModInvCTBatches = 0u;
+                ok = SSFBNModInvCT(&r, &a, &m);
+                SSF_ASSERT(_SSFBNModInvCTBatches == batches);
+                /* Is a zero? */
+                if (SSFBNIsZero(&a))
+                {
+                    /* Yes, no inverse */
+                    SSF_ASSERT(ok == false);
+                    continue;
+                }
+                /* No */
+                SSF_ASSERT(_SSFBNModInvEuclidTest(&ref, &a, &m) == ok);
+                SSF_ASSERT(((pass != 4u) && (pass != 5u)) || ok);
+                /* Is a invertible? */
+                if (ok)
+                {
+                    /* Yes, r == extended Euclid's answer, r < m, a * r == 1 mod m */
+                    SSF_ASSERT((r.len == n) && (SSFBNCmp(&r, &ref) == 0));
+                    SSF_ASSERT(SSFBNCmp(&r, &m) < 0);
+                    SSFBNModMul(&check, &a, &r, &m);
+                    SSF_ASSERT(SSFBNIsOne(&check));
+                    /* In place: r aliases a */
+                    SSFBNCopy(&check, &a);
+                    SSF_ASSERT(SSFBNModInvCT(&check, &check, &m) == true);
+                    SSF_ASSERT(SSFBNCmp(&check, &ref) == 0);
+                }
+                /* a = 0 has no inverse; same batch count */
+                SSFBNSetZero(&a, n);
+                _SSFBNModInvCTBatches = 0u;
+                SSF_ASSERT(SSFBNModInvCT(&r, &a, &m) == false);
+                SSF_ASSERT(_SSFBNModInvCTBatches == batches);
+            }
+        }
+
+        /* Small known values: 3^-1 mod 7 = 5, 2^-1 mod 3 = 2, 5^-1 mod 21 = 17, 3 mod 21 none */
+        SSFBNSetUint32(&m, 7u, 1u);
+        SSFBNSetUint32(&a, 3u, 1u);
+        SSF_ASSERT((SSFBNModInvCT(&r, &a, &m) == true) && (r.len == 1u) && (r.limbs[0] == 5u));
+        SSFBNSetUint32(&m, 3u, 1u);
+        SSFBNSetUint32(&a, 2u, 1u);
+        SSF_ASSERT((SSFBNModInvCT(&r, &a, &m) == true) && (r.limbs[0] == 2u));
+        SSFBNSetUint32(&a, 1u, 1u);
+        SSF_ASSERT((SSFBNModInvCT(&r, &a, &m) == true) && (r.limbs[0] == 1u));
+        SSFBNSetUint32(&m, 21u, 1u);
+        SSFBNSetUint32(&a, 5u, 1u);
+        SSF_ASSERT((SSFBNModInvCT(&r, &a, &m) == true) && (r.limbs[0] == 17u));
+        SSFBNSetUint32(&a, 3u, 1u);
+        SSF_ASSERT(SSFBNModInvCT(&r, &a, &m) == false);
+
+        /* Against the Fermat inverse on the NIST primes */
+        {
+            static const SSFBN_t *const primes[] = {
+                &SSF_BN_NIST_P256,
+#if SSF_BN_CONFIG_MAX_BITS >= 768
+                &SSF_BN_NIST_P384,
+#endif
+            };
+
+            for (pass = 0u; pass < (uint16_t)(sizeof(primes) / sizeof(primes[0])); pass++)
+            {
+                SSFBNCopy(&m, primes[pass]);
+                for (i = 0u; i < 20u; i++)
+                {
+                    _SSFBNUTFillBelow(&a, &m, (uint32_t)(i + 1u) * 0x9E3779B9u);
+                    if (SSFBNIsZero(&a)) SSFBNSetOne(&a, m.len);
+                    SSF_ASSERT(SSFBNModInvCT(&r, &a, &m) == true);
+                    SSF_ASSERT(SSFBNModInv(&ref, &a, &m) == true);
+                    SSF_ASSERT(SSFBNCmp(&r, &ref) == 0);
+                }
+            }
+        }
+
+        /* gcd(a, m) of 1 to 3 limbs, and a dividing m: no inverse */
+        for (gl = 1u; gl <= 3u; gl++)
+        {
+            n = 16u;
+            if (n > SSF_BN_MAX_MOD_LIMBS) break;
+            SSFBNSetZero(&g, gl);
+            SSFBNSetZero(&k, (uint16_t)(n - gl));
+            for (i = 0u; i < gl; i++)
+            {
+                s ^= s << 13; s ^= s >> 17; s ^= s << 5;
+                g.limbs[i] = s;
+            }
+            for (i = 0u; i < (uint16_t)(n - gl); i++)
+            {
+                s ^= s << 13; s ^= s >> 17; s ^= s << 5;
+                k.limbs[i] = s;
+            }
+            g.limbs[0] |= 1u;
+            g.limbs[gl - 1u] |= 0x80000000u;
+            k.limbs[0] |= 1u;
+            k.limbs[n - gl - 1u] |= 0x80000000u;
+            SSFBNMul(&prod, &g, &k);
+            SSFBNSetZero(&m, n);
+            memcpy(m.limbs, prod.limbs, (size_t)n * sizeof(SSFBNLimb_t));
+            k.len = (uint16_t)(n - gl - 1u);
+            k.limbs[k.len - 1u] |= 1u;
+            SSFBNMul(&prod, &g, &k);
+            SSFBNSetZero(&a, n);
+            memcpy(a.limbs, prod.limbs, (size_t)prod.len * sizeof(SSFBNLimb_t));
+            SSF_ASSERT(SSFBNModInvCT(&r, &a, &m) == false);
+            SSFBNSetZero(&a, n);
+            memcpy(a.limbs, g.limbs, (size_t)gl * sizeof(SSFBNLimb_t));
+            SSF_ASSERT(SSFBNModInvCT(&r, &a, &m) == false);
+        }
+
+        SSF_ASSERT(_SSFBNModInvCTRangeErrs == 0u);
+
+        /* The d, e update keeps (-2m, m) at its extremes: d, e at -2m + 1, -m, -1, 0, 1, m - 1 */
+        /* against matrices with |u| + |v| = |q| + |r| = 2^30, the most a batch can produce */
+        {
+            static const int32_t kc[6][2] = { { -2, 1 }, { -1, 0 }, { 0, -1 }, { 0, 0 },
+                                              { 0, 1 }, { 1, -1 } };
+            static const int32_t rows[8][2] = {
+                { 0x40000000, 0 }, { -0x40000000, 0 }, { 0, 0x40000000 }, { 0, -0x40000000 },
+                { 0x20000000, 0x20000000 }, { 0x20000000, -0x20000000 },
+                { -0x20000000, 0x20000000 }, { -0x3FFFFFFF, -1 } };
+            int32_t uvqr[4];
+            uint16_t di;
+            uint16_t ei;
+            uint16_t ri;
+            uint16_t qi;
+
+            for (pass = 0u; pass < 3u; pass++)
+            {
+                /* P-256, an all-ones modulus and one with a small top limb */
+                n = (pass == 0u) ? 8u : 4u;
+                SSFBNCopy(&m, &SSF_BN_NIST_P256);
+                /* Is this the all-ones pass? */
+                if (pass == 1u)
+                {
+                    /* Yes */
+                    SSFBNSetZero(&m, n);
+                    for (i = 0u; i < n; i++) m.limbs[i] = 0xFFFFFFFFu;
+                }
+                /* No, is this the small-top pass? */
+                else if (pass == 2u)
+                {
+                    /* Yes, four limbs of P-256 with a top limb of 3 */
+                    m.len = n;
+                    m.limbs[n - 1u] = 3u;
+                }
+                /* No, P-256 as is */
+                for (di = 0u; di < 6u; di++)
+                {
+                    for (ei = 0u; ei < 6u; ei++)
+                    {
+                        for (ri = 0u; ri < 8u; ri++)
+                        {
+                            for (qi = 0u; qi < 8u; qi++)
+                            {
+                                uvqr[0] = rows[ri][0];
+                                uvqr[1] = rows[ri][1];
+                                uvqr[2] = rows[qi][0];
+                                uvqr[3] = rows[qi][1];
+                                SSF_ASSERT(_SSFBNModInvCTUpdateDETest(&m, kc[di][0], kc[di][1],
+                                                                      kc[ei][0], kc[ei][1],
+                                                                      uvqr) == 0u);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        /* Every working array is wiped (BN-11 scrub hook): f, g, d, e and m's copy */
+        SSFBNCopy(&m, &SSF_BN_NIST_P256);
+        _SSFBNUTFillBelow(&a, &m, 77u);
+        _scrubCalls = 0u;
+        _scrubDirty = 0u;
+        _SSFBNScrubTestHook = _ScrubCheck;
+        SSF_ASSERT(SSFBNModInvCT(&r, &a, &m) == true);
+        SSF_ASSERT(_scrubCalls == 5u);
+        _SSFBNScrubTestHook = NULL;
+        SSF_ASSERT(_scrubDirty == 0u);
+
+        /* a >= m acts as its residue (11: none; 14 = 3 mod 11: 4). Contracts: even m, */
+        /* a and m of different lengths, NULL arguments */
+        SSFBNSetUint32(&m, 10u, 1u);
+        SSFBNSetUint32(&a, 3u, 1u);
+        SSF_ASSERT_TEST(SSFBNModInvCT(&r, &a, &m));
+        SSFBNSetUint32(&m, 11u, 1u);
+        SSFBNSetUint32(&a, 11u, 1u);
+        SSF_ASSERT(SSFBNModInvCT(&r, &a, &m) == false);
+        SSFBNSetUint32(&a, 14u, 1u);
+        SSF_ASSERT((SSFBNModInvCT(&r, &a, &m) == true) && (r.limbs[0] == 4u));
+        SSFBNSetUint32(&a, 3u, 2u);
+        SSF_ASSERT_TEST(SSFBNModInvCT(&r, &a, &m));
+        SSF_ASSERT_TEST(SSFBNModInvCT(NULL, &a, &m));
+        SSF_ASSERT_TEST(SSFBNModInvCT(&r, NULL, &m));
+        SSF_ASSERT_TEST(SSFBNModInvCT(&r, &a, NULL));
     }
 
     /* ---- OPTIMIZE BN-O8: ModMulNIST recognises its own primes by pointer; a copy works ---- */
@@ -5512,7 +5858,7 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(_scrubCalls == 0u);
     }
 
-    /* ---- BN-07: SSFBNModInvOdd equals SSFBNModInvExt on odd moduli; its preconditions ---- */
+    /* ---- BN-07: SSFBNModInvOdd equals extended Euclid on odd moduli; its preconditions ---- */
     {
         SSFBN_DEFINE(m, SSF_BN_MAX_MOD_LIMBS);
         SSFBN_DEFINE(a, SSF_BN_MAX_MOD_LIMBS);
@@ -5548,14 +5894,14 @@ void SSFBNUnitTest(void)
                 if (pass == 1u) SSFBNSetOne(&a, n);
                 if (pass == 2u) { SSFBNCopy(&a, &m); a.limbs[0] -= 1u; }
 
-                /* Same answer as SSFBNModInvExt (1 and m - 1 always invert); a * r == 1 mod m */
+                /* Same answer as extended Euclid (1 and m - 1 always invert); a * r == 1 mod m */
                 ok = SSFBNModInvOdd(&rOdd, &a, &m);
-                SSF_ASSERT(SSFBNModInvExt(&rExt, &a, &m) == ok);
+                SSF_ASSERT(_SSFBNModInvEuclidTest(&rExt, &a, &m) == ok);
                 SSF_ASSERT(((pass != 1u) && (pass != 2u)) || ok);
                 /* Is a invertible? */
                 if (ok)
                 {
-                    /* Yes, check it against ModInvExt and a * r == 1 */
+                    /* Yes, check it against extended Euclid and a * r == 1 */
                     SSF_ASSERT((rOdd.len == n) && (SSFBNCmp(&rOdd, &rExt) == 0));
                     SSFBNModMul(&check, &a, &rOdd, &m);
                     SSF_ASSERT(SSFBNIsOne(&check));
@@ -6112,7 +6458,7 @@ void SSFBNUnitTest(void)
                        (unsigned long long)(t1 - t0));
             }
 
-            /* --- ModInv (Fermat) vs ModInvExt (binary EEA, non-CT) at P-256 size */
+            /* --- ModInv (Fermat) vs ModInvExt (safegcd, odd m) at P-256 size */
             /* Is this the P-256 width? */
             if (n == 8u)
             {
@@ -6134,7 +6480,7 @@ void SSFBNUnitTest(void)
                     (void)SSFBNModInvExt(&rInv, &a, &mod);
                 }
                 t1 = SSFPortGetTick64();
-                SSF_UT_PRINTF("  ModInvExt  %s %u iter: %llu ms (binary EEA)\n",
+                SSF_UT_PRINTF("  ModInvExt  %s %u iter: %llu ms (safegcd)\n",
                        bench[bi].label, 2000u, (unsigned long long)(t1 - t0));
             }
 

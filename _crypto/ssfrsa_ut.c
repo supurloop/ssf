@@ -2648,33 +2648,36 @@ void SSFRSAUnitTest(void)
         size_t privKeyDerLen;
         size_t pubKeyDerLen;
         size_t sigLen;
+        uint32_t signs;
 
         SSFSHA256((const uint8_t *)"slow path", 9, hash, sizeof(hash));
         SSF_ASSERT(SSFRSAKeyGen(2048u, privKeyDer, sizeof(privKeyDer), &privKeyDerLen,
                                 pubKeyDer, sizeof(pubKeyDer), &pubKeyDerLen) == true);
         _SSFBNSlowPathCalls = 0u;
         _SSFBNModShiftCalls = 0u;
-        _SSFBNModInvBinaryCalls = 0u;
-        _SSFBNModInvBinaryMinLen = 0xFFFFu;
+        _SSFBNModInvCTBatches = 0u;
+        signs = 0u;
 #if SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1
         SSF_ASSERT(SSFRSASignPKCS1(privKeyDer, privKeyDerLen, SSF_RSA_HASH_SHA256, hash,
                                    sizeof(hash), sig, sizeof(sig), &sigLen) == true);
+        signs++;
         SSF_ASSERT(SSFRSAVerifyPKCS1(pubKeyDer, pubKeyDerLen, SSF_RSA_HASH_SHA256, hash,
                                      sizeof(hash), sig, sigLen) == true);
 #endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1 */
 #if SSF_RSA_CONFIG_ENABLE_PSS == 1
         SSF_ASSERT(SSFRSASignPSS(privKeyDer, privKeyDerLen, SSF_RSA_HASH_SHA256, hash,
                                  sizeof(hash), sig, sizeof(sig), &sigLen) == true);
+        signs++;
 #endif /* SSF_RSA_CONFIG_ENABLE_PSS */
         SSF_ASSERT(_SSFBNSlowPathCalls == 0u);
 
         /* The CRT split cB mod p, cB mod q is constant-time Montgomery, not shift-subtract */
         SSF_ASSERT(_SSFBNModShiftCalls == 0u);
 
-        /* The variable-time binary-GCD inverse runs only for the blind r mod the public n (full */
-        /* width), never on a secret prime (half width): its timing must not depend on p or q */
-        SSF_ASSERT(_SSFBNModInvBinaryCalls >= 1u);
-        SSF_ASSERT(_SSFBNModInvBinaryMinLen == 64u);
+        /* Signing has no variable-time step: the blinding inverse r^-1 mod n is the constant- */
+        /* time safegcd at the width of n, 197 batches for 2048 bits, once per sign (a half-  */
+        /* width prime would take 99) (R3(c) P3; P4 removed the binary GCD)                 */
+        SSF_ASSERT(_SSFBNModInvCTBatches == (197u * signs));
     }
 #endif /* SSF_CONFIG_BN_UNIT_TEST && SSF_RSA_CONFIG_ENABLE_2048 && KEYGEN */
 #endif /* SSF_RSA_ANY_ENABLED */

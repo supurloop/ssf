@@ -267,6 +267,7 @@ void SSFBNDivMod(SSFBN_t *q, SSFBN_t *rem, const SSFBN_t *a, const SSFBN_t *b);
 void SSFBNGcd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b);
 bool SSFBNModInvExt(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
 bool SSFBNModInvOdd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
+bool SSFBNModInvCT(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Montgomery multiplication                                                                     */
@@ -370,17 +371,19 @@ extern uint32_t _SSFBNSlowPathCalls;
 /* Test-only count of SSFBNMod's variable-time shift-and-subtract reductions */
 extern uint32_t _SSFBNModShiftCalls;
 
-/* Test-only counts of the binary-GCD inverse's u / v operations and the limbs they touch */
-extern uint32_t _SSFBNModInvUVSteps;
-extern uint32_t _SSFBNModInvUVLimbs;
+/* Test-only count of SSFBNModInvCT's 30-divstep batches (fixed by the modulus width) */
+extern uint32_t _SSFBNModInvCTBatches;
 
-/* Test-only counts of _SSFBNHalveMod calls and the passes over x they make */
-extern uint32_t _SSFBNHalveModCalls;
-extern uint32_t _SSFBNHalveModPasses;
+/* Test-only count of SSFBNModInvCT batches that left d or e outside (-2m, m) */
+extern uint32_t _SSFBNModInvCTRangeErrs;
 
-/* Test-only count of binary-GCD inverses and the narrowest modulus one ran on (in limbs) */
-extern uint32_t _SSFBNModInvBinaryCalls;
-extern uint16_t _SSFBNModInvBinaryMinLen;
+/* Test-only: r = a^-1 mod m by extended Euclid (any m), the oracle for the safegcd tests */
+bool _SSFBNModInvEuclidTest(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
+
+/* Test-only: one SSFBNModInvCT d, e update from d = kd * m + cd, e = ke * m + ce and matrix */
+/* uvqr = { u, v, q, r }; returns 1 if the result leaves (-2m, m), else 0                    */
+uint32_t _SSFBNModInvCTUpdateDETest(const SSFBN_t *m, int32_t kd, int32_t cd, int32_t ke,
+                                    int32_t ce, const int32_t uvqr[4]);
 #endif /* SSF_CONFIG_BN_UNIT_TEST */
 
 #ifdef __cplusplus

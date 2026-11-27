@@ -20,7 +20,7 @@ extern "C" {
 
 /* Define the maximum JSON string length to be parsed in bytes; 1..SIZE_MAX / 2, <= 2^31 - 1. */
 #ifndef SSF_JSON_CONFIG_MAX_IN_LEN
-#define SSF_JSON_CONFIG_MAX_IN_LEN  (2047u)
+#define SSF_JSON_CONFIG_MAX_IN_LEN  (4095u)
 #endif
 #if (SSF_JSON_CONFIG_MAX_IN_LEN < 1u) || (SSF_JSON_CONFIG_MAX_IN_LEN > (SIZE_MAX / 2u)) || \
     (SSF_JSON_CONFIG_MAX_IN_LEN > 0x7FFFFFFFul)

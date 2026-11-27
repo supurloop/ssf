@@ -50,6 +50,7 @@
 #include "ssfhttphdr.h"
 #include "ssfmqttpkt.h"
 #include "ssfmqttc.h"
+#include "ssfawsprov.h"
 #include "ssfnetsock.h"
 #include "ssfnetws.h"
 #include "ssftlsc.h"
@@ -274,6 +275,9 @@ SSFUnitTest_t unitTests[] =
 #endif /* SSF_CONFIG_SM_UNIT_TEST */
 
     /* _net */
+#if SSF_CONFIG_AWSPROV_UNIT_TEST == 1
+    { "ssfawsprov", "AWS IoT Fleet Provisioning", SSFAWSProvUnitTest },
+#endif /* SSF_CONFIG_AWSPROV_UNIT_TEST */
 #if SSF_CONFIG_HTTPHDR_UNIT_TEST == 1
     { "ssfhttphdr", "HTTP/1.1 Message Head Codec", SSFHTTPHdrUnitTest },
 #endif /* SSF_CONFIG_HTTPHDR_UNIT_TEST */

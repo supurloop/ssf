@@ -13,15 +13,17 @@
 #   fb256off     SSF_EC_CONFIG_FIXED_BASE_P256 0
 #   fb384off     SSF_EC_CONFIG_FIXED_BASE_P384 0
 #
-# JSON parser limits (ssfjson), raised from their defaults:
+# JSON parser limits (ssfjson), changed from their defaults:
 #
-#   json4k       SSF_JSON_CONFIG_MAX_IN_LEN 4095 (what ssfawsprov needs)
+#   json2k       SSF_JSON_CONFIG_MAX_IN_LEN 2047 with SSF_AWSPROV_CONFIG_RX_SIZE 2048 (the limit
+#                before ssfawsprov; RX_SIZE - 1 must not exceed it)
 #   jsonbig      SSF_JSON_CONFIG_MAX_IN_LEN 65534
 #   jsondepth8   SSF_JSON_CONFIG_MAX_IN_DEPTH 8
 #
 # MQTT client string limits (ssfmqttc), these rows also run the ssfmqttc / ssfmqttpkt tests:
 #
-#   mqttcsmall   the pre-AWSPROV-G05 defaults: client id, host, user name, password 64; topic 128
+#   mqttcsmall   the pre-AWSPROV-G05 defaults: client id, host, user name, password 64; topic 128;
+#                SSF_AWSPROV_CONFIG_THING_NAME_SIZE 64 to fit the client id
 #   mqttcbig     client id, topic, user name 65536; password 65535 (the protocol maximums;
 #                no inbound topic is too long, so the too-long-topic tests are skipped)
 #   mqttctopic64k topic 65535, the largest at which an inbound topic can still be too long
@@ -39,8 +41,8 @@
 #
 # Each variant is exported from the working tree (including uncommitted edits and new
 # untracked files) into its own directory under build-cov/variants/, so the working tree is
-# never modified. Only the RSA/EC-dependent and JSON unit tests run (and the MQTT tests in the
-# mqttc rows), one process each, so a full sweep takes a few minutes on a multi-core host.
+# never modified. Only the RSA/EC-dependent, JSON and ssfawsprov unit tests run (and the MQTT
+# tests in the mqttc rows), one process each, so a full sweep takes a few minutes on a multi-core host.
 #
 # Usage:  ./tools/config-matrix/features.sh [variant ...]   (default: all)
 #
@@ -52,7 +54,7 @@ set -u
 script_dir=$(cd -- "$(dirname -- "$0")" && pwd)
 R=$(cd -- "$script_dir/../.." && pwd)
 V=$R/build-cov/variants
-TESTS="SSFRSAUnitTest SSFECUnitTest SSFECDSAUnitTest SSFX509UnitTest SSFCMSUnitTest SSFTLSUnitTest SSFPKeyUnitTest SSFTLSCUnitTest SSFJsonUnitTest SSFGObjUnitTest"
+TESTS="SSFRSAUnitTest SSFECUnitTest SSFECDSAUnitTest SSFX509UnitTest SSFCMSUnitTest SSFTLSUnitTest SSFPKeyUnitTest SSFTLSCUnitTest SSFJsonUnitTest SSFGObjUnitTest SSFAWSProvUnitTest"
 MQTTC_TESTS="SSFMQTTPktUnitTest SSFMQTTCUnitTest"
 
 case "$(uname -s)" in
@@ -72,10 +74,10 @@ p384off|SSF_EC_CONFIG_ENABLE_P384=0
 signoff|SSF_ECDSA_CONFIG_ENABLE_SIGN=0
 fb256off|SSF_EC_CONFIG_FIXED_BASE_P256=0
 fb384off|SSF_EC_CONFIG_FIXED_BASE_P384=0
-json4k|SSF_JSON_CONFIG_MAX_IN_LEN=4095
+json2k|SSF_JSON_CONFIG_MAX_IN_LEN=2047 SSF_AWSPROV_CONFIG_RX_SIZE=2048
 jsonbig|SSF_JSON_CONFIG_MAX_IN_LEN=65534
 jsondepth8|SSF_JSON_CONFIG_MAX_IN_DEPTH=8
-mqttcsmall|SSF_MQTTC_CONFIG_MAX_CLIENT_ID_SIZE=64 SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE=128 SSF_MQTTC_CONFIG_MAX_HOST_SIZE=64 SSF_MQTTC_CONFIG_MAX_USERNAME_SIZE=64 SSF_MQTTC_CONFIG_MAX_PASSWORD_LEN=64
+mqttcsmall|SSF_AWSPROV_CONFIG_THING_NAME_SIZE=64 SSF_MQTTC_CONFIG_MAX_CLIENT_ID_SIZE=64 SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE=128 SSF_MQTTC_CONFIG_MAX_HOST_SIZE=64 SSF_MQTTC_CONFIG_MAX_USERNAME_SIZE=64 SSF_MQTTC_CONFIG_MAX_PASSWORD_LEN=64
 mqttctopic64k|SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE=65535
 mqttcbig|SSF_MQTTC_CONFIG_MAX_CLIENT_ID_SIZE=65536 SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE=65536 SSF_MQTTC_CONFIG_MAX_USERNAME_SIZE=65536 SSF_MQTTC_CONFIG_MAX_PASSWORD_LEN=65535
 ecc-both|$RSA_OFF
@@ -98,6 +100,7 @@ _opt_header() {
         SSF_CRYPT_CONFIG_*) echo _opt/ssfcrypt_opt.h ;;
         SSF_JSON_CONFIG_*)  echo _opt/ssfjson_opt.h ;;
         SSF_MQTTC_CONFIG_*) echo _opt/ssfmqttc_opt.h ;;
+        SSF_AWSPROV_CONFIG_*) echo _opt/ssfawsprov_opt.h ;;
         *)                  echo "" ;;
     esac
 }

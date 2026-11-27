@@ -59,14 +59,14 @@ Options live in [`_opt/ssfjson_opt.h`](../_opt/ssfjson_opt.h) (aggregated into t
 | Option | Default | Description |
 |--------|---------|-------------|
 | `SSF_JSON_CONFIG_MAX_IN_DEPTH` | `4` | Maximum nesting depth for the parser, `1` to `254`; each `{` or `[` counts as one level, anywhere in the input; deeper input is invalid. Overridable (see below). |
-| `SSF_JSON_CONFIG_MAX_IN_LEN` | `2047` | Maximum JSON string length accepted by the parser in bytes, `1` to `SIZE_MAX / 2` and at most `2^31 - 1` (so at most `32767` where `size_t` is 16 bits). Input one byte longer is invalid. Overridable (see below). |
+| `SSF_JSON_CONFIG_MAX_IN_LEN` | `4095` | Maximum JSON string length accepted by the parser in bytes, `1` to `SIZE_MAX / 2` and at most `2^31 - 1` (so at most `32767` where `size_t` is 16 bits). Input one byte longer is invalid. Overridable (see below). |
 | `SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE` | `0` | `1` to compile `SSFJsonGetDouble()`; `0` to omit floating-point parsing |
 | `SSF_JSON_CONFIG_ENABLE_FLOAT_GEN` | `1` | `1` to compile `SSFJsonPrintDouble()`; `0` to omit floating-point generation |
 | `SSF_JSON_GOBJ_ENABLE` | `1` | `1` to enable `SSFJsonGObjCreate()` and `SSFJsonGObjPrint()` JSON/gobj conversion functions; `0` to exclude them and remove the `ssfgobj` dependency |
 | `SSF_JSON_GOBJ_CONFIG_MAX_STR_SIZE` | `256` | Maximum length in bytes of any object key or string value during JSON/gobj conversion |
 
 `SSF_JSON_CONFIG_MAX_IN_DEPTH` and `SSF_JSON_CONFIG_MAX_IN_LEN` can be set per build without
-editing the options file, e.g. `-DSSF_JSON_CONFIG_MAX_IN_LEN=4095`, or a `#define` seen before
+editing the options file, e.g. `-DSSF_JSON_CONFIG_MAX_IN_LEN=65534`, or a `#define` seen before
 `ssfoptions.h`; a value out of range is a compile-time `#error`.
 
 - **Raising the length costs no RAM.** The parser keeps no buffer of the input size; the limit
@@ -75,11 +75,12 @@ editing the options file, e.g. `-DSSF_JSON_CONFIG_MAX_IN_LEN=4095`, or a `#defin
   call is O(n) in the input length (about 0.1 ms for a 64 KB document on a desktop host).
 - **Raising the depth costs stack:** each level is one level of parser recursion (see
   [Notes](#notes)).
-- **What needs a larger length.** The AWS IoT `CreateCertificateFromCsr` response (a PEM
-  certificate and an ownership token) is about 2.1 to 2.5 KB, over the default; ssfawsprov
-  requires `SSF_JSON_CONFIG_MAX_IN_LEN` of at least `4095`.
-- The unit tests run with the defaults and with the length raised to `4095` and `65534` and
-  the depth to `8` ([`tools/config-matrix/features.sh`](../tools/config-matrix/features.sh));
+- **What sets the default.** The AWS IoT `CreateCertificateFromCsr` response (a PEM
+  certificate and an ownership token) is about 2.1 to 2.5 KB. ssfawsprov requires
+  `SSF_JSON_CONFIG_MAX_IN_LEN` of at least `SSF_AWSPROV_CONFIG_RX_SIZE - 1` (`4095` by
+  default) and stops the build with `#error` otherwise.
+- The unit tests run with the defaults, with the length set to `2047` and `65534`, and with
+  the depth set to `8` ([`tools/config-matrix/features.sh`](../tools/config-matrix/features.sh));
   they assume a length of at least `1024` and a depth of at least `4`.
 
 <a id="api-summary"></a>

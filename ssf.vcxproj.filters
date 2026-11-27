@@ -111,6 +111,12 @@
     <ClCompile Include="_fsm\ssfsm_ut.c">
       <Filter>_fsm</Filter>
     </ClCompile>
+    <ClCompile Include="_net\ssfawsprov.c">
+      <Filter>_net</Filter>
+    </ClCompile>
+    <ClCompile Include="_net\ssfawsprov_ut.c">
+      <Filter>_net</Filter>
+    </ClCompile>
     <ClCompile Include="_net\ssfhttphdr.c">
       <Filter>_net</Filter>
     </ClCompile>
@@ -448,6 +454,9 @@
     <ClInclude Include="_fsm\ssfsm.h">
       <Filter>_fsm</Filter>
     </ClInclude>
+    <ClInclude Include="_net\ssfawsprov.h">
+      <Filter>_net</Filter>
+    </ClInclude>
     <ClInclude Include="_net\ssfhttphdr.h">
       <Filter>_net</Filter>
     </ClInclude>
@@ -473,6 +482,9 @@
       <Filter>_net</Filter>
     </ClInclude>
     <ClInclude Include="_opt\ssfasn1_opt.h">
+      <Filter>_opt</Filter>
+    </ClInclude>
+    <ClInclude Include="_opt\ssfawsprov_opt.h">
       <Filter>_opt</Filter>
     </ClInclude>
     <ClInclude Include="_opt\ssfbase64url_opt.h">

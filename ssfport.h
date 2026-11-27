@@ -65,6 +65,7 @@ extern "C" {
 #define SSF_CONFIG_X509_UNIT_TEST    (1u)
 #define SSF_CONFIG_PEM_UNIT_TEST     (1u)
 #define SSF_CONFIG_PKEY_UNIT_TEST    (1u)
+#define SSF_CONFIG_UTF8_UNIT_TEST    (1u)
 
 /* 1 when libcrypto is linked for unit test cross-validation; -D on the command line overrides */
 #ifndef SSF_CONFIG_HAVE_OPENSSL
@@ -163,6 +164,7 @@ extern "C" {
     (SSF_CONFIG_X509_UNIT_TEST == 1) || \
     (SSF_CONFIG_PEM_UNIT_TEST == 1) || \
     (SSF_CONFIG_PKEY_UNIT_TEST == 1) || \
+    (SSF_CONFIG_UTF8_UNIT_TEST == 1) || \
     /* _crypto */ \
     (SSF_CONFIG_AES_UNIT_TEST == 1) || \
     (SSF_CONFIG_AESCCM_UNIT_TEST == 1) || \

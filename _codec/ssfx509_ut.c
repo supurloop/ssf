@@ -1162,6 +1162,91 @@ static void _UTCSRAccept(const SSFX509CSRParams_t *p, const uint8_t *sig, uint32
     SSF_ASSERT((SSFX509EncodeCSR(out, sizeof(out), p, sig, sigLen, &len)) && (len > 0u));
 }
 
+/* Asserts all four encoders, measure and write, refuse a Name value that is not UTF-8. */
+static void _UTNameUTF8Refuse(SSFX509GenParams_t *g, SSFX509CSRParams_t *c, const uint8_t *sig,
+                              uint32_t sigLen)
+{
+    static uint8_t out[SSF_X509_CONFIG_MAX_CERT_SIZE];
+    uint32_t len;
+
+    SSF_REQUIRE(g != NULL);
+    SSF_REQUIRE(c != NULL);
+    SSF_REQUIRE(sig != NULL);
+
+    SSF_ASSERT(SSFX509EncodeTBS(NULL, 0, g, &len) == false);
+    SSF_ASSERT(SSFX509EncodeTBS(out, sizeof(out), g, &len) == false);
+    SSF_ASSERT(SSFX509EncodeCert(NULL, 0, g, sig, sigLen, &len) == false);
+    SSF_ASSERT(SSFX509EncodeCert(out, sizeof(out), g, sig, sigLen, &len) == false);
+    _UTCSRRefuse(c, sig, sigLen);
+}
+
+/* Checks that Name values must be well-formed UTF-8 in certificates and CSRs alike. */
+static void _UTNameUTF8(void)
+{
+    static const char *good[] = {
+        "plain", "caf\xC3\xA9", "\xE2\x82\xAC" "100", "\xED\x9F\xBF", "\xEE\x80\x80",
+        "\xEF\xBF\xBF", "\xF0\x9F\x98\x80", "\xF4\x8F\xBF\xBF", "a\xDF\xBF" "b"
+    };
+    static const char *bad[] = {
+        "\x80", "ab\xBF", "\xC0\xAF", "\xC1\x81", "\xE0\x80\xAF", "\xED\xA0\x80",
+        "\xED\xBF\xBF", "\xF0\x8F\xBF\xBF", "\xF4\x90\x80\x80", "\xF5\x80\x80\x80", "\xFF",
+        "ok\xC3", "ok\xE2\x82", "ok\xF0\x9F\x98", "\xC3(", "\xE2\x82(",
+    };
+    static SSFX509GenParams_t g;
+    static SSFX509CSRParams_t c;
+    static SSFX509Cert_t parsed;
+    static uint8_t pub[65];
+    static uint8_t sig[72];
+    static uint8_t out[SSF_X509_CONFIG_MAX_CERT_SIZE];
+    uint8_t serial[] = { 0x07u };
+    uint32_t i;
+    uint32_t f;
+
+    memset(pub, 0x04, sizeof(pub));
+    memset(sig, 0x30, sizeof(sig));
+
+    /* ---- Well-formed 1..4-byte forms are written as given, in every field ---- */
+    for (i = 0; i < (sizeof(good) / sizeof(good[0])); i++)
+    {
+        _utGenBaseParams(&g, serial, pub, sizeof(pub));
+        g.subject.cn = good[i];
+        g.subject.o = good[i];
+        g.subject.ou = good[i];
+        g.subject.st = good[i];
+        g.subject.l = good[i];
+        g.issuer = g.subject;
+        _utGenCheckConsistent(&g, sig, sizeof(sig), out, sizeof(out), &parsed);
+        SSF_ASSERT((parsed.subject.cnLen == strlen(good[i])) &&
+                   (memcmp(parsed.subject.cn, good[i], parsed.subject.cnLen) == 0));
+        SSF_ASSERT((parsed.issuer.lLen == strlen(good[i])) &&
+                   (memcmp(parsed.issuer.l, good[i], parsed.issuer.lLen) == 0));
+        _UTCSRParams(&c, false, pub);
+        c.subject = g.subject;
+        _UTCSRAccept(&c, sig, sizeof(sig));
+    }
+
+    /* ---- Ill-formed: every encoder refuses, whichever subject or issuer field holds it ---- */
+    for (i = 0; i < (sizeof(bad) / sizeof(bad[0])); i++)
+    {
+        for (f = 0; f < 6u; f++)
+        {
+            _utGenBaseParams(&g, serial, pub, sizeof(pub));
+            _UTCSRParams(&c, false, pub);
+            if (f == 0u) c.subject.cn = bad[i];
+            else if (f == 1u) c.subject.o = bad[i];
+            else if (f == 2u) c.subject.ou = bad[i];
+            else if (f == 3u) c.subject.st = bad[i];
+            else if (f == 4u) c.subject.l = bad[i];
+            else c.subject.cn = "ok";
+            /* The certificate subject matches the CSR's; for f == 5 only the issuer is bad */
+            g.subject = c.subject;
+            if (f == 5u) g.issuer.cn = bad[i];
+            if (f == 5u) c.subject.cn = bad[i];
+            _UTNameUTF8Refuse(&g, &c, sig, sizeof(sig));
+        }
+    }
+}
+
 /* Checks the CSR buffer sizes, name bounds, size cap and contracts with a placeholder key. */
 static void _UTCSRLimits(void)
 {
@@ -1388,6 +1473,7 @@ static void _UTCSR(void)
     memset(priv, 0, sizeof(priv));
 
     _UTCSRLimits();
+    _UTNameUTF8();
 }
 
 /* --------------------------------------------------------------------------------------------- */

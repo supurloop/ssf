@@ -38,6 +38,7 @@
 #include "ssfrsa.h"
 #include "ssfed25519.h"
 #include "ssfstr.h"
+#include "ssfutf8.h"
 
 #if SSF_X509_CONFIG_RSA_MIN_BITS < 1024u
 #error SSF_X509_CONFIG_RSA_MIN_BITS must be >= 1024.
@@ -1736,7 +1737,7 @@ static bool _SSFX509EncDNAttrSeqContent(uint8_t *bufOpt, uint32_t bufOptSize, co
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns bytes for one RDN SET { SEQUENCE { OID, UTF8String } }, else 0 if over its bound.     */
+/* Returns bytes for one RDN SET { SEQUENCE { OID, UTF8String } }, else 0 if over or not UTF-8.  */
 /* --------------------------------------------------------------------------------------------- */
 static uint32_t _SSFX509EncDNAttr(uint8_t *bufOpt, uint32_t bufOptSize, const uint8_t *oid,
                                   uint32_t oidLen, SSFCStrIn_t valueStr, uint32_t upperBound)
@@ -1755,6 +1756,13 @@ static uint32_t _SSFX509EncDNAttr(uint8_t *bufOpt, uint32_t bufOptSize, const ui
         /* No, refuse to emit a non-conforming name */
         return 0;
     }
+    /* Is the value ill-formed UTF-8? */
+    if (!SSFUTF8IsValid((const uint8_t *)valueStr, valueLen, false))
+    {
+        /* Yes, refuse to emit a non-conforming name */
+        return 0;
+    }
+    /* No */
     attr.oid = oid;
     attr.oidLen = oidLen;
     attr.valueStr = valueStr;

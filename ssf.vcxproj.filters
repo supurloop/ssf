@@ -357,6 +357,12 @@
     <ClCompile Include="_codec\ssfpkey_ut.c">
       <Filter>_codec</Filter>
     </ClCompile>
+    <ClCompile Include="_codec\ssfutf8.c">
+      <Filter>_codec</Filter>
+    </ClCompile>
+    <ClCompile Include="_codec\ssfutf8_ut.c">
+      <Filter>_codec</Filter>
+    </ClCompile>
     <ClCompile Include="_ui\ssfcli.c">
       <Filter>_ui</Filter>
     </ClCompile>
@@ -720,6 +726,9 @@
       <Filter>_codec</Filter>
     </ClInclude>
     <ClInclude Include="_codec\ssfpkey_ut_fix.h">
+      <Filter>_codec</Filter>
+    </ClInclude>
+    <ClInclude Include="_codec\ssfutf8.h">
       <Filter>_codec</Filter>
     </ClInclude>
     <ClInclude Include="_ui\ssfcli.h">

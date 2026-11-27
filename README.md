@@ -169,6 +169,7 @@ Encoding and decoding interfaces for common data formats, all with strict buffer
 | [UBJSON](_codec/ssfubjson.md) | Universal Binary JSON parser/generator | ~9 KB | — | ~270 B¹⁰ | — | Yes |
 | [Decimal](_codec/ssfdec.md) | Integer-to-decimal string converter | ~2.5 KB | — | ~96 B | — | Yes |
 | [Safe Strings](_codec/ssfstr.md) | Safe C string interface replacing crash-prone standard functions | ~1.2 KB | — | ~64 B | — | Yes |
+| [UTF-8](_codec/ssfutf8.md) | Strict RFC 3629 UTF-8 validator, decoder and encoder; UTF-16 surrogate pair joining | ~550 B | — | ~64 B | — | Yes |
 | [Pattern Matching](_codec/ssfmatch.md) | Case-insensitive compare, `*`/`?` glob, URI path templates with `{param}` extraction | ~600 B | — | ~100 B⁵⁷ | — | Yes |
 | [Generic Object](_codec/ssfgobj.md) | BETA: Hierarchical generic object parser/generator for cross-codec in-memory representation | ~3 KB | ~8 B | ~160 B¹¹ | yes¹⁵ | Yes¹⁷ |
 

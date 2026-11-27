@@ -18,7 +18,8 @@ Sources    : AWS docs read on 2026-11-26. Each fact in section 1 names its page.
              (developerguide = https://docs.aws.amazon.com/iot/latest/developerguide/)
 Status     : G01 done (commit 9041eba, 2026-11-26). G02 done (commit d510ab3, 2026-11-26).
              G03 done (commit 0557f94, 2026-11-26). G04 done (commit 7900292, 2026-11-26).
-             G05 done (2026-11-26).
+             G05 done (commit d4bcd2d, 2026-11-26). G06 skipped (2026-11-26).
+             G09 implemented (ssfutf8 + ssfx509, 2026-11-27), not yet committed.
              Everything else is plan only.
 
 Layout
@@ -412,7 +413,7 @@ AWSPROV-G03  ssfx509: PKCS#10 CSR encoder
            pass still refused it; no out-of-bounds write). Now refused in both passes.
            Not fixed (pre-existing): subject strings are not checked to be valid UTF-8, for
            certificates and CSRs alike; invalid input gives a non-conforming UTF8String that
-           strict parsers refuse. Inputs come from the caller. Tracked as AWSPROV-G09.
+           strict parsers refuse. Inputs come from the caller. Tracked as AWSPROV-G09 (ssfutf8).
            ssfx509.md now says C is a PrintableString (it said every value was a UTF8String).
            Coverage: two failure returns in _SSFX509EncCRIContent (INTEGER 0, empty [0]) cannot
            be reached, since the enclosing size check precedes every write; EncodeTBS has the
@@ -479,7 +480,8 @@ AWSPROV-G04  ssfjson: allow a larger input limit per build
            Base64-padded certificatePem or the ownership token would come back with an
            embedded NUL. M04 copies the token back as the raw escaped JSON slice (span from
            SSFJsonMessage), never unescaped; for the PEM, V02 must confirm AWS emits only \n,
-           \/ and \" escapes. If it emits \u escapes, add G10: a standard \u -> UTF-8 decode.
+           \/ and \" escapes. If it emits \u escapes, add G10: a standard \u -> UTF-8 decode
+           (SSFUTF8FromUTF16Pair + SSFUTF8EncodeCP from G09).
 
 AWSPROV-G05  ssfmqttc: size the string limits for AWS and other cloud brokers by default
   Why    : AWS client IDs and thing names are up to 128 bytes, topics up to 256 bytes; the
@@ -599,25 +601,110 @@ AWSPROV-G08  ssfecdsa: wipe the scalar copy on every SSFECDSAPubKeyFromPrivKey r
   Done   : ./ssf and ASan pass; tools/coverage 100% of the changed lines; ARM / XC32 no
            warnings. Needs approval to modify ssfecdsa.
 
-AWSPROV-G09  ssfx509: refuse subject / issuer strings that are not valid UTF-8
+AWSPROV-G09  ssfutf8: new UTF-8 codec module; ssfx509 refuses Name strings that are not UTF-8
   Why    : Found in the G03 audit (pre-existing). The generator writes every Name value except
            countryName as a UTF8String but only bounds its length (SSFStrLen); the bytes are
            never checked. Invalid UTF-8 (a stray 0x80, an overlong form, a surrogate, a value
            above U+10FFFF, a truncated sequence) gives a non-conforming certificate or CSR that
            strict parsers refuse (Python cryptography does; AWS may). Names usually come from
            device data (serial numbers, thing names), so this is a data error to report.
-  Change : A strict RFC 3629 validator, e.g. static _SSFX509IsUTF8(str, len), applied in
-           _SSFX509EncDNAttr to every UTF8String value; on failure both passes return false,
-           as for an over-long value. No SSF module validates UTF-8 today (checked: none in
-           _codec, ssfjson, ssfmqttc); if another module needs it later, it can move to a
-           shared helper. The RFC 5280 bounds stay in bytes, as now.
-  Test   : Accept: ASCII, 2/3/4-byte forms, U+FFFF, U+10FFFF, the existing fixtures. Refuse in
-           EncodeTBS, EncodeCert, EncodeCSRInfo and EncodeCSR, measure and write: lone
-           continuation byte, C0/C1 overlong forms, E0 80..9F, ED A0..BF (surrogates), F0 80..8F,
-           F4 90+ and F5..FF, a sequence cut off by the NUL. Exhaustive check of every 1- and
-           2-byte string and every 3-byte lead/continuation combination against a reference.
-  Done   : ./ssf and ASan pass; coverage 100% of the new lines; features.sh passes; ARM / XC32
-           no new warnings; ssfx509.md says values must be valid UTF-8. Needs approval (ssfx509).
+           No SSF module handles UTF-8 today, and three more document the gap: ssfmqttc
+           (inbound topics unchecked, outbound strings limited to ASCII; MQTT 1.5.3), ssfnetws
+           (Close reason unchecked; RFC 6455 7.1.7) and ssfjson (a G10 \u decode needs code
+           point -> UTF-8). So the check goes in its own module, not a private ssfx509 helper.
+  Cost   : Measured on a prototype (-Os, -ffunction-sections, with SSF_REQUIRE), flash bytes:
+             function                 M0+   M4  XC32
+             SSFUTF8DecodeNext        208  216   408
+             SSFUTF8IsValid            68   64   144
+             SSFUTF8EncodeCP          136  124   260
+             SSFUTF8FromUTF16Pair      72   64   144
+             SSFUTF8Count              72   68   164
+             total                    556  536  1120
+           No RAM, no tables. ssfx509 links DecodeNext + IsValid only: ~280 bytes ARM, ~550
+           XC32. Unused functions are dropped by --gc-sections.
+  Change : New module (no approval needed; adds files only):
+             _codec/ssfutf8.{h,c,md}, _codec/ssfutf8_ut.c
+             SSFUTF8DecodeNext(str, strLen, cpOut, seqLenOut)  one code point; strict RFC 3629
+                                                     (lead C2..F4, second-byte ranges for
+                                                     E0, ED, F0, F4)
+             SSFUTF8IsValid(str, strLen, allowNul)   whole string; allowNul false refuses
+                                                     U+0000 (MQTT 1.5.3 forbids it)
+             SSFUTF8EncodeCP(cp, out, outSize, outLenOut)  shortest form; false for a
+                                                     surrogate, > U+10FFFF, or out too small
+             SSFUTF8FromUTF16Pair(hi, lo, cpOut)     for JSON \uD83D\uDE00 (G10)
+             SSFUTF8Count(str, strLen, countOut)     code points; false if ill-formed
+           All return bool and write their outputs only on success (claude.ssf: a function
+           that can fail returns bool; length arguments end in Len).
+           Build wiring: build.ninja, build-linux.ninja, build-asan.ninja, build scripts,
+           ssf.vcxproj(.filters), main.c unit-test list, _codec/README.md, README.md.
+           ssfx509 (approved 2026-11-27): _SSFX509EncDNAttr calls
+           SSFUTF8IsValid(value, len, false) on every UTF8String value; on failure both passes
+           return false, as for an over-long value. The RFC 5280 bounds stay in bytes.
+  Test   : ssfutf8_ut.c: exhaustive check of every 1- and 2-byte string and every 3-byte lead /
+           continuation combination against an independent reference decoder (written as a
+           table of the RFC 3629 well-formed byte sequences); 4-byte boundaries U+10000,
+           U+10FFFF, F4 90 80 80, F5..FF; lone continuation byte; C0/C1 overlong forms,
+           E0 80..9F, ED A0..BF (surrogates), F0 80..8F; truncated sequences at every length;
+           len 0; allowNul both ways. EncodeCP: every code point 0..0x10FFFF round trips
+           through DecodeNext; surrogates and 0x110000 refused; out one byte short refused.
+           FromUTF16Pair: all four range edges of each half. Count: ASCII, mixed, ill-formed.
+           DBC: NULL pointers assert. Fuzz target tools/fuzz/fuzz_utf8.c (DecodeNext vs.
+           IsValid vs. EncodeCP round trip).
+           ssfx509_ut.c: accept ASCII, 2/3/4-byte forms, U+FFFF, U+10FFFF, existing fixtures;
+           refuse a lone continuation byte, an overlong form, a surrogate, F4 90, and a sequence
+           cut off by the NUL, in EncodeTBS, EncodeCert, EncodeCSRInfo and EncodeCSR, measure
+           and write passes.
+  Done   : ./ssf and ASan pass; coverage 100% of ssfutf8.c and the new ssfx509 lines;
+           features.sh passes; ARM / XC32 no new warnings and sizes recorded in ssfutf8.md;
+           ssfx509.md says values must be valid UTF-8; fuzz target in tools/fuzz/README.md.
+  Result : Implemented 2026-11-27, TDD (both test sets red against a stub / the old ssfx509).
+           ssfutf8.c: 100% lines (gcov), every branch but the never-taken SSF_ENSURE failures.
+           Exhaustive: all 1-, 2- and 3-byte inputs and 6.5M 4-byte boundary inputs agree with a
+           table-driven reference decoder (Unicode Table 3-7); every code point 0..0x10FFFF round
+           trips. Mutants: 28/28 non-equivalent killed; 5 equivalent survivors (lead / trail masks
+           widened over a bit that is always 0 for that byte class, and removal of an SSF_ENSURE
+           that cannot fire). Differential: 300,000 random inputs agree with Python's strict UTF-8
+           decoder (33,080 valid). Fuzz: tools/fuzz/fuzz_utf8.c (self-consistency, no OpenSSL
+           side), 20M inputs under ASan/UBSan with a gcc driver; it catches seeded E0 / ED /
+           truncation bugs. libFuzzer itself was not run: run.sh needs Docker, and this host's
+           podman refuses the short image name gcc:latest without a TTY (pre-existing, not changed
+           here).
+           ssfx509: one SSFUTF8IsValid(.., false) call in _SSFX509EncDNAttr; tests check 9
+           valid strings in every Name field (cert re-parses to the same bytes, CSR accepted)
+           and 16 invalid ones in each of CN, O, OU, ST, L and the issuer, in EncodeTBS,
+           EncodeCert, EncodeCSRInfo and EncodeCSR, measure and write passes.
+           Sizes (-Os, with the 17-byte assert file name): ssfutf8 553 B M4, 617 B M0+, 1061 B
+           XC32; validator only (DecodeNext + IsValid) 285 B M4, 317 B M0+; ssfx509 +5 B M4,
+           +17 B M0+. Stack 64 B peak (M0+). API changed from the size_t returns planned
+           above to bool returns with *LenOut outputs, per claude.ssf (see Change).
+           Audit: no findings. Reads never pass len (checked before the trail loop); outputs
+           are written only on success; the encoder writes only shortest forms; the x509 value
+           length is already bounded by SSFStrLen. Behaviour change: a caller passing Latin-1
+           or other non-UTF-8 Name bytes now gets false (documented in ssfx509.md). The bounds
+           stay in bytes, which is stricter than RFC 5280's character count. The parser still
+           does not check UTF-8 (documented).
+           Verified: ./ssf 63/63; ASan/UBSan utf8, x509, cms; ARM M4 / M0+ and XC32 0 warnings
+           (the 3 pre-existing ARM failed files unchanged); features.sh all 23 rows build with 0
+           warnings and pass; md code examples compile.
+           claude.ssf pass (2026-11-27): one-line if / else-if chains in DecodeNext and EncodeCP
+           braced with Question / Yes / No comments; SSF_ENSURE((n >= 1u) && (n <= strLen))
+           invariant before each length step in IsValid and Count; u-suffixed initialisers.
+           Unit test: one field per line (named Good / Bad row types), len -> strLen, nested
+           ternary parenthesised, braced conditional. No behaviour change; all checks rerun.
+
+AWSPROV-G11  (optional, not AWS) ssfmqttc: UTF-8 topics and inbound validation via ssfutf8
+  Why    : MQTT 1.5.3: a receiver must close the connection on ill-formed UTF-8 or U+0000;
+           ssfmqttc passes inbound topics through unchecked and limits outbound strings to
+           ASCII because it had no validator (ssfmqttc.md "ASCII only", "Inbound UTF-8 is not
+           validated").
+  Change : Validate inbound topics with SSFUTF8IsValid(.., false) (close with PROTOCOL);
+           accept non-ASCII UTF-8 in outbound topics, filters, client ids and user names.
+  Done   : After G09. Needs approval (ssfmqttc). Not needed for ssfawsprov.
+
+AWSPROV-G12  (optional, not AWS) ssfnetws: fail on a Close reason that is not UTF-8
+  Why    : RFC 6455 7.1.7; ssfnetws.md "A Close reason is not checked for UTF-8".
+  Change : Check the reason with SSFUTF8IsValid(.., true); fail the connection (1007) if bad.
+  Done   : After G09. Needs approval (ssfnetws). Not needed for ssfawsprov.
 
 No gap for ssftlsc: TLS 1.3, mutual TLS, SNI and ALPN already cover AWS (1.2).
 No gap for ssfmqttc routing: its rx and event callbacks are bound at SSFMQTTCInit, and
@@ -808,3 +895,4 @@ AWSPROV-V03  End-to-end with ssfawsprov
   G06 only if requested; G07 must land before G06 (or anything else that encodes a secret).
   G08 is independent; best before field deployment of G02.
   G09 is independent; best before M03 puts device data into CSR subjects.
+  G10 (if V02 needs it) after G09.  G11, G12 optional, after G09, not needed for ssfawsprov.

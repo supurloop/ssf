@@ -95,6 +95,7 @@
 #include "ssfx509.h"
 #include "ssfpem.h"
 #include "ssfpkey.h"
+#include "ssfutf8.h"
 #include "ssfdtime.h"
 #include "ssfrtc.h"
 #include "ssfiso8601.h"
@@ -247,6 +248,9 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_PKEY_UNIT_TEST == 1
     { "ssfpkey", "Private Key Codec", SSFPKeyUnitTest },
 #endif /* SSF_CONFIG_PKEY_UNIT_TEST */
+#if SSF_CONFIG_UTF8_UNIT_TEST == 1
+    { "ssfutf8", "UTF-8 Codec", SSFUTF8UnitTest },
+#endif /* SSF_CONFIG_UTF8_UNIT_TEST */
 
     /* _ecc */
 #if SSF_CONFIG_RS_UNIT_TEST == 1

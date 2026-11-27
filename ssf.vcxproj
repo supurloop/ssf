@@ -352,6 +352,7 @@
     <ClInclude Include="_edc\ssffcsum.h" />
     <ClInclude Include="_fsm\ssfsm.h" />
     <ClInclude Include="_net\ssfawsprov.h" />
+    <ClInclude Include="_net\ssfawsprov_ut_fix.h" />
     <ClInclude Include="_net\ssfhttphdr.h" />
     <ClInclude Include="_net\ssfmqttc.h" />
     <ClInclude Include="_net\ssfmqttpkt.h" />

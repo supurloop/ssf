@@ -21,7 +21,7 @@ Status     : G01 done (commit 9041eba, 2026-11-26). G02 done (commit d510ab3, 20
              G05 done (commit d4bcd2d, 2026-11-26). G06 skipped (2026-11-26).
              G08 done (commit 5030e65, 2026-11-27). G09 done (commit f16516a, 2026-11-27).
              G13 done (commit 7697f67, 2026-11-27). M01 done (commit bbd7bfa, 2026-11-27).
-             M02 done (2026-11-27).
+             M02 done (commit 43537e7, 2026-11-27). M03 done (2026-11-27).
              Everything else is plan only.
 
 Layout
@@ -1036,15 +1036,123 @@ AWSPROV-M02  Topic names and subscription set
         it with the lifetime (it must outlive the MQTT connection).
 
 AWSPROV-M03  CreateCertificateFromCsr request
-  Change : SSFAWSProvBuildCsrRequest(curve, priv, subject, out, outSize, outLen): pub from
-           priv, CSR (G03) signed with SSFECDSASign, PEM (G01), then
-           {"certificateSigningRequest":"<pem>"} via ssfjson (escapes "\n"). Wipes scratch.
-           Key generation stays with the caller (SSFECDSAKeyGen), so the key is never inside
-           the module's buffers longer than one call.
-  Test   : Fixed key => byte-exact JSON fixture; the JSON parses back with SSFJsonGetString to
-           the same PEM, which decodes to a CSR that self-verifies; measure mode; one byte short
-           fails; scratch scrubbed (same hook style as _ssfPEMUTScrubHook).
-  Done   : ./ssf passes.
+  Found in the code (2026-11-27)
+    - G03 API: the caller passes SSFX509CSRParams_t {subject, sigAlg/pubKeyAlg/curve OIDs as
+      raw DER content, uncompressed pubKey}. SSFX509EncodeCSRInfo gives the bytes to hash,
+      and SSFX509EncodeCSR wraps the signature. Both measure when buf is NULL. ssfx509 has no
+      public OID constants, so ssfawsprov keeps its own (as ssfpkey does).
+    - SSFECDSASign is RFC 6979 deterministic and needs no RNG. G03 showed whole CSRs match
+      "openssl req -sigopt nonce-type:1" byte for byte, so byte-exact fixtures are possible.
+    - The DER signature is 70..72 bytes (P-256) or 102..104 (P-384), depending on the leading
+      bytes of r and s. So the CSR, PEM and JSON lengths vary with the key: a size function
+      has to give an upper bound, not an exact length.
+    - SSFJsonPrintString escapes '\n' and '\r' and doesn't escape '/'. Base64 and the PEM
+      header only use characters that need no escaping, so the only expansion is 1 byte per
+      line break.
+    - Nothing secret passes through M03's own buffers. The private key goes by pointer to
+      SSFECDSAPubKeyFromPrivKey and SSFECDSASign, which wipe their scratch (G08, G13). CRI,
+      hash, signature, CSR, PEM and JSON are all public. So M03 needs no scrub hook. Instead,
+      the test checks that the key bytes never appear in scratch or out.
+    - Rows that build without signing (signoff) or without one curve (p256off, p384off) still
+      compile the module, so M03 needs #if guards, not #errors.
+    - Memory: CRI, DER and PEM can't overlap their outputs. The caller passes a scratch
+      buffer, and M07 lends its rx copy buffer (RX_SIZE, idle while a request is being built).
+      CRI goes at scratch[0] and is hashed. DER also goes at scratch[0], since CRI is no longer
+      needed, then PEM goes at scratch[derMax]. JSON goes into out.
+
+  Change (_net/ssfawsprov.h/.c; all under SSF_ECDSA_CONFIG_ENABLE_SIGN == 1)
+    - bool SSFAWSProvCsrRequestSizes(SSFECCurve_t curve, const SSFX509GenName_t *subjectOpt,
+                                     size_t *scratchSizeOut, size_t *outSizeOut)
+      - Upper bounds, computed without a key:
+          DER via EncodeCSR measure with a curve-length pubKey and a max-length signature;
+          scratch = derMax + SSF_PEM_ENCODE_SIZE(19, derMax);
+          out = 30 + pemLen + lineCount + 2 + NUL.
+      - false if the curve isn't built or the subject is refused (UTF-8, CN > 64).
+    - bool SSFAWSProvBuildCsrRequest(SSFECCurve_t curve, const uint8_t *privKey,
+                                     size_t privKeyLen, const SSFX509GenName_t *subjectOpt,
+                                     uint8_t *scratch, size_t scratchSize, char *outStr,
+                                     size_t outSize, size_t *outLen)
+      1. pub = SSFECDSAPubKeyFromPrivKey.
+      2. CRI into scratch, then SHA-256 (P-256) or SHA-384 (P-384).
+      3. SSFECDSASign.
+      4. CSR DER into scratch.
+      5. SSFPEMEncode "CERTIFICATE REQUEST" into the scratch tail.
+      6. {"certificateSigningRequest":"<pem>"} via SSFJsonPrintObject/PrintLabel/PrintString.
+      Returns false on: a curve that isn't built, a key that fails PubKeyFromPrivKey (0, >= n,
+      wrong length), a refused subject, or scratch or out too small. On false, outStr is ""
+      when outSize > 0 and *outLen is 0. Scratch contents are unspecified (public data only).
+    - The NULL subject gives an empty Name (30 00). Whether AWS accepts it is checked in V02;
+      until then the app should pass at least a CN.
+    - OID constants: id-ecPublicKey, prime256v1, secp384r1, ecdsa-with-SHA256, -SHA384
+      (each under its curve's #if).
+  Test (TDD; tests first)
+    - Fixtures made offline with OpenSSL ("openssl req -new -key k.pem -sigopt nonce-type:1
+      -subj ..."), embedded as DER, for P-256 and P-384, each with an empty subject and with
+      CN+O+C. The JSON output must equal the prefix, the PEM of the fixture with every
+      newline escaped, and the suffix, byte for byte.
+    - Round trip: SSFJsonGetString -> PEM -> SSFPEMDecodeNext gives the fixture DER, and with
+      SSF_CONFIG_HAVE_OPENSSL, d2i_X509_REQ + X509_REQ_verify succeed.
+    - Sizes: for every case, scratchSize and outSize from SSFAWSProvCsrRequestSizes are enough,
+      exact fits pass, and outSize - 1 or the exact scratch need - 1 fail. Bound tightness is
+      reported (bound - actual <= 2 signature bytes plus their PEM/JSON growth).
+    - Refusals:
+      - private key 0, n, all 0xFF and the wrong length;
+      - CN of 65 bytes;
+      - non-UTF-8 O;
+      - curve SSF_EC_CURVE_MAX.
+      Each leaves outStr "" and *outLen 0.
+    - The private key bytes appear nowhere in scratch or out (memmem) after each call.
+    - DBC: NULL privKey, scratch, outStr, outLen, scratchSizeOut and outSizeOut.
+    - Matrix: signoff compiles without the functions; p256off and p384off run only their
+      enabled curve.
+  Audit
+    - Mutants: hash choice per curve, OID per curve, PEM label, JSON key, the size formula
+      terms, and the failure-path clearing.
+    - gcov 100% of reachable lines.
+    - Size and stack on M4, M0+ and XC32: SHA-384 state and the signature are on the stack,
+      expected around 400..500 B.
+    - ASan, features.sh, ARM, XC32.
+  Done
+    - ./ssf passes. One commit.
+
+  Result (2026-11-27)
+    - TDD red: the tests linked against missing functions. Green with the implementation.
+      All four OpenSSL fixtures match byte for byte (P-256 and P-384, empty subject and
+      CN+O+C). The JSON round-trips through ssfjson and ssfpem to the fixture DER.
+    - The bounds are exact for a maximum-length signature. The test re-derives them from the
+      fixture's own signature length by PEM encoding a buffer of that size. A 200-subject
+      sweep per curve reaches the bound exactly (a 72- or 104-byte signature occurred), and
+      every build fits.
+    - Mutants 24/24 killed: hash and OID per curve, PEM label, JSON key, every size-formula
+      term, the failure-path clearing, the key-length and curve checks, the subject copy.
+      M02 mutants still 28/31 (3 equivalent).
+    - gcov: 98.6% of 144 lines. The two lines never run are the SSF_ERROR default of
+      _SSFAWSProvCsrParams (callers have already refused curves that aren't built) and a
+      SSFECDSASign failure for a key that already passed validation.
+    - Size (-Os, CSR part):
+        M4    1058 B
+        M0+   1108 B
+        XC32  1772 B
+      Each includes a 104 B const measure buffer and 36 B of OIDs; DBC stays in production.
+      This is over the 400..500 B estimate.
+      Stack: BuildCsrRequest frame 392 B (M4) plus its callees' (SSFECDSASign is the
+      deepest). CsrRequestSizes is 104 B, after moving its stand-in pub/sig into flash
+      (it was 312 B).
+    - ASan clean. ARM M4/M0+ 0 warnings, the same 3 socket files. XC32 0 warnings.
+      XC16 (PIC24, 16-bit size_t) 0 warnings after guarding the UINT32 clamp. dsPIC33EP's
+      extended-pointer warnings occur in every SSF module.
+    - Independent review (fresh agent, code only) found no memory-safety bugs. Fixed from
+      it:
+        privKey overlapping scratch or outStr (CRI overwrote the key before signing, or
+          outStr[0] = 0 wrote into it) is now a REQUIRE;
+        subject strings starting inside scratch or outStr are now a REQUIRE;
+        #error when SSF_X509_CONFIG_MAX_CERT_SIZE * 3 >= SIZE_MAX (16-bit size wrap);
+        DBC tests for each, and the sweep now asserts that the bound is reached.
+    - For M07: signing is deterministic (RFC 6979), so rebuilding the request on every
+      retry signs the same CSR again. A fault-injected signature on a repeat is a known path
+      to key recovery. M07 must build the request once per key and resend that payload on
+      retries, or the device must set SSF_ECDSA_CONFIG_VERIFY_AFTER_SIGN 1. ssfawsprov.md
+      (M09) recommends both for field devices.
 
 AWSPROV-M04  CreateCertificateFromCsr response parsing
   Change : SSFAWSProvParseCsrAccepted(payload, len, ...) copies the payload into a

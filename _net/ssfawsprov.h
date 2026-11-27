@@ -37,6 +37,9 @@ extern "C" {
 #include "ssfport.h"
 #include "ssf.h"
 #include "ssfmqttc.h"
+#include "ssfec.h"
+#include "ssfecdsa.h"
+#include "ssfx509.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Defines                                                                                       */
@@ -91,6 +94,14 @@ typedef struct
 bool SSFAWSProvTemplateNameIsValid(SSFCStrIn_t nameStr, size_t nameSize);
 bool SSFAWSProvTopicsInit(SSFAWSProvTopics_t *topicsOut, SSFCStrIn_t templateNameStr,
                           size_t templateNameSize);
+#if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
+/* privKey and the subject strings must not overlap scratch or outStr */
+bool SSFAWSProvCsrRequestSizes(SSFECCurve_t curve, const SSFX509GenName_t *subjectOpt,
+                               size_t *scratchSizeOut, size_t *outSizeOut);
+bool SSFAWSProvBuildCsrRequest(SSFECCurve_t curve, const uint8_t *privKey, size_t privKeyLen,
+                               const SSFX509GenName_t *subjectOpt, uint8_t *scratch,
+                               size_t scratchSize, char *outStr, size_t outSize, size_t *outLen);
+#endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */

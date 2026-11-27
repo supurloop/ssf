@@ -457,6 +457,9 @@
     <ClInclude Include="_net\ssfawsprov.h">
       <Filter>_net</Filter>
     </ClInclude>
+    <ClInclude Include="_net\ssfawsprov_ut_fix.h">
+      <Filter>_net</Filter>
+    </ClInclude>
     <ClInclude Include="_net\ssfhttphdr.h">
       <Filter>_net</Filter>
     </ClInclude>

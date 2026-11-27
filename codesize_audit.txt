@@ -3,7 +3,7 @@ SSF CODE SIZE AUDIT: ARM CORTEX-M, -Os
 Audit date : 2026-11-26
 Scope      : flash savings that cost little or no performance or RAM. Code at commit da0b8c8
              (branch mqtt).
-Status     : #6 DONE; every other item is OPEN (measurement only).
+Status     : #6 DONE; #1 re-measured at 3821634 with its RSA stack fix applied; others OPEN.
 
 SUMMARY
 -------
@@ -11,7 +11,7 @@ A representative MQTT-over-TLS client image links at 105,344 bytes of flash (tex
 Measured savings, against that image:
 
   #  Change                                              Saving      Perf / RAM impact
-  1  Build with LTO                                      18.4 KB     neutral or faster
+  1  Build with LTO                                      21.2 KB     faster; SHA-256 4% slower
   2  Cheaper assert call (still always on)                9.8 KB     none (failure path only)
        trap 9.8 KB / no arguments 7.3 KB / line only 1.8 KB
   3  EC comb window H 6 -> 4  (H 6 -> 5: 6.1 KB)          9.2 KB     keygen/sign ~15% slower
@@ -49,11 +49,39 @@ Perf      : host x86-64, gcc -O2, 200 iterations per operation. Absolute times d
 
 FINDINGS
 --------
-1. Build with LTO (-flto at compile and link)                                  18.4 KB, OPEN
-   Image 105,344 -> 86,919 bytes (-17.5%); bss 1,052 -> 984. Checked that the client entry
-   points, the comb tables, X.509 parsing and the AEADs are all still present. Usually neutral
-   or faster. This is a port build setting: document it in ssfport.md and offer it in
-   build-arm.sh.
+1. Build with LTO (-flto at compile and link)                                  21.2 KB, OPEN
+   Re-measured at commit 3821634 (includes #6) with the RSA stack fix below: client image
+   103,072 -> 81,815 bytes (-20.6%); bss 1,052 -> 880. (At da0b8c8 the saving was 18.4 KB.)
+   Client entry points, comb tables, X.509 parsing and the AEADs are all still present.
+
+   Speed, ARM instructions (Thumb-2 -Os under qemu, method as in bnzero_report.txt):
+     RSA-2048 / 4096 sign       -0.66% / -0.40%    RSA verify           0.00%
+     P-256 keygen / sign        -2.72% / -2.19%    P-256 verify / ECDH  -1.24% / -1.08%
+     P-384 keygen / sign        -2.27% / -1.83%    P-384 verify / ECDH  -0.93% / -0.77%
+     X25519, Ed25519            within +-0.07%     AES-128-CCM 16 KB    -4.80%
+     ChaCha20-Poly1305 16 KB    -0.93%             AES-128/256-GCM      +0.21% / +0.77%
+     SHA-256, HMAC-SHA-256      +4.04%             SHA-384              +1.19%
+   Host x86-64 -O2 timings: no change beyond noise. The SHA-256 slowdown (about 2.4
+   instructions per byte) is not investigated.
+
+   Stack: without a fix, LTO inlined helpers that have only one caller in the image into the
+   RSA entry points, and their frames then sat on top of the fixed stack scrub:
+     ARM peak       no LTO    LTO, no fix   LTO, fixed
+     RSA sign       21,552    30,776        20,984     (when one sign scheme is linked,
+     RSA-PSS sign   22,360    21,872 (2)    21,872      as in the client image, which
+     RSA keygen     26,288    37,128        26,296      links only SSFRSASignPSS)
+     P-256 verify    6,336     6,568         6,568      ECC/25519/symmetric: within +8 B
+     (2) PKCS#1 also linked, so the CRT helper had two callers and was not inlined.
+   Fix (applied): SSF_NOINLINE on _SSFRSAPrivateOpCRT, SSFRSAFips{PrimeDistance,DLowerBound,
+   ECoprime}OK, SSFBNDivMod and SSFBNModInv. Non-LTO code is unchanged (only assert line
+   numbers move); LTO costs 96 bytes and no measurable speed. With LTO, sign leaves no
+   residue below the stack scrub; keygen leaves the same 48 B as without LTO.
+
+   Remaining work: document LTO in ssfport.md and offer it in build-arm.sh.
+
+   Side finding (not LTO): with arm-linux-gnueabihf-gcc 14 (Thumb-2 -Os), non-LTO sign reaches
+   567 B below the stack scrub (54 non-zero bytes), more than the 128 B margin ssfrsa.md
+   suggests for compilers other than Cortex-M4 GCC -Os. Not checked on arm-none-eabi.
 
 2. Cheaper assert call                                                          9.8 KB, OPEN
    SSF_ASSERT stays always on; only the arguments passed on failure change. Image savings:

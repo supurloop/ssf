@@ -210,6 +210,10 @@ comparable security.
   Other compilers and flags can go slightly deeper (M4 `-O2`: 64–80 B, Cortex-M0+ `-Os`:
   96–112 B); set [`SSF_RSA_CONFIG_STACK_SCRUB_MARGIN`](#configuration) to `128u` there to
   cover that too, at the cost of as much more peak stack.
+  The helpers these entry points call out of line (`_SSFRSAPrivateOpCRT`, the
+  `SSFRSAFips*` checks, `SSFBNDivMod`, `SSFBNModInv`) are `noinline`, so link-time
+  optimization (`-flto`) cannot merge their frames into the entry point's frame: an LTO
+  build's peak stack stays at or below the non-LTO peak instead of growing by ~9–11 KB.
   Each scrub size is a linear model in `L` (`SSF_BN_MAX_MOD_LIMBS`, the modulus width in
   limbs) and `T` (`2^SSF_BN_MODEXP_WIN_K`, the window entries): the window table (half-width
   for the CRT exponentiations, full width for keygen's Miller-Rabin), `T` `SSFBN_t` headers,

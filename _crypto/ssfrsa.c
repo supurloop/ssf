@@ -646,6 +646,8 @@ static void _SSFRSABlindExp(SSFBN_t *out, const SSFBN_t *d, const SSFBN_t *rBlin
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: RSA private-key operation using CRT, with message (base) and exponent blinding.     */
 /* --------------------------------------------------------------------------------------------- */
+/* Not inlined so LTO keeps its frame off the sign entry point's frame (the stack peak) */
+SSF_NOINLINE
 static bool _SSFRSAPrivateOpCRT(const SSFBN_t *c, uint16_t nLimbs, const SSFBN_t *n,
                                 const SSFBN_t *e, const SSFBN_t *p, const SSFBN_t *q,
                                 const SSFBN_t *dp, const SSFBN_t *dq, const SSFBN_t *qInv,
@@ -786,6 +788,8 @@ cleanup:
 /* --------------------------------------------------------------------------------------------- */
 /* If |p - q| > 2^(halfBits - 100) returns true, else false (FIPS 186-4 Sec. B.3.3 step 5.4).    */
 /* --------------------------------------------------------------------------------------------- */
+/* Not inlined so LTO keeps its frame off SSFRSAKeyGen's frame (the stack peak) */
+SSF_NOINLINE
 bool SSFRSAFipsPrimeDistanceOK(const SSFBN_t *p, const SSFBN_t *q, uint16_t halfBits)
 {
     SSFBN_DEFINE(diff, SSF_BN_MAX_LIMBS);
@@ -814,6 +818,8 @@ bool SSFRSAFipsPrimeDistanceOK(const SSFBN_t *p, const SSFBN_t *q, uint16_t half
 /* --------------------------------------------------------------------------------------------- */
 /* If d > 2^halfBits returns true, else false (FIPS 186-4 Sec. B.3.1 Wiener-attack lower bound). */
 /* --------------------------------------------------------------------------------------------- */
+/* Not inlined so LTO keeps its frame off SSFRSAKeyGen's frame (the stack peak) */
+SSF_NOINLINE
 bool SSFRSAFipsDLowerBoundOK(const SSFBN_t *d, uint16_t halfBits)
 {
     SSF_REQUIRE(d != NULL);
@@ -827,6 +833,8 @@ bool SSFRSAFipsDLowerBoundOK(const SSFBN_t *d, uint16_t halfBits)
 /* --------------------------------------------------------------------------------------------- */
 /* If gcd(e, p-1) == 1 and gcd(e, q-1) == 1 returns true, else false.                            */
 /* --------------------------------------------------------------------------------------------- */
+/* Not inlined so LTO keeps its frame off SSFRSAKeyGen's frame (the stack peak) */
+SSF_NOINLINE
 bool SSFRSAFipsECoprimeOK(const SSFBN_t *e, const SSFBN_t *pMinus1, const SSFBN_t *qMinus1)
 {
     SSFBN_DEFINE(eW, SSF_BN_MAX_LIMBS);

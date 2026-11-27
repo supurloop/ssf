@@ -1690,6 +1690,8 @@ void SSFBNGcd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b)
 /* --------------------------------------------------------------------------------------------- */
 /* Computes q = a / b and rem = a mod b via shift-subtract long division.                        */
 /* --------------------------------------------------------------------------------------------- */
+/* Not inlined so LTO keeps its frame off SSFRSAKeyGen's frame (the stack peak) */
+SSF_NOINLINE
 void SSFBNDivMod(SSFBN_t *q, SSFBN_t *rem, const SSFBN_t *a, const SSFBN_t *b)
 {
     SSFBN_DEFINE(shifted, SSF_BN_MAX_LIMBS);
@@ -2434,6 +2436,8 @@ void SSFBNModMulNISTPrime(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const 
 /* --------------------------------------------------------------------------------------------- */
 /* If a^(-1) mod m exists for prime m and is verified then writes r, returns true, else false.   */
 /* --------------------------------------------------------------------------------------------- */
+/* Not inlined so LTO keeps its frame off SSFRSAKeyGen's frame (the stack peak) */
+SSF_NOINLINE
 bool SSFBNModInv(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
 {
     SSFBN_DEFINE(t, SSF_BN_MAX_MOD_LIMBS); /* m - 2, then a * r mod m: both below m */

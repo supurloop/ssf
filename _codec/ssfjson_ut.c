@@ -32,6 +32,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
 #include "ssfjson.h"
 #if SSF_JSON_GOBJ_ENABLE == 1
 #include "ssfgobj.h"
@@ -477,6 +478,161 @@ static bool _SSFJsonUTNest(char *out, size_t outSize, uint32_t depth)
     return true;
 }
 
+#if SSF_JSON_CONFIG_MAX_IN_LEN >= 8u
+/* Writes {"k":"aa..a"} (or ["aa..a"] when isArray) of exactly len bytes plus a NUL into out. */
+static void _SSFJsonUTFill(char *out, size_t outSize, size_t len, bool isArray)
+{
+    const char *pre = (isArray ? "[\"" : "{\"k\":\"");
+    size_t preLen = strlen(pre);
+
+    SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE(len >= (preLen + 2u));
+    SSF_REQUIRE(outSize > len);
+
+    memcpy(out, pre, preLen);
+    memset(&out[preLen], 'a', (len - preLen) - 2u);
+    out[len - 2u] = '"';
+    out[len - 1u] = (isArray ? ']' : '}');
+    out[len] = 0;
+}
+#endif /* SSF_JSON_CONFIG_MAX_IN_LEN >= 8 */
+
+/* Checks input of exactly SSF_JSON_CONFIG_MAX_IN_LEN bytes is accepted and one more refused. */
+static void _SSFJsonUTMaxLen(void)
+{
+#if SSF_JSON_CONFIG_MAX_IN_LEN >= 8u
+    static char js[SSF_JSON_CONFIG_MAX_IN_LEN + 2u];
+    static char out[SSF_JSON_CONFIG_MAX_IN_LEN];
+    SSFGPath_t path[SSF_JSON_CONFIG_MAX_IN_DEPTH + 1];
+    SSFJsonType_t jt;
+    size_t index;
+    size_t start;
+    size_t end;
+    size_t outLen;
+    size_t valLen;
+    size_t k;
+    size_t elem0 = 0;
+    uint8_t form;
+
+    for (form = 0; form < 2u; form++)
+    {
+        bool isArray = (form == 1u);
+
+        memset((void *)path, 0, sizeof(path));
+        /* Top-level array? */
+        if (isArray)
+        {
+            /* Yes, the string is element 0 */
+            SSF_GPATH_SET_INDEX(path[0], &elem0);
+            valLen = SSF_JSON_CONFIG_MAX_IN_LEN - 4u;
+        }
+        else
+        {
+            /* No, the string is member "k" */
+            SSF_GPATH_SET_KEY(path[0], "k");
+            valLen = SSF_JSON_CONFIG_MAX_IN_LEN - 8u;
+        }
+
+        /* Exactly the limit: accepted, and the whole value comes back */
+        _SSFJsonUTFill(js, sizeof(js), SSF_JSON_CONFIG_MAX_IN_LEN, isArray);
+        SSF_ASSERT(strlen(js) == SSF_JSON_CONFIG_MAX_IN_LEN);
+        SSF_ASSERT(SSFJsonIsValid(js));
+        SSF_ASSERT(SSFJsonMessage(js, &index, &start, &end, NULL, 0, &jt));
+        memset(out, 0x55, sizeof(out));
+        SSF_ASSERT(SSFJsonGetString(js, path, out, sizeof(out), &outLen));
+        SSF_ASSERT((outLen == valLen) && (out[valLen] == 0));
+        for (k = 0; k < valLen; k++) SSF_ASSERT(out[k] == 'a');
+
+        /* One byte over: refused by every entry point */
+        _SSFJsonUTFill(js, sizeof(js), (SSF_JSON_CONFIG_MAX_IN_LEN + 1u), isArray);
+        SSF_ASSERT(SSFJsonIsValid(js) == false);
+        SSF_ASSERT(SSFJsonMessage(js, &index, &start, &end, NULL, 0, &jt) == false);
+        SSF_ASSERT(SSFJsonGetString(js, path, out, sizeof(out), &outLen) == false);
+    }
+#endif /* SSF_JSON_CONFIG_MAX_IN_LEN >= 8 */
+}
+
+/* Parses an AWS CreateCertificateFromCsr-shaped response of about 3.5 KB, if the limit allows. */
+static void _SSFJsonUTAwsResponse(void)
+{
+    static char js[4096];
+    static char pem[2400];
+    static char out[2400];
+    static char token[1301];
+    SSFGPath_t path[SSF_JSON_CONFIG_MAX_IN_DEPTH + 1];
+    size_t pemLen = 0;
+    size_t len = 0;
+    size_t outLen;
+    size_t k;
+    int n;
+
+    /* PEM with real newlines, and the same PEM JSON-escaped into the response */
+    n = snprintf(pem, sizeof(pem), "-----BEGIN CERTIFICATE-----\n");
+    pemLen += (size_t)n;
+    for (k = 0; k < 30u; k++)
+    {
+        n = snprintf(&pem[pemLen], sizeof(pem) - pemLen,
+                     "MIIDWTCCAkGgAwIBAgIUQ%02uv5yNHZtRQ3kDnPKWEEQf8r0mmQwDQYJKoZIhvcNAQEL\n",
+                     (unsigned int)k);
+        pemLen += (size_t)n;
+    }
+    n = snprintf(&pem[pemLen], sizeof(pem) - pemLen, "-----END CERTIFICATE-----\n");
+    pemLen += (size_t)n;
+    SSF_ASSERT(pemLen < sizeof(pem));
+    for (k = 0; k < (sizeof(token) - 1u); k++)
+    {
+        token[k] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"[k % 64u];
+    }
+    token[sizeof(token) - 1u] = 0;
+
+    n = snprintf(js, sizeof(js), "{\"certificateOwnershipToken\":\"%s\",\"certificateId\":\"%s\","
+                 "\"certificatePem\":\"", token,
+                 "4e2f5f0e4d4b8c1f6e0c9d7a3b2c1d0e4e2f5f0e4d4b8c1f6e0c9d7a3b2c1d0e");
+    len = (size_t)n;
+    for (k = 0; k < pemLen; k++)
+    {
+        /* Newline in the PEM? */
+        if (pem[k] == '\n')
+        {
+            /* Yes, JSON-escape it */
+            js[len++] = '\\';
+            js[len++] = 'n';
+        }
+        else
+        {
+            /* No, copy it */
+            js[len++] = pem[k];
+        }
+    }
+    js[len++] = '"';
+    js[len++] = '}';
+    js[len] = 0;
+    SSF_ASSERT((len > 3400u) && (len < 3700u));
+
+    memset((void *)path, 0, sizeof(path));
+    SSF_GPATH_SET_KEY(path[0], "certificatePem");
+    /* Does the response fit the configured limit? */
+    if (len <= SSF_JSON_CONFIG_MAX_IN_LEN)
+    {
+        /* Yes, every field extracts and the PEM's escaped newlines are real again */
+        SSF_ASSERT(SSFJsonIsValid(js));
+        SSF_ASSERT(SSFJsonGetString(js, path, out, sizeof(out), &outLen));
+        SSF_ASSERT((outLen == pemLen) && (memcmp(out, pem, pemLen) == 0));
+        SSF_GPATH_SET_KEY(path[0], "certificateOwnershipToken");
+        SSF_ASSERT(SSFJsonGetString(js, path, out, sizeof(out), &outLen));
+        SSF_ASSERT((outLen == strlen(token)) && (memcmp(out, token, outLen) == 0));
+        SSF_GPATH_SET_KEY(path[0], "certificateId");
+        SSF_ASSERT(SSFJsonGetString(js, path, out, sizeof(out), &outLen));
+        SSF_ASSERT(outLen == 64u);
+    }
+    else
+    {
+        /* No, it is refused as a whole */
+        SSF_ASSERT(SSFJsonIsValid(js) == false);
+        SSF_ASSERT(SSFJsonGetString(js, path, out, sizeof(out), &outLen) == false);
+    }
+}
+
 void SSFJsonUnitTest(void)
 {
     uint32_t i;
@@ -486,6 +642,10 @@ void SSFJsonUnitTest(void)
     int64_t outI64;
     SSFGPath_t path[SSF_JSON_CONFIG_MAX_IN_DEPTH + 1];
     SSFGPath_t gpath[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+
+    /* ---- SSF_JSON_CONFIG_MAX_IN_LEN: exactly the limit, one over, an AWS-sized response ---- */
+    _SSFJsonUTMaxLen();
+    _SSFJsonUTAwsResponse();
 
     /* ---- AUDIT JSON-2: object nesting counts toward SSF_JSON_CONFIG_MAX_IN_DEPTH ---- */
     /* Objects nested under a skipped member must still count toward the depth limit */
@@ -504,7 +664,8 @@ void SSFJsonUnitTest(void)
         memset((void *)path, 0, sizeof(path));
         SSF_GPATH_SET_KEY(path[0], "a");
         SSF_ASSERT(SSFJsonGetType(nest, path) == SSF_JSON_TYPE_ERROR);
-        SSF_ASSERT(_SSFJsonUTNest(nest, sizeof(nest), SSF_JSON_CONFIG_MAX_IN_LEN / 6u) == true);
+        SSF_ASSERT(_SSFJsonUTNest(nest, sizeof(nest), ((SSF_JSON_CONFIG_MAX_IN_LEN - 2u) / 6u)) ==
+                   true);
         SSF_ASSERT(SSFJsonIsValid(nest) == false);
 
         /* A path down the deepest allowed nesting still reaches the value */
@@ -1570,7 +1731,7 @@ void SSFJsonUnitTest(void)
                                         &strOutLen) == true);
             SSF_ASSERT(strOutLen == 1);
             SSF_ASSERT(strOutLen == strlen(strOut));
-            SSF_ASSERT(memcmp(strOut, &strs[aidx1], strOutLen));
+            SSF_ASSERT(memcmp(strOut, strs[aidx1], strOutLen) == 0);
 #if SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE == 1
             SSF_ASSERT(SSFJsonGetDouble(_jtsComplex[i], path, &d) == false);
 #endif /* SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE */

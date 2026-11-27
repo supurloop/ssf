@@ -13,6 +13,12 @@
 #   fb256off     SSF_EC_CONFIG_FIXED_BASE_P256 0
 #   fb384off     SSF_EC_CONFIG_FIXED_BASE_P384 0
 #
+# JSON parser limits (ssfjson), raised from their defaults:
+#
+#   json4k       SSF_JSON_CONFIG_MAX_IN_LEN 4095 (what ssfawsprov needs)
+#   jsonbig      SSF_JSON_CONFIG_MAX_IN_LEN 65534
+#   jsondepth8   SSF_JSON_CONFIG_MAX_IN_DEPTH 8
+#
 # The curve / RSA-size combinations and crypto profiles of run.sh (which needs MSBuild on
 # Windows and runs the full suite), here with the targeted tests:
 #
@@ -26,8 +32,8 @@
 #
 # Each variant is exported from the working tree (including uncommitted edits and new
 # untracked files) into its own directory under build-cov/variants/, so the working tree is
-# never modified. Only the RSA/EC-dependent unit tests run, one process each, so a full sweep
-# takes well under a minute on a multi-core host.
+# never modified. Only the RSA/EC-dependent and JSON unit tests run, one process each, so a
+# full sweep takes a few minutes on a multi-core host.
 #
 # Usage:  ./tools/config-matrix/features.sh [variant ...]   (default: all)
 #
@@ -39,7 +45,7 @@ set -u
 script_dir=$(cd -- "$(dirname -- "$0")" && pwd)
 R=$(cd -- "$script_dir/../.." && pwd)
 V=$R/build-cov/variants
-TESTS="SSFRSAUnitTest SSFECUnitTest SSFECDSAUnitTest SSFX509UnitTest SSFCMSUnitTest SSFTLSUnitTest SSFPKeyUnitTest SSFTLSCUnitTest"
+TESTS="SSFRSAUnitTest SSFECUnitTest SSFECDSAUnitTest SSFX509UnitTest SSFCMSUnitTest SSFTLSUnitTest SSFPKeyUnitTest SSFTLSCUnitTest SSFJsonUnitTest SSFGObjUnitTest"
 
 case "$(uname -s)" in
     Linux)  ninja_file=build-linux.ninja ;;
@@ -58,6 +64,9 @@ p384off|SSF_EC_CONFIG_ENABLE_P384=0
 signoff|SSF_ECDSA_CONFIG_ENABLE_SIGN=0
 fb256off|SSF_EC_CONFIG_FIXED_BASE_P256=0
 fb384off|SSF_EC_CONFIG_FIXED_BASE_P384=0
+json4k|SSF_JSON_CONFIG_MAX_IN_LEN=4095
+jsonbig|SSF_JSON_CONFIG_MAX_IN_LEN=65534
+jsondepth8|SSF_JSON_CONFIG_MAX_IN_DEPTH=8
 ecc-both|$RSA_OFF
 ecc-p256|$RSA_OFF SSF_EC_CONFIG_ENABLE_P384=0
 ecc-p384|$RSA_OFF SSF_EC_CONFIG_ENABLE_P256=0
@@ -76,6 +85,7 @@ _opt_header() {
         SSF_ECDSA_CONFIG_*) echo _opt/ssfecdsa_opt.h ;;
         SSF_EC_CONFIG_*)    echo _opt/ssfec_opt.h ;;
         SSF_CRYPT_CONFIG_*) echo _opt/ssfcrypt_opt.h ;;
+        SSF_JSON_CONFIG_*)  echo _opt/ssfjson_opt.h ;;
         *)                  echo "" ;;
     esac
 }

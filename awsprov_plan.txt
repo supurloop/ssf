@@ -17,7 +17,7 @@ Sources    : AWS docs read on 2026-11-26. Each fact in section 1 names its page.
                [API] apireference/API_CreateProvisioningTemplate.html
              (developerguide = https://docs.aws.amazon.com/iot/latest/developerguide/)
 Status     : G01 done (commit 9041eba, 2026-11-26). G02 done (commit d510ab3, 2026-11-26).
-             G03 done (2026-11-26, commit "ssfx509: add PKCS#10 CSR encoder").
+             G03 done (commit 0557f94, 2026-11-26). G04 implemented, not yet committed.
              Everything else is plan only.
 
 Layout
@@ -411,22 +411,74 @@ AWSPROV-G03  ssfx509: PKCS#10 CSR encoder
            pass still refused it; no out-of-bounds write). Now refused in both passes.
            Not fixed (pre-existing): subject strings are not checked to be valid UTF-8, for
            certificates and CSRs alike; invalid input gives a non-conforming UTF8String that
-           strict parsers refuse. Inputs come from the caller. Tracked as AWSPROV-G09. ssfx509.md now says C is a
-           PrintableString (it said every value was a UTF8String).
+           strict parsers refuse. Inputs come from the caller. Tracked as AWSPROV-G09.
+           ssfx509.md now says C is a PrintableString (it said every value was a UTF8String).
            Coverage: two failure returns in _SSFX509EncCRIContent (INTEGER 0, empty [0]) cannot
            be reached, since the enclosing size check precedes every write; EncodeTBS has the
            same defensive returns.
 
 AWSPROV-G04  ssfjson: allow a larger input limit per build
-  Why    : The CSR response is ~2.1..2.5 KB (1.8) and SSF_JSON_CONFIG_MAX_IN_LEN is 2047 and
-           not overridable.
-  Change : Wrap SSF_JSON_CONFIG_MAX_IN_LEN (and its _MAX_IN_DEPTH) in #ifndef so a build can
-           pass -DSSF_JSON_CONFIG_MAX_IN_LEN=4095. Keep the default at 2047. Check that internal
-           index types handle values above 2047 (and above 65535, if allowed) and add an #error
-           range check. ssfawsprov will #error if the limit is below what it needs.
-  Test   : ssfjson_ut passes at 2047 and 4095; a new test parses a string of exactly the limit
-           and fails at limit + 1 for both values; add a config-matrix row with 4095.
-  Done   : ./ssf passes in both configurations.
+  Why    : The CreateCertificateFromCsr response is ~2.1..2.5 KB (1.8); SSF_JSON_CONFIG_MAX_IN_LEN
+           is 2047 and a plain #define, so a build cannot raise it without editing the module.
+
+  Found in the code (2026-11-26)
+    - MAX_IN_LEN only bounds a NUL scan at the top-level parse (depth 0 of _SSFJsonArray /
+      _SSFJsonObject): at most MAX_IN_LEN + 1 bytes are read looking for the terminator. No
+      production buffer is sized from it (only unit-test statics), so raising it costs scan
+      time, not RAM.
+    - Positions are size_t, the scan counter uint32_t, depth uint8_t; no uint16_t. The string
+      scanner reads up to index + 3, so a 16-bit size_t needs the limit well below 65535;
+      depth must stay <= 254.
+    - Other modules use #ifndef overrides with #error ranges (e.g. ssftlsc_opt.h); ssfjson_opt.h
+      does not. No test checks MAX_IN_LEN accepted and MAX_IN_LEN + 1 refused.
+
+  Change (_opt/ssfjson_opt.h; no .c change)
+    #ifndef SSF_JSON_CONFIG_MAX_IN_DEPTH            (default 4u)
+    #ifndef SSF_JSON_CONFIG_MAX_IN_LEN              (default 2047u)
+    #error unless 1 <= MAX_IN_DEPTH <= 254
+    #error unless 1 <= MAX_IN_LEN <= SIZE_MAX / 2 and <= 0x7FFFFFFF
+    SIZE_MAX / 2 keeps the scanner's look-ahead from wrapping on 16-bit size_t; 2^31 - 1 keeps
+    the uint32_t scan loop safe. A build then passes -DSSF_JSON_CONFIG_MAX_IN_LEN=4095. Depth
+    override is optional (AWS nests 2 levels) but cheap and consistent; drop it if minimal is
+    preferred.
+
+  Tests (_codec/ssfjson_ut.c)
+    1. Boundary at the built limit (static buffers MAX_IN_LEN + 2): a valid {"k":"aaa..."} of
+       exactly MAX_IN_LEN bytes passes SSFJsonIsValid, SSFJsonMessage and SSFJsonGetString
+       (string intact); one byte longer is refused by all three. Same for a top-level array.
+    2. AWS-shaped smoke test: with MAX_IN_LEN >= 4095 a 3.5 KB {"certificateOwnershipToken":
+       ..., "certificateId": ..., "certificatePem": ...} parses, each field extracts, and the
+       PEM's \n escapes become newlines; at 2047 the same document is refused.
+    3. The existing nesting tests already scale with both macros.
+  Matrix : tools/config-matrix/features.sh rows json4k (MAX_IN_LEN=4095), jsonbig (65534),
+           jsondepth8 (MAX_IN_DEPTH=8); add SSFJsonUnitTest and SSFGObjUnitTest to the tests
+           each row runs; confirm the #define rewrite works inside the #ifndef.
+  Audit  : (not committed) -DSSF_JSON_CONFIG_MAX_IN_LEN=4095 takes effect; each #error fires
+           (0, over cap, depth 0 and 255); time a parse at 65534.
+  Docs   : ssfjson.md configuration table: both overridable, ranges, no RAM cost (longer NUL
+           scan per lookup), input must be NUL-terminated within the limit, every lookup
+           re-parses (O(n) per call); ssfawsprov needs MAX_IN_LEN >= 4095 (M01 #error).
+  Done   : ./ssf and ASan pass; features.sh passes with the new rows; coverage of the new test
+           code; ARM / XC32 no new warnings. One commit, TDD: ssfjson_opt.h, ssfjson_ut.c,
+           ssfjson.md, features.sh. Needs approval (ssfjson, config-matrix script).
+
+  Result : (2026-11-26) Overrides verified with -D at 4095 / 65534 / depth 8 / depth 254 and
+           in the matrix rows; each #error fires (length 0, -1, 2^31, 32768 with a 16-bit
+           SIZE_MAX; depth 0, -1, 255). Boundary mutants of the length check in ssfjson.c: 0 of
+           5 caught by the old tests, 5 of 5 by the new. Worst case at 65534 (3028 escaped
+           members): ~0.08 ms per lookup on the host, linear. Fixed two pre-existing test bugs
+           found while running other limits: a memcmp against a pointer's bytes (passed by
+           chance) and a nesting test that failed when MAX_IN_LEN is a multiple of 6. The test
+           suite needs MAX_IN_LEN >= 1024 and MAX_IN_DEPTH >= 4 (documented). Not changed: a
+           raised limit lets SSFJsonGObjCreate build proportionally more gobj nodes from one
+           document (heap-bounded, pre-existing design).
+  Risk for M04 (pre-existing, not in G04): SSFJsonGetString decodes \uXXXX into two raw bytes
+           (A -> 00 41, not "A"; intended, tested at ssfjson_ut.c:1745), which is not
+           standard JSON. If AWS escapes characters (some encoders write '=' as =), a
+           Base64-padded certificatePem or the ownership token would come back with an
+           embedded NUL. M04 copies the token back as the raw escaped JSON slice (span from
+           SSFJsonMessage), never unescaped; for the PEM, V02 must confirm AWS emits only \n,
+           \/ and \" escapes. If it emits \u escapes, add G10: a standard \u -> UTF-8 decode.
 
 AWSPROV-G05  ssfmqttc: allow AWS-sized client IDs per build
   Why    : AWS client IDs and thing names are up to 128 bytes; the default
@@ -555,6 +607,8 @@ AWSPROV-M04  CreateCertificateFromCsr response parsing
            NUL terminated), extracts certificateId, certificatePem -> DER (SSFPEMDecodeNext,
            label CERTIFICATE) and certificateOwnershipToken. Checks that the certificate parses
            (SSFX509Parse) and that its public key equals the device key; else fail.
+           The token is kept as the raw escaped JSON slice (SSFJsonMessage span), never
+           unescaped, because SSFJsonGetString decodes \uXXXX to two raw bytes (G04 risk).
            SSFAWSProvParseRejected(payload, len, &statusCode, errorCode, errorMessage) for all
            three error topics.
   Test   : Fixtures shaped exactly as [FPA] (replace with V02 captures when available):
@@ -656,7 +710,8 @@ AWSPROV-V01  TLS and MQTT connectivity, before M07
 AWSPROV-V02  Capture real provisioning responses, before finalizing M04/M05 fixtures
   Do     : Using the AWS CLI or SDK (not SSF), run CreateCertificateFromCsr and RegisterThing on
            a test template; save the accepted and rejected payloads (scrub real IDs, keep
-           lengths). Record the token length and total response sizes.
+           lengths). Record the token length and total response sizes. Record every escape
+           AWS uses in string values; any \uXXXX means G10 (standard \u decoding) is needed.
   Done   : Fixtures replaced with captures; G04's limit and the opt-header buffer sizes set
            from measured sizes plus margin.
 

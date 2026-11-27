@@ -122,8 +122,14 @@ extern void *_SSFECDSAECDHTestExitHookCtx;
 
 extern void (*_SSFECDSAKeyGenTestExitHook)(void *ctx,
                                            const SSFBN_t *d,
+                                           const SSFECPoint_t *Q,
                                            const uint8_t *entropy, size_t entropyLen);
 extern void *_SSFECDSAKeyGenTestExitHookCtx;
+
+extern void (*_SSFECDSAPubKeyTestExitHook)(void *ctx,
+                                           const SSFBN_t *d,
+                                           const SSFECPoint_t *Q);
+extern void *_SSFECDSAPubKeyTestExitHookCtx;
 
 /* Test-only fault injection: Sign treats its first N attempts as r == 0. */
 extern uint8_t _SSFECDSASignTestForcedRetries;

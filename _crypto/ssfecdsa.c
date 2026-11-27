@@ -70,8 +70,14 @@ void *_SSFECDSAECDHTestExitHookCtx = NULL;
 
 void (*_SSFECDSAKeyGenTestExitHook)(void *ctx,
                                     const SSFBN_t *d,
+                                    const SSFECPoint_t *Q,
                                     const uint8_t *entropy, size_t entropyLen) = NULL;
 void *_SSFECDSAKeyGenTestExitHookCtx = NULL;
+
+void (*_SSFECDSAPubKeyTestExitHook)(void *ctx,
+                                    const SSFBN_t *d,
+                                    const SSFECPoint_t *Q) = NULL;
+void *_SSFECDSAPubKeyTestExitHookCtx = NULL;
 
 /* Test-only fault injection: Sign treats its first N attempts as r == 0. */
 uint8_t _SSFECDSASignTestForcedRetries = 0u;
@@ -677,15 +683,18 @@ bool SSFECDSAKeyGen(SSFECCurve_t curve, uint8_t *privKey, size_t privKeySize, ui
     ok = true;
 
 cleanup:
-    /* Wipe d, the PRNG state and its entropy seed. */
+    /* Wipe d, the projective Q, the PRNG state and its entropy seed. */
     SSFBNZeroize(&d);
+    SSFBNZeroize(&Q.x);
+    SSFBNZeroize(&Q.y);
+    SSFBNZeroize(&Q.z);
     if (prngInited) SSFPRNGDeInitContext(&prng);
     SSFCryptSecureZero(entropy, sizeof(entropy));
 #if SSF_CONFIG_ECDSA_UNIT_TEST == 1
     if (_SSFECDSAKeyGenTestExitHook != NULL)
     {
         _SSFECDSAKeyGenTestExitHook(_SSFECDSAKeyGenTestExitHookCtx,
-                                    &d, entropy, sizeof(entropy));
+                                    &d, &Q, entropy, sizeof(entropy));
     }
 #endif
     return ok;
@@ -700,6 +709,7 @@ bool SSFECDSAPubKeyFromPrivKey(SSFECCurve_t curve, const uint8_t *privKey, size_
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
     SSFBN_DEFINE(d, SSF_EC_MAX_LIMBS);
     SSFECPOINT_DEFINE(Q, SSF_EC_MAX_LIMBS);
+    bool ok = false;
 
     SSF_REQUIRE(privKey != NULL);
     SSF_REQUIRE(pubKey != NULL);
@@ -709,21 +719,28 @@ bool SSFECDSAPubKeyFromPrivKey(SSFECCurve_t curve, const uint8_t *privKey, size_
     SSF_REQUIRE(pubKeySize >= (1u + (2u * (size_t)c->bytes)));
 
     /* Import and validate private key */
-    if (!SSFBNFromBytes(&d, privKey, privKeyLen, c->limbs)) return false;
-    if (!_SSFECDSAPrivKeyIsValid(&d, c)) return false;
+    if (!SSFBNFromBytes(&d, privKey, privKeyLen, c->limbs)) goto cleanup;
+    if (!_SSFECDSAPrivKeyIsValid(&d, c)) goto cleanup;
 
     /* Q = d * G */
     _SSFECDSAScalarMulBase(&Q, &d, curve);
 
     /* Encode */
-    if (!SSFECPointEncode(&Q, curve, pubKey, pubKeySize, pubKeyLen))
-    {
-        SSFBNZeroize(&d);
-        return false;
-    }
+    ok = SSFECPointEncode(&Q, curve, pubKey, pubKeySize, pubKeyLen);
 
+cleanup:
+    /* Wipe d and the projective Q. */
     SSFBNZeroize(&d);
-    return true;
+    SSFBNZeroize(&Q.x);
+    SSFBNZeroize(&Q.y);
+    SSFBNZeroize(&Q.z);
+#if SSF_CONFIG_ECDSA_UNIT_TEST == 1
+    if (_SSFECDSAPubKeyTestExitHook != NULL)
+    {
+        _SSFECDSAPubKeyTestExitHook(_SSFECDSAPubKeyTestExitHookCtx, &d, &Q);
+    }
+#endif
+    return ok;
 }
 
 /* --------------------------------------------------------------------------------------------- */

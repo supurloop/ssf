@@ -1781,6 +1781,22 @@ static void _SSFBNUTCheckMontInitR2(const SSFBN_t *m)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Asserts SSFBNMontInit(m) runs exactly dbl modular doublings and sqr Montgomery squarings.     */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFBNUTCheckMontInitCounts(const SSFBN_t *m, uint32_t dbl, uint32_t sqr)
+{
+    SSFBNMONT_DEFINE(mont, SSF_BN_MAX_LIMBS);
+
+    SSF_REQUIRE(m != NULL);
+
+    _SSFBNMontInitDoublings = 0u;
+    _SSFBNMontInitSquarings = 0u;
+    SSFBNMontInit(&mont, m);
+    SSF_ASSERT(_SSFBNMontInitDoublings == dbl);
+    SSF_ASSERT(_SSFBNMontInitSquarings == sqr);
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Fills a->limbs[0..n-1] with a pseudo-random pattern below m (top limb cleared); sets a->len.  */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFBNUTFillBelow(SSFBN_t *a, const SSFBN_t *m, uint32_t seed)
@@ -3576,19 +3592,23 @@ void SSFBNUnitTest(void)
 
         /* NIST field primes and the P-256 group order */
         _SSFBNUTCheckMontInitR2(&SSF_BN_NIST_P256);
+        _SSFBNUTCheckMontInitCounts(&SSF_BN_NIST_P256, 9u, 5u);
 #if SSF_BN_CONFIG_MAX_BITS >= 768
         _SSFBNUTCheckMontInitR2(&SSF_BN_NIST_P384);
+        _SSFBNUTCheckMontInitCounts(&SSF_BN_NIST_P384, 13u, 5u);
 #endif
         SSFBNSetZero(&m, 8u);
         m.limbs[0] = 0xFC632551u; m.limbs[1] = 0xF3B9CAC2u; m.limbs[2] = 0xA7179E84u;
         m.limbs[3] = 0xBCE6FAADu; m.limbs[4] = 0xFFFFFFFFu; m.limbs[5] = 0xFFFFFFFFu;
         m.limbs[6] = 0x00000000u; m.limbs[7] = 0xFFFFFFFFu;
         _SSFBNUTCheckMontInitR2(&m);
+        _SSFBNUTCheckMontInitCounts(&m, 9u, 5u);
 
         /* 3 limbs (w = 96 = 3 * 2^5) with the top bit set, then inside the top limb */
         m.len = 3u;
         m.limbs[0] = 0x89ABCDEFu; m.limbs[1] = 0x01234567u; m.limbs[2] = 0x80000001u;
         _SSFBNUTCheckMontInitR2(&m);
+        _SSFBNUTCheckMontInitCounts(&m, 4u, 5u);
         m.limbs[2] = 0x00012345u;
         _SSFBNUTCheckMontInitR2(&m);
 
@@ -3597,12 +3617,14 @@ void SSFBNUnitTest(void)
         m.limbs[0] = 0x2468ACE1u;
         m.limbs[1] = 0x00000017u;
         _SSFBNUTCheckMontInitR2(&m);
+        _SSFBNUTCheckMontInitCounts(&m, 96u, 5u);
 
         /* One limb: smallest odd moduli above 1 and the full-width extreme */
         SSFBNSetUint32(&m, 3u, 1u);
         _SSFBNUTCheckMontInitR2(&m);
         SSFBNSetUint32(&m, 0xFFFFFFFFu, 1u);
         _SSFBNUTCheckMontInitR2(&m);
+        _SSFBNUTCheckMontInitCounts(&m, 2u, 5u);
 
         /* m == 1: R^2 mod 1 is 0 */
         SSFBNSetUint32(&m, 1u, 1u);
@@ -3635,7 +3657,7 @@ void SSFBNUnitTest(void)
         _SSFBNUTCheckMontInitR2(&SSF_BN_NIST_P256);
 
 #if SSF_BN_CONFIG_MAX_BITS >= 4096
-        /* 2048-bit full-width modulus: R^2 matches, using only 2 doublings */
+        /* 2048-bit full-width modulus: R^2 matches with 65 doublings and 5 squarings */
         m.len = 64u;
         for (k = 0u; k < 64u; k++)
         {
@@ -3644,12 +3666,10 @@ void SSFBNUnitTest(void)
         m.limbs[0] |= 1u;
         m.limbs[63] |= 0x80000000u;
         _SSFBNUTCheckMontInitR2(&m);
-        _SSFBNMontInitDoublings = 0u;
-        SSFBNMontInit(&mont, &m);
-        SSF_ASSERT(_SSFBNMontInitDoublings == 2u);
+        _SSFBNUTCheckMontInitCounts(&m, 65u, 5u);
 #endif
 #if SSF_BN_CONFIG_MAX_BITS >= 6144
-        /* 3072-bit full-width modulus (w = 3 * 2^10): 4 doublings */
+        /* 3072-bit full-width modulus (w = 3 * 2^10): 97 doublings and 5 squarings */
         m.len = 96u;
         for (k = 0u; k < 96u; k++)
         {
@@ -3658,9 +3678,19 @@ void SSFBNUnitTest(void)
         m.limbs[0] |= 1u;
         m.limbs[95] |= 0x80000000u;
         _SSFBNUTCheckMontInitR2(&m);
-        _SSFBNMontInitDoublings = 0u;
-        SSFBNMontInit(&mont, &m);
-        SSF_ASSERT(_SSFBNMontInitDoublings == 4u);
+        _SSFBNUTCheckMontInitCounts(&m, 97u, 5u);
+#endif
+#if SSF_BN_CONFIG_MAX_BITS >= 8192
+        /* 4096-bit full-width modulus (w = 2^12): 129 doublings and 5 squarings */
+        m.len = 128u;
+        for (k = 0u; k < 128u; k++)
+        {
+            m.limbs[k] = (SSFBNLimb_t)(0x6A09E667u * (uint32_t)(k + 3u));
+        }
+        m.limbs[0] |= 1u;
+        m.limbs[127] |= 0x80000000u;
+        _SSFBNUTCheckMontInitR2(&m);
+        _SSFBNUTCheckMontInitCounts(&m, 129u, 5u);
 #endif
     }
 

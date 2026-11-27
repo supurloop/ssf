@@ -105,7 +105,7 @@ other big-integer libraries.
   (4 squares + 1 multiply per 4 bits) versus 2 per bit for a bit-by-bit ladder, after
   amortising the 14-MontMul precompute.
 - **Montgomery context reuse is an important optimisation.** Initializing a `SSFBNMont_t`
-  with [`SSFBNMontInit()`](#montinit) costs about a dozen Montgomery squarings (it computes
+  with [`SSFBNMontInit()`](#montinit) costs about six Montgomery squarings (it computes
   `R² mod m`), as much as a short exponentiation. For
   repeated operations against the same modulus — RSA sign/verify loops, DH key rotation,
   Miller-Rabin witness rounds — initialise once and reuse the context across
@@ -828,10 +828,12 @@ must be odd (every cryptographic modulus used with this module is). `ctx->len` a
 embedded `mod`/`rr` lengths are set from `m->len`, which must not exceed
 [`SSF_BN_MAX_MOD_LIMBS`](#ssf-bn-max-mod-limbs). `R²` is built from `2^(L-1)`, where `L` is
 the bit length of `m`: `w - L + 1 + j` modular doublings reach `2^(w+j) mod m`, with
-`w = 32 × len = j × 2^s` and `j` odd, then `s` Montgomery squarings each double the exponent
-offset up to `2^(2w)`. A full-width 2048-bit modulus takes 2 doublings and 11 squarings. The
-doubling count depends only on `L` and `len`, which are public for RSA moduli and fixed by the
-key size for their primes. Every step is constant-time. `m` may carry leading zero limbs (it
+`w = 32 × len = j × 2^s`, then `s` Montgomery squarings each double the exponent offset up to
+`2^(2w)`. `j` starts as the odd part of `w` and takes factors of two from `s` while
+`2j <= len`, because about `len` doublings cost as much as one squaring. A full-width
+2048-bit modulus takes 65 doublings and 5 squarings (P-256: 9 and 5). The doubling count
+depends only on `L` and `len`, which are public for RSA moduli and fixed by the key size for
+their primes. Every step is constant-time. `m` may carry leading zero limbs (it
 then takes more doublings), and `m == 1` gives `rr == 0`. `R²` is built in `ctx->rr` itself
 (Montgomery squaring reads `mod` and `mp`, never `rr`), so no key-derived copy is left on the
 stack and the frame is a few dozen bytes. After copying `m` into `ctx->mod` only that copy is read, so `m` may be

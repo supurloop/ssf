@@ -70,8 +70,9 @@ void (*_SSFBNScrubTestHook)(const void *buf, size_t bufSize) = NULL;
 uint32_t _SSFBNKaratsubaPropIters = 0u;
 uint32_t _SSFBNToBytesScans = 0u;
 
-/* Test-only count of the modular doublings SSFBNMontInit runs. */
+/* Test-only counts of the modular doublings and Montgomery squarings SSFBNMontInit runs. */
 uint32_t _SSFBNMontInitDoublings = 0u;
+uint32_t _SSFBNMontInitSquarings = 0u;
 
 /* Test-only counts: MontMul inner-loop and MontSquare carry-loop iterations. */
 uint32_t _SSFBNMontMulIters = 0u;
@@ -2676,7 +2677,7 @@ void SSFBNMontInit(SSFBNMont_t *ctx, const SSFBN_t *m)
         ctx->mp = (SSFBNLimb_t)(-(int32_t)x);
     }
 
-    /* R^2 mod m for R = 2^w, w = 32 * len = j * 2^s (j odd); w can exceed 16 bits */
+    /* R^2 mod m for R = 2^w, w = 32 * len = j * 2^s; w can exceed 16 bits */
     w = (uint32_t)ctx->len * SSF_BN_LIMB_BITS;
     bitLen = SSFBNBitLen(&ctx->mod);
     /* From here only ctx->mod is read, so m may alias ctx->rr */
@@ -2698,6 +2699,13 @@ void SSFBNMontInit(SSFBNMont_t *ctx, const SSFBN_t *m)
             s++;
         }
 
+        /* Move factors of two from s into j up to j = len: len doublings cost about a squaring */
+        while ((s > 0u) && ((j << 1) <= (uint32_t)ctx->len))
+        {
+            j <<= 1;
+            s--;
+        }
+
         /* Double to 2^(w + j) mod m, which is 2^j in Montgomery form */
         for (k = 0u; k < (((w - bitLen) + 1u) + j); k++)
         {
@@ -2709,6 +2717,7 @@ void SSFBNMontInit(SSFBNMont_t *ctx, const SSFBN_t *m)
         for (k = 0u; k < s; k++)
         {
             SSFBNMontSquare(r2, r2, ctx);
+            _SSF_BN_COUNT(_SSFBNMontInitSquarings);
         }
     }
     /* No, r2 stays 0 */

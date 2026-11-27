@@ -337,8 +337,9 @@ extern uint32_t _SSFBNTrialDivRejects;
 extern uint32_t _SSFBNKaratsubaPropIters;
 extern uint32_t _SSFBNToBytesScans;
 
-/* Test-only count of the modular doublings SSFBNMontInit runs. */
+/* Test-only counts of the modular doublings and Montgomery squarings SSFBNMontInit runs. */
 extern uint32_t _SSFBNMontInitDoublings;
+extern uint32_t _SSFBNMontInitSquarings;
 
 /* Test-only counts: MontMul inner-loop and MontSquare carry-loop iterations. */
 extern uint32_t _SSFBNMontMulIters;

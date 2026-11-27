@@ -1,0 +1,298 @@
+SSF RSA / BIGNUM PERFORMANCE AUDIT
+==================================
+Audit date : 2026-11-27
+Scope      : run time of RSA sign / verify / keygen and the ssfbn code under them; what each
+             speedup costs in code size, RAM and security properties. Code at commit e9cd857
+             (branch mqtt). Nothing here is applied to the tree; all numbers are from
+             prototypes in a scratch copy.
+Status     : R5 implemented in the working tree (not committed); every other item OPEN.
+
+SUMMARY
+-------
+Measured (prototypes), ARM instructions, RSA-2048 / RSA-4096:
+
+  #   Change                                    Sign 2048  Verify 2048  Sign 4096  Verify 4096
+  R1  Row kernel for Montgomery mul/square, C   -14.9%     -16.5%       (in R0c)   (in R0c)
+  R2  Same kernel with UMAAL (ARMv7E-M, v6+ A)  -31.9%     -38.8%       (in R0u)   (in R0u)
+  R3  Faster blinding inverse r^-1 mod n         -4.0%      none         -2.5%      none
+  R4  Fused constant-time table select           -0.6%      none         -0.3%      none
+  R5  MontInit: ~len doublings, 5 squarings     -1.9%     -13.0%        -1.4%     -15.4%
+  R0c R1 + R3 + R4 + R5 (portable C)            -20.9%     -26.9%       -22.2%     -30.6%
+  R0u R2 + R3 + R4 + R5 (UMAAL)                 -37.3%     -44.9%       -41.8%     -50.0%
+
+  RSA-2048 keygen (cost model from measured parts, see R9): R0c -16%, R0u -34%,
+  R0u + base-2 pretest (R9a) -44%.
+
+  Code size: client image (M4) +48 B for R0c, +16 B for R0u; ssfbn.o M4 +38 B / M0+ +88 B.
+  RAM: static unchanged; peak stack +56 B on RSA sign and keygen (R4's mask array), verify
+  -16 B, ECC within 8 B.
+  ECC gains too, because SSFBNMul shares the kernel: P-256 sign -1.8% (C) / -5.3% (UMAAL),
+  P-384 sign -3.5% / -8.3%.
+
+  - 82% of RSA-2048 sign is SSFBNMontSquare + SSFBNMontMul. Their inner loops are compiled
+    badly: the 64-bit carry and the uint16_t loop counter are spilled to the stack, about 17
+    instructions per 32x32 limb product. That is the main finding.
+  - The binary-GCD blinding inverse is the second-largest cost (about 12% of sign) and becomes
+    14% of sign once the kernels are fast.
+  - Cortex-M0+ has no 32x32->64 multiply. Every limb product calls __aeabi_lmul (a 64x64
+    multiply). C changes help only a little there; an ARMv6-M assembly kernel is the fix
+    (R7, estimated, not measured).
+
+METHOD
+------
+Counts : the bnzero_report.txt / dbc_hot_audit.txt harness. arm-linux-gnueabihf-gcc 14,
+         -mthumb -march=armv7-a+fp -Os, static, unit tests off, run under qemu-arm
+         -d in_asm,exec,nochain, executed instructions summed. Totals include the fixed
+         harness start-up (about 40 K instructions).
+Check  : every variant's PKCS#1 v1.5 signature compared byte for byte with the known
+         signature (deterministic padding), PSS sign checked by verify, ECC ops checked by
+         their own verify. All variants passed.
+M0+    : ssfbn.c compiled by arm-none-eabi-gcc 15.2 for -mcpu=cortex-m0plus, linked into the
+         same qemu harness with the ARMv6-M libgcc __aeabi_lmul / __aeabi_uidivmod. The rest
+         of the program stays ARMv7. This counts ARMv6-M instructions for the BN code only.
+Size   : arm-none-eabi-gcc 15.2.0 -Os, the codesize_audit.txt client image (app.c,
+         --gc-sections, text + data), plus ssfbn.o text.
+Stack  : painted peak stack in the qemu harness (stackwrap.c), ARMv7 Thumb-2.
+Keygen : too long to trace (7.06 billion instructions). A host build with event counters,
+         using the same deterministic entropy, gives the event counts (it produces the same
+         key: hash ff3f4169 on host and ARM). The ARM cost of each event is measured
+         separately.
+Caveat : instruction counts are not cycles. On Cortex-M4, UMAAL, UMLAL and MUL are single-cycle
+         and loads take 1 to 2 cycles, so instruction ratios are a fair guide to cycle ratios
+         there. The armv7-a target has no hardware divide; Cortex-M4 does. That affects only
+         trial division (R9).
+
+WHERE THE TIME GOES (base, RSA-2048, ARM instructions)
+-------------------------------------------------------
+  Sign 88.3 M:
+    SSFBNMontSquare 51.1 M (58%), SSFBNMontMul 20.9 M (24%);
+    blinding inverse (_SSFBNModInvBinary and its helpers) about 10.8 M (12%);
+    SSFBNCondCopy table scan 3.2 M (3.7%); MontInit R^2 setup about 3.6 M (4%, overlaps the
+    Montgomery numbers above).
+  Verify 2.52 M: MontSquare 2.04 M, MontMul 0.39 M. 11 of the 28 squarings are MontInit's R^2
+    setup.
+  Keygen 7.06 G (this seed: 1,219 candidates, 1,030 rejected by trial division, 197 Miller-
+    Rabin exponentiations at 32.5 M each = 6.40 G, 91%; trial division about 0.39 G, 5.5%).
+
+FINDINGS
+--------
+R1. Row kernel for the Montgomery inner loops (portable C)                            OPEN
+    Change: one static helper _SSFBNMulAddRow(r, x, b, a, n, carry) computes
+    r[j] = low(a * b[j] + x[j] + carry) with a 32-bit carry and a uint32_t count. MontMul (both
+    CIOS loops; the reduction writes r = x - 1 to fuse the word shift), MontSquare (triangle
+    and reduction) and _SSFBNSchoolbookMulRaw call it. The loop is unrolled by two.
+    Measured: sign -14.9%, verify -16.5% (no unroll: -12.8% / -13.4%). P-256 about -1%.
+    Code: ssfbn.o -106 B (M4), -148 B (M0+). RAM: none.
+    Constant time: unchanged (no data-dependent branch; same operation count).
+    Tried and rejected: a fused FIOS loop (multiply and reduce in one pass) is slower:
+    -12.2% in C and -28.7% with UMAAL, against -14.9% and -31.9% for the row kernel.
+    Unit tests: the _SSFBNMontMulIters / _SSFBNMontSqrCarryIters counters must be counted per
+    row (n per call) to keep their exact-count asserts.
+
+R2. UMAAL in the row kernel (ARMv7E-M: M4, M7, M33/M55 with DSP; ARMv6+ A/R)           OPEN
+    Change: the R1 helper body becomes one "umaal lo, carry, a, b[j]" per limb (GCC/Clang
+    inline asm, as SSF_OPTIMIZER_BARRIER already uses), guarded by __ARM_FEATURE_DSP or an
+    A/R-profile __ARM_ARCH >= 6; every other target keeps R1's C.
+    Measured: sign -31.9%, verify -38.8% (no unroll: -24.0% / -25.7%). P-256 verify -2.5%.
+    Code: ssfbn.o -132 B (M4). RAM: none.
+    Trade-offs: the first inline asm in ssfbn. GCC/Clang only (IAR and Arm Compiler 5 fall
+    back to C unless given their own syntax). Cortex-M3 (ARMv7-M, no DSP) has no UMAAL and
+    uses the C path. UMAAL has fixed timing, so constant time is kept.
+
+R3. Faster blinding inverse r^-1 mod n                                                OPEN
+    Today _SSFBNModInvBinary runs every step at the full width of n, and halving x needs a
+    separate add pass plus a shift pass.
+    (a) Prototyped: shrink the working length of u and v as they lose limbs, and halve x in
+        one pass (x + (m if odd)) >> 1. Measured: sign -4.0% (2048) / -2.5% (4096).
+        Code +68 B (M4) / +148 B (M0+). RAM none. Already variable-time, by design
+        (ssfrsa.md); no change to what leaks.
+    (b) Not prototyped: invert r mod p and mod q (half width, so about half the binary-GCD
+        work) and unblind m1 and m2 before the CRT recombination, dropping the full-width
+        unblinding multiply. Estimate: a further -4 to -6% of sign. The exponentiations still
+        see only blinded input.
+    (c) Not prototyped: a constant-time inverse (Bernstein-Yang safegcd or Pornin's
+        optimized binary GCD). This removes the documented variable-time step in signing and
+        is several times faster than the bit-at-a-time loop. Estimate: -10 to -12% of sign
+        after R0. Cost about 1-2 KB code and the most review effort of any item here.
+
+R4. Fused constant-time table select in _SSFBNModExpMontCore                          OPEN
+    Change: 16 masks computed once per window, then one pass over the limbs ORs in the
+    selected entry, instead of 16 SSFBNCondCopy calls.
+    Measured: sign -0.6% (2048) / -0.3% (4096). Code +64 B (M4) / +80 B (M0+). RAM: +56 B
+    peak stack on sign and keygen (the 16-word mask array); computing the mask in the loop
+    instead avoids that at a small speed cost. Constant time: unchanged (every entry read).
+    Low value; do it only alongside R1/R2.
+
+R5. MontInit: more doublings, fewer squarings for R^2 mod m                    DONE (tree)
+    MontInit doubles 2^(bitLen-1) up to 2^(w+j) and then squares s times (w = j * 2^s).
+    For RSA moduli w is a power of two, so it does 1 doubling and 10-11 full Montgomery
+    squarings. Moving factors of two from s into j, up to j = 64, swaps about 6 squarings for
+    63 cheap modular doublings.
+    Measured (j <= 64): verify -12.8% (2048) / -15.1% (4096), sign -1.8% / -1.4%.
+    (j <= 16: verify -10.8%; j <= 256: worse.)
+    Code +12 B (M4) / +24 B (M0+). RAM: none. Constant time: the doubling count depends
+    only on public lengths. Best ratio of gain to effort in this audit; it also speeds up
+    every RSA and Miller-Rabin MontInit and every SSFBNMod / SSFBNModMulCT of an odd modulus.
+
+    R5 IMPLEMENTATION PLAN
+    Cap rule, measured before choosing (instructions, base / j <= 64 / j <= len):
+      RSA-2048 verify   2,519,352 / 2,198,169 / 2,198,187
+      RSA-4096 verify   9,806,045 / 8,324,341 / 8,307,369
+      P-256 sign        5,340,789 / 5,376,174 / 5,325,359   (fixed 64 is slower on ECC)
+      P-384 sign       13,578,397 /13,601,334 /13,564,483
+    A fixed cap of 64 doublings is too many for 8- and 12-limb moduli, where a squaring is
+    cheap. Rule chosen: double j while 2j <= len (limbs), taking that factor of two from s.
+    That gives about len doublings, so doubling work stays about equal to one squaring.
+    The rule depends only on len, which is public.
+    Expected counts (doublings = w - bitLen + 1 + j; squarings = s):
+      Modulus                  before (dbl / sqr)   after (dbl / sqr)
+      P-256  (8 limbs)              2 / 8                9 / 5
+      P-384  (12 limbs, w=3*2^7)    4 / 7               13 / 5
+      RSA-2048 n (64 limbs)         2 / 11              65 / 5
+      RSA-3072 n (96, w=3*2^10)     4 / 10              97 / 5
+      RSA-4096 n (128 limbs)        2 / 12             129 / 5
+      3 limbs, top bit set          4 / 5                4 / 5   (2j > len: unchanged)
+      1 limb 0xFFFFFFFF             2 / 5                2 / 5
+      4 limbs, bit length 37       93 / 7               96 / 5
+    Steps (TDD):
+      1. Add a test-only counter _SSFBNMontInitSquarings next to _SSFBNMontInitDoublings
+         (ssfbn.c / ssfbn.h). Instrumentation only; the suite must still pass.
+      2. Red: in ssfbn_ut.c, assert the "after" (doublings, squarings) pairs above for every
+         shape the BN-O1 block already checks for R^2 correctness, replacing the old 2048
+         (== 2) and 3072 (== 4) doubling asserts; add 4096 under SSF_BN_CONFIG_MAX_BITS >=
+         8192. Run the BN unit test and see it fail.
+      3. Green: in SSFBNMontInit, after splitting w = j * 2^s, add the j-doubling loop. Run the
+         BN, RSA, EC and ECDSA unit tests (every MontInit consumer).
+      4. Docs: ssfbn.md MontInit section ("2 doublings and 11 squarings") and the "about a
+         dozen squarings" note.
+      5. Measure before (e9cd857) and after: speed of every RSA and ECDSA / ECDH sign and
+         verify path, client image size (M4, M0+, with and without LTO), static RAM and
+         painted peak stack.
+      6. Only if asked: the full ./ssf and ./ssf-asan suites, then commit.
+
+    R5 RESULTS
+    TDD: step 1 counter added, BN unit test passed. Step 2 count asserts failed as expected
+    (ssfbn_ut.c, P-256: 2 doublings, expected 9). Step 3 rule added; BN, EC, ECDSA and RSA
+    unit tests pass (host driver; the full suites were not run). Host build: 0 warnings.
+    Files: ssfbn.c (rule + _SSFBNMontInitSquarings), ssfbn.h (extern), ssfbn_ut.c
+    (_SSFBNUTCheckMontInitCounts on 9 shapes, new 4096-bit shape), ssfbn.md (MontInit text).
+
+    Speed: ARM instructions, before = e9cd857, after = e9cd857 + R5, unit tests off. Harness
+    start-up subtracted; "verify" = sign+verify minus sign for PSS and ECDSA; ECDH = shared
+    secret only.
+      Operation                    Before          After        Delta
+      RSA-2048 sign PKCS#1       88,246,057     86,613,601     -1.85%
+      RSA-2048 verify PKCS#1      2,479,896      2,158,627    -12.95%
+      RSA-2048 sign PSS          88,409,555     86,777,071     -1.85%
+      RSA-2048 verify PSS         2,520,905      2,199,840    -12.74%
+      RSA-4096 sign PKCS#1      555,331,538    547,730,648     -1.37%
+      RSA-4096 verify PKCS#1      9,766,610      8,267,791    -15.35%
+      RSA-4096 sign PSS         555,528,391    547,927,479     -1.37%
+      RSA-4096 verify PSS         9,845,785      8,347,182    -15.22%
+      RSA-2048 keygen         7,059,297,729  7,046,019,325     -0.19%  (same key generated)
+      P-256 keygen / sign       4,406,670 / 5,301,220   4,402,670 / 5,285,801   -0.09 / -0.29%
+      P-256 verify / ECDH     16,067,180 /15,323,413  16,055,668 /15,319,516   -0.07 / -0.03%
+      P-384 keygen / sign     11,057,538 /13,538,828  11,053,917 /13,524,925   -0.03 / -0.10%
+      P-384 verify / ECDH     41,173,117 /38,501,547  41,162,742 /38,498,029   -0.03 / -0.01%
+      X25519, Ed25519 keygen / sign / verify          within +-0.01% (no ssfbn code)
+
+    Code size: arm-none-eabi-gcc 15.2.0 -Os, client image (text + data, bytes).
+      Image                Before     After   Delta
+      Cortex-M4           103,104   103,120     +16
+      Cortex-M0+          112,228   112,248     +20
+      Cortex-M4, LTO       84,903    84,919     +16
+      Cortex-M0+, LTO      90,039    90,059     +20
+      ssfbn.o: +12 B (M4), +4 B (M0+).
+
+    RAM: static data / bss 96 / 1,052 (LTO 96 / 984) before and after. Painted peak stack
+    (ARM) identical for every operation above (RSA-2048 sign 21,552, PSS sign 22,360, verify
+    9,680, keygen 26,288; P-256 sign 5,112, verify 6,368).
+
+R6. Share Montgomery contexts inside _SSFRSAPrivateOpCRT                              OPEN
+    Not prototyped. Sign builds 3 contexts for n (SSFBNModExpPub for r^e, two
+    SSFBNModMulCTOdd) and 5 for p/q (2 SSFBNMod, 2 SSFBNModExpHalf, 1 SSFBNModMulCTOdd).
+    Building each once needs context-taking internal variants.
+    Estimate after R5: about -1.7% of sign. RAM: an n context held across the CRT body is
+    2 x SSF_BN_MAX_MOD_LIMBS words (1 KB at the 4096-bit configuration) and would sit
+    under the ModExpHalf peak, so up to +1 KB peak stack unless the frames are rearranged.
+    Not recommended on its own.
+
+R7. Cortex-M0+ multiply (ARMv6-M has no UMULL/UMLAL)                                  OPEN
+    Measured on the M0+ BN code (instructions):
+      RSA-2048 sign      base 366.9 M (4.2x the ARMv7 count)   R0c -2.5%
+                         C kernel with 16-bit halves -12.1%
+      RSA-2048 verify    base 12.50 M   R0c -16.5%   C 16-bit halves -25.3%
+    R1 barely helps on M0+, because each limb product is still a call to __aeabi_lmul (a
+    full 64x64 multiply, about 40 instructions) plus about 25 instructions of spills: only
+    r0-r7 are usable. The 16-bit-halves C version avoids the call but still spills (about
+    50 instructions per product).
+    Recommendation: an ARMv6-M assembly row kernel (4 MULS of 16-bit halves, carries in
+    ADCS, no spills; about 20 instructions per product). Estimate: RSA sign and keygen
+    about 2.5x faster on M0+ (not measured). Code about +100-150 B; RAM none.
+
+R8. Window size SSF_BN_MODEXP_WIN_K (configuration, no code change)                   OPEN
+    Measured against K = 4 (default):
+      K = 5   sign -0.5% (2048) / -2.8% (4096)
+              stack +4,096 B (ModExpHalf table) and +8,192 B (ModExpMont, Miller-Rabin)
+              at the 4096-bit configuration
+      K = 3   sign +5.1% / +7.2%   stack -2,048 B / -4,096 B
+    Keep 4. Document K = 3 as the RAM-saving setting and K = 5 as only worth it for
+    4096-bit-heavy builds with RAM to spare.
+
+R9. Key generation                                                                    OPEN
+    Breakdown (above): 91% Miller-Rabin exponentiations, 5.5% trial division. Cost model per
+    exponentiation, measured: base 32.5 M, R0c 26.7 M (-17.9%), R0u 20.4 M (-37.1%).
+    Keygen totals from the model: R0c -16%, R0u -34%.
+    (a) Base-2 strong-probable-prime pretest, constant time, before the random-base rounds.
+        It squares each step and adds a modular doubling plus masked select per exponent
+        bit, instead of the window multiplies and the table. Prototyped: 23.2 M per
+        exponentiation, -28% per rejected composite. With 187 composites and 2 primes in
+        this run: keygen -24% on base, -44% total with R0u. The 2 accepted primes each pay
+        one extra (cheap) test.
+        Code about +200 B. RAM: 2 temporaries plus a context (about 2.5 KB at 4096-bit
+        configuration, in a frame beside, not under, IsProbablePrime's).
+        Compliance: the required random-base Miller-Rabin rounds are unchanged; the pretest
+        only rejects earlier. Confirm with whoever owns FIPS 186 claims.
+    (b) Incremental sieve: keep the candidate's residues mod the small primes and step
+        +2 instead of drawing a new random candidate and dividing again. This makes a larger
+        prime table cheap. With primes up to about 16 K, 24% fewer candidates reach
+        Miller-Rabin. Estimate -20 to -25% of keygen. RAM +0.5 to 4 KB (residues). Flash up to
+        +1.8 KB (table). Trade-off: primes are not drawn exactly uniformly, and FIPS 186
+        B.3.3 draws a fresh random candidate each iteration. Not recommended if FIPS
+        alignment matters.
+    (c) Trial division costs 1.8 M per full pass on armv7-a and M0+ (two 32-bit divides per
+        limb per prime, through __aeabi_uidivmod). Cortex-M4 has UDIV and pays much less.
+        A reciprocal (multiply-shift) remainder would help no-divide targets only. Low value.
+    (d) SSF_RSA_CONFIG_MILLER_RABIN_ROUNDS: 5 is the FIPS 186-5 Table B.1 value for 1024-bit
+        primes. Only the accepted primes pay all the rounds, so lowering it saves about 1%.
+        Leave it.
+
+R10. Smaller items (estimates, not prototyped)                                       OPEN
+    - SSFBNMontConvertOut via a dedicated reduction (REDC only) instead of MontMul by 1:
+      about -2.5% of verify, ~+100 B.
+    - MontSquare: fuse the doubling pass and the diagonal pass: about -1% of RSA.
+    - _SSFBNRawSub / _SSFBNRawAdd use a 64-bit borrow and a uint16_t count (11 instructions
+      per limb). After R3 they are about 5% of sign; a 32-bit form saves maybe 1-2%.
+    - Exponent blinding uses 64-bit factors: 6.25% longer exponents, about 5% of sign.
+      32-bit factors would save about 3%, but this weakens a side-channel defence. Not
+      recommended.
+
+RECOMMENDED ORDER
+-----------------
+  1. R5 (12-15% faster verify, a few lines, no RAM or size cost).
+  2. R1 + R2 together, sharing one helper with a C fallback: the big win for RSA and
+     keygen, and a little for ECC.
+  3. R3 (a), then decide on R3 (c), which buys both speed and a fully constant-time sign.
+  4. R9 (a) if keygen time on device matters.
+  5. R7 if any M0+ port uses RSA.
+  R4, R6, R8, R10: only opportunistically.
+
+NOT CHANGED / NOTES
+-------------------
+  - Every kernel change keeps the fixed operation count, so the constant-time claims in
+    ssfbn.md / ssfrsa.md still hold. R3 (a) changes only the documented variable-time
+    inverse.
+  - The new helpers are hot paths: they would need DBC-exception notes in ssfbn.md, as in
+    dbc_hot_audit.txt.
+  - The full ./ssf and ./ssf-asan suites have not been run on any prototype (prototypes
+    live outside the tree).

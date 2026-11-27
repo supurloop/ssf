@@ -282,11 +282,11 @@ from `ssfport.h`, which must be included first (`ssfoptions.h` does this).
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE` | `128` | Topic names and filters, 2..65536. Also bounds inbound topics; a longer inbound PUBLISH topic is dropped with `SSF_MQTTC_REASON_RX_PUBLISH_TOPIC_TOO_LONG`. |
-| `SSF_MQTTC_CONFIG_MAX_HOST_SIZE` | `64` | Broker host name or address, 2..256 (DNS name limit plus NUL). |
-| `SSF_MQTTC_CONFIG_MAX_CLIENT_ID_SIZE` | `64` | Client identifier, 2..65536. Brokers must accept 1 to 23 characters and may accept longer. |
-| `SSF_MQTTC_CONFIG_MAX_USERNAME_SIZE` | `64` | User name, 2..65536. |
-| `SSF_MQTTC_CONFIG_MAX_PASSWORD_LEN` | `64` | Password bytes, 1..65535. Binary, not NUL terminated. |
+| <a id="opt-strings"></a>`SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE` | `257` | Topic names and filters, 2..65536. Also bounds inbound topics; a longer inbound PUBLISH topic is dropped with `SSF_MQTTC_REASON_RX_PUBLISH_TOPIC_TOO_LONG`. The default fits AWS IoT Core's 256-byte topics. Override with `-D`. |
+| `SSF_MQTTC_CONFIG_MAX_HOST_SIZE` | `256` | Broker host name or address, 2..256 (DNS name limit plus NUL), as in the transports. Override with `-D`. |
+| `SSF_MQTTC_CONFIG_MAX_CLIENT_ID_SIZE` | `129` | Client identifier, 2..65536. Brokers must accept 1 to 23 characters and may accept longer; AWS IoT Core and Azure IoT Hub accept 128. Override with `-D`. |
+| `SSF_MQTTC_CONFIG_MAX_USERNAME_SIZE` | `257` | User name, 2..65536. The default fits the Azure IoT Hub user name form. Override with `-D`. |
+| `SSF_MQTTC_CONFIG_MAX_PASSWORD_LEN` | `512` | Password bytes, 1..65535. Binary, not NUL terminated. The default fits SAS tokens and typical JWTs. Override with `-D`. |
 | `SSF_MQTTC_CONFIG_MAX_SUBSCRIPTIONS` | `8` | Maximum entries in the subscription set, 1..16. All filters are sent in one SUBSCRIBE, so the tx block size must hold them. |
 | <a id="opt-subretry"></a>`SSF_MQTTC_CONFIG_SUB_RETRY_TICKS` | 5 minutes (500 ms in the ssfmqttc unit test build) | Interval at which refused filters are subscribed again, measured from READY and from each refused retry. At least 60 s outside the unit test build (`#error`). Override with `-D`. |
 | <a id="opt-depth"></a>`SSF_MQTTC_CONFIG_RX_PUBLISH_QUEUE_DEPTH` | `4` | Inbound PUBLISH packets held for the application, at least 1. Sizes the rx pool (depth plus one framing block) and the PUBACK capacity of the control pool. |
@@ -295,6 +295,19 @@ from `ssfport.h`, which must be included first (`ssfoptions.h` does this).
 | <a id="opt-hold"></a>`SSF_MQTTC_CONFIG_RX_HOLD_MAX_TICKS` | 10 s (400 ms in the ssfmqttc unit test build, longer than its PINGRESP timeout) | Longest a QoS 1 PUBLISH is held, with reads suspended, waiting for queue space; it is then dropped and acknowledged (`SSF_MQTTC_REASON_RX_PUBLISH_HOLD_TIMEOUT`) and reading resumes. Everything behind it waits too, PINGRESP and PUBACKs for the application's own publishes included, so `txPublishTimeout` and `subscribeTimeout` should exceed it. Override with `-D`. |
 | <a id="opt-openpoll"></a>`SSF_MQTTC_CONFIG_OPEN_POLL_TICKS` | 10 ms | Longest `SSFMQTTCTask()` lets the app loop sleep while the transport resolves the host and connects, at least 1 tick. |
 | <a id="opt-pingresp"></a>`SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT` | 30 s (250 ms in the ssfmqttc unit test build) | Connection is dropped if PINGRESP does not follow PINGREQ within this time. PINGREQ is sent every `keepAliveSec / 4`, which must be at least this value, so the default allows a minimum `keepAliveSec` of 120. The unit test value keeps the same ratio with `keepAliveSec` 1. Override with `-D`. |
+
+The five string limits above size no storage: the client keeps pointers to the application's
+strings, and the limits only bound the length scans and the checks in `SSFMQTTCStart()` and
+`SSFMQTTCTxPublish()`. Raising them costs the client no RAM; the memory a long string needs is in
+the tx block (`txBlockSize`), which must hold the whole CONNECT and each PUBLISH, and an inbound
+topic is delivered only if its PUBLISH fits `rxBlockSize`. An application that sizes its own
+buffers from these constants (for example a copy of each received topic) grows with them.
+Lower them to refuse longer strings early. With `SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE` at 65536 no
+inbound topic is too long (MQTT topics are at most 65535 bytes), so `RX_PUBLISH_TOPIC_TOO_LONG`
+is never reported. Override any of them with `-D` or a `#define` before `ssfoptions.h` is included; values
+outside the ranges above stop the build (`#error`). The defaults were raised from 64 (128 for
+topics) so that AWS IoT client ids (thing names) and topics fit without overrides; with them,
+inbound topics of 128 to 256 bytes are delivered where they were dropped before.
 
 The ssfsm event and timer pools must be sized for the client: see `SSF_SM_MAX_ACTIVE_EVENTS` and
 `SSF_SM_MAX_ACTIVE_TIMERS` in [`_opt/ssfsm_opt.h`](../_opt/ssfsm_opt.h). The client alone can

@@ -17,7 +17,8 @@ Sources    : AWS docs read on 2026-11-26. Each fact in section 1 names its page.
                [API] apireference/API_CreateProvisioningTemplate.html
              (developerguide = https://docs.aws.amazon.com/iot/latest/developerguide/)
 Status     : G01 done (commit 9041eba, 2026-11-26). G02 done (commit d510ab3, 2026-11-26).
-             G03 done (commit 0557f94, 2026-11-26). G04 implemented, not yet committed.
+             G03 done (commit 0557f94, 2026-11-26). G04 done (commit 7900292, 2026-11-26).
+             G05 done (2026-11-26).
              Everything else is plan only.
 
 Layout
@@ -76,8 +77,8 @@ passes ./ssf, and leaves every other module unchanged in behavior.
     fits SSF_TLS_CONFIG_MAX_ALPN_LEN (32).
 
 1.3 MQTT LIMITS [Q]
-  - Client ID: 128 bytes UTF-8, not adjustable. ssfmqttc default is 64 (incl. NUL): too small
-    for clientId = thingName. See G05.
+  - Client ID: 128 bytes UTF-8, not adjustable. ssfmqttc default was 64 (incl. NUL): too
+    small for clientId = thingName. G05 raises it to 129.
   - Thing name: 128 bytes UTF-8, not adjustable.
   - Keep-alive: requests in 1..29 s are treated as 30 s; 0 or > 1200 gets 1200 s. ssfmqttc
     requires keepAliveSec >= 120 with its 30 s PINGRESP timeout. Use 120..1200.
@@ -114,7 +115,7 @@ passes ./ssf, and leaves every other module unchanged in behavior.
     device can simply call CreateCertificateFromCsr again. A repeated CSR therefore leaves no
     permanent orphan certificate.
   - Template name: 1..36 characters, pattern ^[0-9A-Za-z_-]+$. [API] Longest topic is then
-    28 + 36 + 24 = 88 bytes with 5 '/': fits SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE (128) and [Q].
+    28 + 36 + 24 = 88 bytes with 5 '/': fits SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE (257) and [Q].
   - CSR key: RSA >= 2048 or ECC P-256 / P-384 / P-521 [XC]. The API page sets no subject rules.
 
 1.5 CLAIM CERTIFICATES [PWC]
@@ -480,17 +481,77 @@ AWSPROV-G04  ssfjson: allow a larger input limit per build
            SSFJsonMessage), never unescaped; for the PEM, V02 must confirm AWS emits only \n,
            \/ and \" escapes. If it emits \u escapes, add G10: a standard \u -> UTF-8 decode.
 
-AWSPROV-G05  ssfmqttc: allow AWS-sized client IDs per build
-  Why    : AWS client IDs and thing names are up to 128 bytes; the default
-           SSF_MQTTC_CONFIG_MAX_CLIENT_ID_SIZE is 64.
-  Change : Make the string-size options in ssfmqttc_opt.h #ifndef-overridable (CLIENT_ID,
-           TOPIC, HOST, USERNAME, PASSWORD), keep current defaults, and document in ssfmqttc.md
-           that AWS needs CLIENT_ID_SIZE >= 129 and HOST_SIZE large enough for
-           "<prefix>-ats.iot.<region>.amazonaws.com" (64 is enough for standard endpoints;
-           custom domains may need more).
-  Test   : ssfmqttc_ut passes with CLIENT_ID_SIZE 129 and a 128-byte client ID connects through
-           the mock transport; a 129-byte ID is rejected by Start's validation.
-  Done   : ./ssf passes; config-matrix row added.
+AWSPROV-G05  ssfmqttc: size the string limits for AWS and other cloud brokers by default
+  Why    : AWS client IDs and thing names are up to 128 bytes, topics up to 256 bytes; the
+           defaults (client ID 64, topic 128) are too small, e.g. clientId = thingName, or a
+           shadow topic built from a 128-byte thing name. Azure IoT Hub needs more as well:
+           device ID 128, username ~220 bytes, SAS-token password ~200..300 bytes, host names
+           of 67+ characters. HOST_SIZE 64 is also inconsistent with ssfnetsock, ssfnetws and
+           ssftlsc, which all allow 256.
+  Cost   : None in RAM. The limits size no storage in ssfmqttc: opts holds pointers to the
+           caller's strings, and the limits only bound the SSFStrLen scans and the REQUIREs
+           in Start. The packet memory is the caller's tx / rx block size, as now.
+           Dynamic allocation was considered and rejected: there is nothing to allocate.
+           Unit-test buffers sized from the limits grow (host only).
+  Change : In _opt/ssfmqttc_opt.h make all five #ifndef-overridable (-D or a #define before
+           ssfoptions.h) and raise the defaults:
+             SSF_MQTTC_CONFIG_MAX_CLIENT_ID_SIZE  64 -> 129  (AWS / Azure 128 + NUL)
+             SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE     128 -> 257  (AWS 256 + NUL)
+             SSF_MQTTC_CONFIG_MAX_HOST_SIZE       64 -> 256  (matches ssfnetsock / ssftlsc)
+             SSF_MQTTC_CONFIG_MAX_USERNAME_SIZE   64 -> 257  (Azure username form)
+             SSF_MQTTC_CONFIG_MAX_PASSWORD_LEN    64 -> 512  (SAS tokens, JWTs)
+           The existing #error range checks in ssfmqttc.h stay as they are. A small build can
+           still shrink them.
+  Effect : Inbound PUBLISH topics of 128..256 bytes are now delivered instead of dropped with
+           SSF_MQTTC_REASON_RX_PUBLISH_TOPIC_TOO_LONG, provided they fit the caller's rx block.
+           Strings that used to fail Start's REQUIREs at 64 bytes now pass up to the new
+           limits. Note both in ssfmqttc.md.
+  Test   : At each limit (via the macros, not literals): a string of exactly size - 1 bytes is
+           accepted and one of size bytes fails Start's REQUIRE, for client ID, host, username
+           and will / subscription topic; a password of MAX_PASSWORD_LEN bytes is accepted and
+           MAX + 1 refused. A 128-byte client ID CONNECTs through the mock transport and the
+           CONNECT bytes carry it intact. Inbound topic of MAX_TOPIC_SIZE - 1 delivered, of
+           MAX_TOPIC_SIZE dropped with TOPIC_TOO_LONG: the tests that build these from
+           SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE need an rx block (SSF_MQTTC_UT_RX_BLOCK_SIZE, now
+           128) that holds a 257-byte topic, or they reach the packet-too-large path instead;
+           check every such test still exercises what it claims. Mutation check of the
+           boundary comparisons. Tests must also pass at the old defaults and at a small
+           build (config-matrix rows).
+  Done   : ./ssf and ASan pass; features.sh rows mqttcsmall (old 64 / 128 values) and
+           mqttcbig (CLIENT_ID 65536, TOPIC 65536) pass; ARM / XC32 no warnings; ssfmqttc.md
+           configuration table gives new defaults, ranges and overridability, and the AWS /
+           Azure needs; README size figures unchanged (no RAM change). Needs approval
+           (ssfmqttc).
+  Result : (2026-11-26) Defaults raised and made #ifndef-overridable as above. New tests:
+           _SSFMQTTCUTScenarioStringLimits (each string at size - 1 accepted and size refused
+           by Start, password MAX / MAX + 1, TxPublish topic, the CONNECT bytes of a
+           MAX - 1 client id) and _SSFMQTTCUTScenarioAwsSizes (128-byte client id CONNECT
+           byte-exact, a 233-byte named shadow topic, a 256-byte topic). The AWS test failed at
+           the old defaults (red) and passes at the new ones. Boundary mutants (each limit
+           +/- 1 everywhere, password <= / +1, inbound >= -> >, Start filter / will topic +1):
+           old tests killed 3 of 13, new tests 13 of 13.
+           Found by the mqttcbig row (pre-existing, reachable with the documented range):
+           at MAX_TOPIC_SIZE 65536 the inbound check compared a uint16_t topicLen with 65536,
+           always false, and -Wextra warned (-Wtype-limits). Behavior was right (every MQTT
+           topic is <= 65535 bytes), so ssfmqttc.c now compiles the check only when the limit
+           is <= 65535; ssfmqttc.md says TOPIC_TOO_LONG is never reported at 65536. The tests
+           that use a too-long inbound topic (RxTopicTooLong second half, four hold scenarios)
+           run only when one can exist; row mqttctopic64k (65535) keeps the drop path covered
+           at the 16-bit edge. Test buffers that hold a max-topic PUBLISH and the mock rx / tx
+           buffers are now sized from the limits (unchanged at the old defaults), and the
+           test packet builder refuses a topic length over 65535.
+           Audit: the limits bound only length scans and REQUIREs; no client storage is sized
+           by them. An accepted inbound PUBLISH is re-packed [topic][NUL][payload] inside the
+           rx block it arrived in, always smaller than the wire form, so a larger topic limit
+           cannot overflow it. Hosts: ssfnetsock, ssfnetws and ssftlsc each refuse a host not
+           shorter than their own 256-byte buffer. passwordLen is uint16_t and the limit is
+           <= 65535 by #error, so no truncation. Applications that size their own buffers
+           from the macros grow with them (noted in ssfmqttc.md). optimization_audit.txt
+           NETSOCK-03 note updated (mqttc host limit is 256 now).
+           Verified: ./ssf 62/62; ASan + UBSan ssfmqttc / ssfmqttpkt; features.sh mqttcsmall,
+           mqttctopic64k, mqttcbig 0 warnings, all tests pass; ARM M4 / M0+ 0 warnings;
+           XC32 v6.00 0 warnings at defaults and at TOPIC / CLIENT_ID 65536; #error fires for
+           each option just outside its range; a -D override is honored.
 
 AWSPROV-G06  (optional) ssfpkey: encode an EC key as SEC1 / PKCS#8 DER
   Why    : Only if the product wants keys stored in a standard format or exported for tools.

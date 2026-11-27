@@ -612,11 +612,13 @@ static bool _SSFMQTTCRxPublishQueue(const uint8_t *pkt, size_t pktLen, bool *isH
     { _SSFMQTTCLinkFail(SSF_MQTTC_REASON_RX_PUBLISH_QOS2); return false; }
     if (SSFMQTTPktDecodePublish(pkt, pktLen, &pub) == false)
     { _SSFMQTTCLinkFail(SSF_MQTTC_REASON_PROTOCOL); return false; }
+#if SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE <= 65535u
     if (pub.topicLen >= SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE)
     {
         _SSFMQTTCRxPublishDrop(pub.qos, pub.packetId, SSF_MQTTC_REASON_RX_PUBLISH_TOPIC_TOO_LONG);
         return true;
     }
+#endif
 
     /* Is the rx queue full? */
     if ((b = _SSFMQTTCRxBlockAlloc()) == NULL)

@@ -11,19 +11,29 @@ extern "C" {
 /* Sizes include the NUL terminator; tick values use SSF_TICKS_PER_SEC; see ssfmqttc.md */
 
 /* Maximum topic name or filter size, 2..65536 */
-#define SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE         (128u)
+#ifndef SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE
+#define SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE         (257u)
+#endif
 
 /* Maximum broker host name or address size, 2..256 */
-#define SSF_MQTTC_CONFIG_MAX_HOST_SIZE          (64u)
+#ifndef SSF_MQTTC_CONFIG_MAX_HOST_SIZE
+#define SSF_MQTTC_CONFIG_MAX_HOST_SIZE          (256u)
+#endif
 
 /* Maximum client identifier size, 2..65536 */
-#define SSF_MQTTC_CONFIG_MAX_CLIENT_ID_SIZE     (64u)
+#ifndef SSF_MQTTC_CONFIG_MAX_CLIENT_ID_SIZE
+#define SSF_MQTTC_CONFIG_MAX_CLIENT_ID_SIZE     (129u)
+#endif
 
 /* Maximum user name size, 2..65536 */
-#define SSF_MQTTC_CONFIG_MAX_USERNAME_SIZE      (64u)
+#ifndef SSF_MQTTC_CONFIG_MAX_USERNAME_SIZE
+#define SSF_MQTTC_CONFIG_MAX_USERNAME_SIZE      (257u)
+#endif
 
 /* Maximum password length, binary, 1..65535 */
-#define SSF_MQTTC_CONFIG_MAX_PASSWORD_LEN       (64u)
+#ifndef SSF_MQTTC_CONFIG_MAX_PASSWORD_LEN
+#define SSF_MQTTC_CONFIG_MAX_PASSWORD_LEN       (512u)
+#endif
 
 /* Maximum entries in the Start option subscription set, 1..16 */
 #define SSF_MQTTC_CONFIG_MAX_SUBSCRIPTIONS      (8u)

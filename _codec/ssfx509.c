@@ -1342,6 +1342,13 @@ typedef struct
     uint32_t sigLen;
 } _EncCert_t;
 
+typedef struct
+{
+    const SSFX509CSRParams_t *params;
+    const uint8_t *sig;
+    uint32_t sigLen;
+} _EncCSR_t;
+
 /* --------------------------------------------------------------------------------------------- */
 /* Returns bytes for tag wrapping content, or bytes needed when bufOpt is NULL, else 0.          */
 /* --------------------------------------------------------------------------------------------- */
@@ -1530,6 +1537,12 @@ static bool _SSFX509Add(uint32_t *pos, uint32_t n)
     SSF_REQUIRE(pos != NULL);
 
     if (n == 0u) return false;
+    /* Would the running length overflow? */
+    if (n > (0xFFFFFFFFu - *pos))
+    {
+        /* Yes, too large to encode */
+        return false;
+    }
     *pos += n;
     return true;
 }
@@ -1544,6 +1557,12 @@ static bool _SSFX509AddBytes(uint8_t *bufOpt, uint32_t bufOptSize, uint32_t *pos
     SSF_REQUIRE(pos != NULL);
     SSF_REQUIRE((data != NULL) || (len == 0u));
 
+    /* Would the running length overflow? */
+    if (len > (0xFFFFFFFFu - *pos))
+    {
+        /* Yes, too large to encode */
+        return false;
+    }
     /* Writing? */
     if (bufOpt != NULL)
     {
@@ -1577,6 +1596,12 @@ static uint32_t _SSFX509EncConstructed(uint8_t *bufOpt, uint32_t bufOptSize, uin
     }
     hdrLen = _SSFX509EncTagLen(NULL, 0, tag, innerLen);
     if (hdrLen == 0u) return 0;
+    /* Would the header and content together overflow? */
+    if (innerLen > (0xFFFFFFFFu - hdrLen))
+    {
+        /* Yes, too large to encode */
+        return 0;
+    }
     total = hdrLen + innerLen;
 
     /* Only measuring? */
@@ -2695,6 +2720,178 @@ bool SSFX509EncodeCert(uint8_t *bufOpt, uint32_t bufOptSize, const SSFX509GenPar
     /* No, write it */
     *lenOut = _SSFX509EncConstructed(bufOpt, bufOptSize, SSF_ASN1_TAG_SEQUENCE,
                                      _SSFX509EncCertContent, &c);
+    return (*lenOut != 0u);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Requires the CSR parameters to be complete: an EC key and a signature algorithm.              */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFX509RequireCSRParams(const SSFX509CSRParams_t *p)
+{
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(p->sigAlgOidRaw != NULL);
+    SSF_REQUIRE(p->sigAlgOidRawLen > 0u);
+    SSF_REQUIRE(p->pubKeyAlgOidRaw != NULL);
+    SSF_REQUIRE(p->pubKeyAlgOidRawLen > 0u);
+    SSF_REQUIRE(p->ecCurveOidRaw != NULL);
+    SSF_REQUIRE(p->ecCurveOidRawLen > 0u);
+    SSF_REQUIRE(p->pubKey != NULL);
+    SSF_REQUIRE(p->pubKeyLen > 0u);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Content: CertificationRequestInfo { version 0, subject, SPKI, attributes [0] empty }.         */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFX509EncCRIContent(uint8_t *bufOpt, uint32_t bufOptSize, const void *arg,
+                                  uint32_t *lenOut)
+{
+    const SSFX509CSRParams_t *p = (const SSFX509CSRParams_t *)arg;
+    SSFX509GenParams_t key;
+    uint32_t pos = 0;
+
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(lenOut != NULL);
+
+    memset(&key, 0, sizeof(key));
+    key.pubKeyAlgOidRaw = p->pubKeyAlgOidRaw;
+    key.pubKeyAlgOidRawLen = p->pubKeyAlgOidRawLen;
+    key.ecCurveOidRaw = p->ecCurveOidRaw;
+    key.ecCurveOidRawLen = p->ecCurveOidRawLen;
+    key.pubKey = p->pubKey;
+    key.pubKeyLen = p->pubKeyLen;
+
+    if (!_SSFX509Add(&pos, _SSFX509EncIntU64(_SSFX509At(bufOpt, pos),
+                                             _SSFX509Rem(bufOpt, bufOptSize, pos), 0u)))
+        return false;
+    if (!_SSFX509Add(&pos, _SSFX509EncDN(_SSFX509At(bufOpt, pos),
+                                         _SSFX509Rem(bufOpt, bufOptSize, pos),
+                                         &p->subject))) return false;
+    if (!_SSFX509Add(&pos, _SSFX509EncConstructed(_SSFX509At(bufOpt, pos),
+                                                  _SSFX509Rem(bufOpt, bufOptSize, pos),
+                                                  SSF_ASN1_TAG_SEQUENCE,
+                                                  _SSFX509EncSPKIContent, &key))) return false;
+    if (!_SSFX509Add(&pos, _SSFX509EncTagLen(_SSFX509At(bufOpt, pos),
+                                             _SSFX509Rem(bufOpt, bufOptSize, pos),
+                                             SSF_ASN1_CONTEXT_EXPLICIT(0), 0u))) return false;
+    *lenOut = pos;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if CertificationRequestInfo encoded, or measured when bufOpt is NULL.            */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFX509EncodeCSRInfo(uint8_t *bufOpt, uint32_t bufOptSize, const SSFX509CSRParams_t *params,
+                          uint32_t *lenOut)
+{
+    uint32_t total;
+
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
+    SSF_REQUIRE(params != NULL);
+    _SSFX509RequireCSRParams(params);
+    SSF_REQUIRE((bufOpt == NULL) ||
+                ((uintptr_t)params->pubKey >= ((uintptr_t)bufOpt + bufOptSize)) ||
+                (((uintptr_t)params->pubKey + params->pubKeyLen) <= (uintptr_t)bufOpt));
+    SSF_REQUIRE(lenOut != NULL);
+
+    *lenOut = 0;
+    total = _SSFX509EncConstructed(NULL, 0, SSF_ASN1_TAG_SEQUENCE, _SSFX509EncCRIContent, params);
+
+    /* Is it unencodable or over the configured certificate size? */
+    if ((total == 0u) || (total > SSF_X509_CONFIG_MAX_CERT_SIZE))
+    {
+        /* Yes, both passes report failure */
+        return false;
+    }
+
+    /* No, only measuring? */
+    if (bufOpt == NULL)
+    {
+        /* Yes, report the size needed */
+        *lenOut = total;
+        return true;
+    }
+    /* No, write it */
+    *lenOut = _SSFX509EncConstructed(bufOpt, bufOptSize, SSF_ASN1_TAG_SEQUENCE,
+                                     _SSFX509EncCRIContent, params);
+    return (*lenOut != 0u);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Content: CertificationRequest { certificationRequestInfo, signatureAlgorithm, sig }.          */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFX509EncCSRContent(uint8_t *bufOpt, uint32_t bufOptSize, const void *arg,
+                                  uint32_t *lenOut)
+{
+    const _EncCSR_t *c = (const _EncCSR_t *)arg;
+    uint32_t pos = 0;
+    uint32_t criLen;
+
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
+    SSF_REQUIRE(c != NULL);
+    SSF_REQUIRE(c->params != NULL);
+    SSF_REQUIRE(c->sig != NULL);
+    SSF_REQUIRE(lenOut != NULL);
+
+    if (!SSFX509EncodeCSRInfo(_SSFX509At(bufOpt, pos), _SSFX509Rem(bufOpt, bufOptSize, pos),
+                              c->params, &criLen)) return false;
+    pos += criLen;
+    if (!_SSFX509Add(&pos, _SSFX509EncAlgId(_SSFX509At(bufOpt, pos),
+                                            _SSFX509Rem(bufOpt, bufOptSize, pos),
+                                            c->params->sigAlgOidRaw,
+                                            c->params->sigAlgOidRawLen))) return false;
+    if (!_SSFX509Add(&pos, _SSFX509EncBitString(_SSFX509At(bufOpt, pos),
+                                                _SSFX509Rem(bufOpt, bufOptSize, pos), c->sig,
+                                                c->sigLen, 0u))) return false;
+    *lenOut = pos;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if CertificationRequest encoded, or measured when bufOpt is NULL.                */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFX509EncodeCSR(uint8_t *bufOpt, uint32_t bufOptSize, const SSFX509CSRParams_t *params,
+                      const uint8_t *signature, uint32_t signatureLen, uint32_t *lenOut)
+{
+    _EncCSR_t c;
+    uint32_t total;
+
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
+    SSF_REQUIRE(params != NULL);
+    _SSFX509RequireCSRParams(params);
+    SSF_REQUIRE((bufOpt == NULL) ||
+                ((uintptr_t)params->pubKey >= ((uintptr_t)bufOpt + bufOptSize)) ||
+                (((uintptr_t)params->pubKey + params->pubKeyLen) <= (uintptr_t)bufOpt));
+    SSF_REQUIRE(signature != NULL);
+    SSF_REQUIRE(signatureLen > 0u);
+    SSF_REQUIRE((bufOpt == NULL) ||
+                ((uintptr_t)signature >= ((uintptr_t)bufOpt + bufOptSize)) ||
+                (((uintptr_t)signature + signatureLen) <= (uintptr_t)bufOpt));
+    SSF_REQUIRE(lenOut != NULL);
+
+    *lenOut = 0;
+    c.params = params;
+    c.sig = signature;
+    c.sigLen = signatureLen;
+    total = _SSFX509EncConstructed(NULL, 0, SSF_ASN1_TAG_SEQUENCE, _SSFX509EncCSRContent, &c);
+
+    /* Is it unencodable or over the configured certificate size? */
+    if ((total == 0u) || (total > SSF_X509_CONFIG_MAX_CERT_SIZE))
+    {
+        /* Yes, both passes report failure */
+        return false;
+    }
+
+    /* No, only measuring? */
+    if (bufOpt == NULL)
+    {
+        /* Yes, report the size needed */
+        *lenOut = total;
+        return true;
+    }
+    /* No, write it */
+    *lenOut = _SSFX509EncConstructed(bufOpt, bufOptSize, SSF_ASN1_TAG_SEQUENCE,
+                                     _SSFX509EncCSRContent, &c);
     return (*lenOut != 0u);
 }
 

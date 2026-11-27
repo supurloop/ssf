@@ -80,6 +80,10 @@ bool SSFPKeyDecodeDER(const uint8_t *der, size_t derLen, SSFPKey_t *keyOut);
 bool SSFPKeyDecodePEM(const char *pem, size_t pemLen, uint8_t *derBuf, size_t derBufSize,
                       SSFPKey_t *keyOut);
 
+/* Builds a P-256 / P-384 key from its raw big-endian scalar; derives and sets pub. */
+bool SSFPKeyFromECPriv(SSFPKeyType_t type, const uint8_t *priv, size_t privLen,
+                       SSFPKey_t *keyOut);
+
 /* Zeroes the whole key structure. */
 void SSFPKeyWipe(SSFPKey_t *key);
 

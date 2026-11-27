@@ -273,6 +273,28 @@ bool SSFX509EncodeTBS(uint8_t *bufOpt, uint32_t bufOptSize, const SSFX509GenPara
 bool SSFX509EncodeCert(uint8_t *bufOpt, uint32_t bufOptSize, const SSFX509GenParams_t *params,
                        const uint8_t *signature, uint32_t signatureLen, uint32_t *lenOut);
 
+/* Inputs for a PKCS#10 CertificationRequest (RFC 2986) with an EC public key */
+typedef struct SSFX509CSRParams
+{
+    SSFX509GenName_t subject;       /* All NULL gives an empty subject */
+    const uint8_t *sigAlgOidRaw;    /* ecdsa-with-SHA256 / SHA384 OID (raw DER content) */
+    uint32_t sigAlgOidRawLen;
+    const uint8_t *pubKeyAlgOidRaw; /* id-ecPublicKey */
+    uint32_t pubKeyAlgOidRawLen;
+    const uint8_t *ecCurveOidRaw;   /* prime256v1 / secp384r1 */
+    uint32_t ecCurveOidRawLen;
+    const uint8_t *pubKey;          /* Uncompressed EC point */
+    uint32_t pubKeyLen;
+} SSFX509CSRParams_t;
+
+/* Encode a CertificationRequestInfo into bufOpt, or measure it when bufOpt is NULL. */
+bool SSFX509EncodeCSRInfo(uint8_t *bufOpt, uint32_t bufOptSize, const SSFX509CSRParams_t *params,
+                          uint32_t *lenOut);
+
+/* Encode a CertificationRequest around a precomputed signature over the CSRInfo; NULL measures. */
+bool SSFX509EncodeCSR(uint8_t *bufOpt, uint32_t bufOptSize, const SSFX509CSRParams_t *params,
+                      const uint8_t *signature, uint32_t signatureLen, uint32_t *lenOut);
+
 /* --------------------------------------------------------------------------------------------- */
 /* Chain verification                                                                            */
 /* --------------------------------------------------------------------------------------------- */

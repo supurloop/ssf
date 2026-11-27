@@ -57,6 +57,13 @@ static const uint8_t _utP256N[32] = {
     0xBC, 0xE6, 0xFA, 0xAD, 0xA7, 0x17, 0x9E, 0x84, 0xF3, 0xB9, 0xCA, 0xC2, 0xFC, 0x63, 0x25, 0x51
 };
 
+/* P-384 group order n */
+static const uint8_t _utP384N[48] = {
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xC7, 0x63, 0x4D, 0x81, 0xF4, 0x37, 0x2D, 0xDF,
+    0x58, 0x1A, 0x0D, 0xB2, 0x48, 0xB0, 0xA7, 0x7A, 0xEC, 0xEC, 0x19, 0x6A, 0xCC, 0xC5, 0x29, 0x73
+};
+
 /* ---- A tiny DER writer for building test inputs ---- */
 typedef struct
 {
@@ -359,6 +366,171 @@ static void _UTCheckRSA(const SSFPKey_t *key)
 #endif /* SSF_RSA_CONFIG_ENABLE_2048 */
 }
 
+/* Checks SSFPKeyFromECPriv() refuses the scalar and leaves the whole key zero. */
+static void _UTFromECPrivRefuse(SSFPKeyType_t type, const uint8_t *priv, size_t privLen)
+{
+    SSFPKey_t key;
+
+    SSF_REQUIRE(priv != NULL);
+
+    memset(&key, 0xAA, sizeof(key));
+    SSF_ASSERT(SSFPKeyFromECPriv(type, priv, privLen, &key) == false);
+    SSF_ASSERT((_UTAllZero(&key, sizeof(key))) && (key.type == SSF_PKEY_TYPE_NONE));
+}
+
+/* Checks the SSFPKeyFromECPriv() length and overlap contracts for one enabled curve. */
+static void _UTFromECPrivContract(SSFPKeyType_t type, const uint8_t *priv, const uint8_t *pub)
+{
+    static struct
+    {
+        uint8_t pre[SSF_PKEY_MAX_PRIV_SIZE];
+        SSFPKey_t key;
+        uint8_t post[SSF_PKEY_MAX_PRIV_SIZE];
+    } area;
+    static SSFPKey_t key;
+    static uint8_t s[SSF_PKEY_MAX_PRIV_SIZE];
+    static uint8_t *kp;
+    static size_t size;
+    static size_t otherSize;
+    static size_t pubLen;
+
+    SSF_REQUIRE((type == SSF_PKEY_TYPE_P256) || (type == SSF_PKEY_TYPE_P384));
+    SSF_REQUIRE(priv != NULL);
+    SSF_REQUIRE(pub != NULL);
+
+    size = ((type == SSF_PKEY_TYPE_P256) ? 32u : 48u);
+    otherSize = ((type == SSF_PKEY_TYPE_P256) ? 48u : 32u);
+    pubLen = 1u + (2u * size);
+
+    /* ---- A length other than the curve size is a programming error ---- */
+    SSF_ASSERT_TEST(SSFPKeyFromECPriv(type, priv, 0u, &key));
+    SSF_ASSERT_TEST(SSFPKeyFromECPriv(type, priv, (size - 1u), &key));
+    SSF_ASSERT_TEST(SSFPKeyFromECPriv(type, priv, (size + 1u), &key));
+    memset(s, 0x11, sizeof(s));
+    SSF_ASSERT_TEST(SSFPKeyFromECPriv(type, s, otherSize, &key));
+
+    /* ---- priv overlapping keyOut is a programming error; adjacent is fine ---- */
+    kp = (uint8_t *)&area.key;
+    SSF_ASSERT_TEST(SSFPKeyFromECPriv(type, area.key.priv, size, &area.key));
+    SSF_ASSERT_TEST(SSFPKeyFromECPriv(type, (kp - (size - 1u)), size, &area.key));
+    SSF_ASSERT_TEST(SSFPKeyFromECPriv(type, ((kp + sizeof(area.key)) - 1u), size, &area.key));
+    memcpy((kp - size), priv, size);
+    SSF_ASSERT(SSFPKeyFromECPriv(type, (kp - size), size, &area.key));
+    _UTCheckEC(&area.key, type, priv, size, pub, pubLen);
+    memcpy((kp + sizeof(area.key)), priv, size);
+    SSF_ASSERT(SSFPKeyFromECPriv(type, (kp + sizeof(area.key)), size, &area.key));
+    _UTCheckEC(&area.key, type, priv, size, pub, pubLen);
+
+    SSFPKeyWipe(&key);
+    memset(&area, 0, sizeof(area));
+    memset(s, 0, sizeof(s));
+}
+
+/* Runs the SSFPKeyFromECPriv() tests for one enabled curve. */
+static void _UTFromECPrivCurve(SSFPKeyType_t type, const uint8_t *priv, const uint8_t *pub,
+                               const uint8_t *sec1Der, size_t sec1DerLen, const uint8_t *n)
+{
+    SSFPKey_t key;
+    SSFPKey_t ref;
+    uint8_t s[SSF_PKEY_MAX_PRIV_SIZE];
+    uint8_t genPub[SSF_PKEY_MAX_PUB_SIZE];
+    size_t genPubLen;
+    SSFECCurve_t curve = ((type == SSF_PKEY_TYPE_P256) ? SSF_EC_CURVE_P256 : SSF_EC_CURVE_P384);
+    size_t size = ((type == SSF_PKEY_TYPE_P256) ? 32u : 48u);
+    size_t pubLen = 1u + (2u * size);
+    size_t i;
+
+    SSF_REQUIRE((type == SSF_PKEY_TYPE_P256) || (type == SSF_PKEY_TYPE_P384));
+    SSF_REQUIRE(priv != NULL);
+    SSF_REQUIRE(pub != NULL);
+    SSF_REQUIRE(sec1Der != NULL);
+    SSF_REQUIRE(n != NULL);
+
+    /* ---- Same key as the SEC 1 decode, every stale byte overwritten ---- */
+    memset(&key, 0xAA, sizeof(key));
+    SSF_ASSERT(SSFPKeyFromECPriv(type, priv, size, &key));
+    _UTCheckEC(&key, type, priv, size, pub, pubLen);
+    SSF_ASSERT(_UTAllZero(&key.priv[size], (sizeof(key.priv) - size)));
+    SSF_ASSERT(_UTAllZero(&key.pub[pubLen], (sizeof(key.pub) - pubLen)));
+    SSF_ASSERT(SSFPKeyDecodeDER(sec1Der, sec1DerLen, &ref));
+    SSF_ASSERT(memcmp(&key, &ref, sizeof(key)) == 0);
+
+    /* ---- Scalar range ends, and a leading zero byte within the fixed width ---- */
+    memset(s, 0, sizeof(s));
+    s[size - 1u] = 1u;
+    SSF_ASSERT(SSFPKeyFromECPriv(type, s, size, &key));
+    SSF_ASSERT((key.type == type) && (key.privLen == size) && (memcmp(key.priv, s, size) == 0));
+    SSF_ASSERT(key.pubLen == pubLen);
+    memcpy(s, n, size);
+    s[size - 1u]--;
+    SSF_ASSERT(SSFPKeyFromECPriv(type, s, size, &key));
+    SSF_ASSERT((key.privLen == size) && (memcmp(key.priv, s, size) == 0));
+    memcpy(s, priv, size);
+    s[0] = 0u;
+    SSF_ASSERT(SSFPKeyFromECPriv(type, s, size, &key));
+    SSF_ASSERT((key.priv[0] == 0u) && (memcmp(key.priv, s, size) == 0));
+
+    /* ---- Scalars outside [1, n - 1] ---- */
+    memset(s, 0, sizeof(s));
+    _UTFromECPrivRefuse(type, s, size);
+    _UTFromECPrivRefuse(type, n, size);
+    memcpy(s, n, size);
+    s[size - 1u]++;
+    _UTFromECPrivRefuse(type, s, size);
+    memset(s, 0xFF, sizeof(s));
+    _UTFromECPrivRefuse(type, s, size);
+
+    /* ---- A failure wipes a valid key already in keyOut ---- */
+    SSF_ASSERT(SSFPKeyFromECPriv(type, priv, size, &key));
+    memset(s, 0, sizeof(s));
+    SSF_ASSERT(SSFPKeyFromECPriv(type, s, size, &key) == false);
+    SSF_ASSERT(_UTAllZero(&key, sizeof(key)));
+
+    /* ---- Generated keys rebuild to the generated public key ---- */
+    for (i = 0; i < 4u; i++)
+    {
+        SSF_ASSERT(SSFECDSAKeyGen(curve, s, sizeof(s), genPub, sizeof(genPub), &genPubLen));
+        SSF_ASSERT(SSFPKeyFromECPriv(type, s, size, &key));
+        _UTCheckEC(&key, type, s, size, genPub, genPubLen);
+    }
+
+    _UTFromECPrivContract(type, priv, pub);
+
+    SSFPKeyWipe(&key);
+    SSFPKeyWipe(&ref);
+    memset(s, 0, sizeof(s));
+}
+
+/* Runs the SSFPKeyFromECPriv() tests. */
+static void _UTFromECPriv(void)
+{
+    SSFPKey_t key;
+
+#if SSF_EC_CONFIG_ENABLE_P256 == 1
+    _UTFromECPrivCurve(SSF_PKEY_TYPE_P256, _pkP256Priv, _pkP256Pub, _pkP256SEC1Der,
+                       sizeof(_pkP256SEC1Der), _utP256N);
+#else
+    _UTFromECPrivRefuse(SSF_PKEY_TYPE_P256, _pkP256Priv, 32u);
+    _UTFromECPrivRefuse(SSF_PKEY_TYPE_P256, _pkP256Priv, 31u);
+#endif /* SSF_EC_CONFIG_ENABLE_P256 */
+#if SSF_EC_CONFIG_ENABLE_P384 == 1
+    _UTFromECPrivCurve(SSF_PKEY_TYPE_P384, _pkP384Priv, _pkP384Pub, _pkP384SEC1Der,
+                       sizeof(_pkP384SEC1Der), _utP384N);
+#else
+    _UTFromECPrivRefuse(SSF_PKEY_TYPE_P384, _pkP384Priv, 48u);
+    _UTFromECPrivRefuse(SSF_PKEY_TYPE_P384, _pkP384Priv, 47u);
+#endif /* SSF_EC_CONFIG_ENABLE_P384 */
+
+    /* ---- Contract: NULL pointers, and a type that is not an EC curve ---- */
+    SSF_ASSERT_TEST(SSFPKeyFromECPriv(SSF_PKEY_TYPE_P256, NULL, 32u, &key));
+    SSF_ASSERT_TEST(SSFPKeyFromECPriv(SSF_PKEY_TYPE_P256, _pkP256Priv, 32u, NULL));
+    SSF_ASSERT_TEST(SSFPKeyFromECPriv(SSF_PKEY_TYPE_NONE, _pkP256Priv, 32u, &key));
+    SSF_ASSERT_TEST(SSFPKeyFromECPriv(SSF_PKEY_TYPE_RSA, _pkP256Priv, 32u, &key));
+    SSF_ASSERT_TEST(SSFPKeyFromECPriv(SSF_PKEY_TYPE_ED25519, _pkP256Priv, 32u, &key));
+    SSF_ASSERT_TEST(SSFPKeyFromECPriv(SSF_PKEY_TYPE_MIN, _pkP256Priv, 32u, &key));
+    SSF_ASSERT_TEST(SSFPKeyFromECPriv(SSF_PKEY_TYPE_MAX, _pkP256Priv, 32u, &key));
+}
+
 /* Curve availability: a key for a curve compiled out must be refused, not decoded */
 #define _UT_P256 (SSF_EC_CONFIG_ENABLE_P256 == 1)
 #define _UT_P384 (SSF_EC_CONFIG_ENABLE_P384 == 1)
@@ -637,5 +809,8 @@ void SSFPKeyUnitTest(void)
         n = _UTPem(pem, sizeof(pem), "EC PRIVATE KEY", bad, sizeof(bad));
         _UTRefusePEM(pem, n);
     }
+
+    /* ======== SSFPKeyFromECPriv ======== */
+    _UTFromECPriv();
 }
 #endif /* SSF_CONFIG_PKEY_UNIT_TEST */

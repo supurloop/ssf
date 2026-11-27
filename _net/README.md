@@ -222,10 +222,11 @@ ssfnetsock is configured in `_opt/ssfnetsock_opt.h`:
   while the session can connect. Returns false, leaving no certificate set, if the chain is
   malformed, the leaf does not parse, or its public key is not the key's. Pass NULL, NULL, 0, NULL
   to clear. Call while the session is not open.
-  - The key must come from `SSFPKeyDecodeDER()` / `SSFPKeyDecodePEM()`, which validate it and fill
-    every field consistently. Only the type and public key are compared here; a hand-built
-    `SSFPKey_t` whose other fields disagree (e.g. a scalar length that is not the curve's) is a
-    programming error and asserts when the CertificateVerify is signed.
+  - The key must come from `SSFPKeyDecodeDER()` / `SSFPKeyDecodePEM()` / `SSFPKeyFromECPriv()`,
+    which validate it and fill every field consistently. Only the type and public key are
+    compared here; a hand-built `SSFPKey_t` whose other fields disagree (e.g. a scalar length
+    that is not the curve's) is a programming error and asserts when the CertificateVerify is
+    signed.
   - When a server asks for a certificate, the chain is sent only if every certificate in it is
     signed with a scheme the server lists (signature_algorithms_cert, else signature_algorithms;
     RFC 8446 4.4.2.3), a self-signed last certificate excepted; otherwise an empty Certificate. A

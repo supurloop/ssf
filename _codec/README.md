@@ -17,11 +17,11 @@ Encoding and decoding interfaces.
 | ssfjson | JSON parser/generator | ssfjson.c, ssfjson.h | [ssfjson.md](ssfjson.md) |
 | ssfmatch | Pattern matching: case-insensitive compare, glob, URI path templates | ssfmatch.c, ssfmatch.h | [ssfmatch.md](ssfmatch.md) |
 | ssfpem | PEM (RFC 7468) block encoder and decoder | ssfpem.c, ssfpem.h | [ssfpem.md](ssfpem.md) |
-| ssfpkey | Private key decoder: PKCS#8, SEC 1, PKCS#1 in PEM or DER | ssfpkey.c, ssfpkey.h | [ssfpkey.md](ssfpkey.md) |
+| ssfpkey | Private key decoder: PKCS#8, SEC 1, PKCS#1 in PEM or DER; P-256 / P-384 key from a raw scalar | ssfpkey.c, ssfpkey.h | [ssfpkey.md](ssfpkey.md) |
 | ssfstr | Safe C string interface | ssfstr.c, ssfstr.h | [ssfstr.md](ssfstr.md) |
 | ssftlv | TLV encoder/decoder | ssftlv.c, ssftlv.h | [ssftlv.md](ssftlv.md) |
 | ssfubjson | UBJSON (Universal Binary JSON) parser/generator | ssfubjson.c, ssfubjson.h | [ssfubjson.md](ssfubjson.md) |
-| ssfx509 | X.509 v3 certificate parser (zero-copy), generator, and RFC 5280 chain verifier | ssfx509.c, ssfx509.h | [ssfx509.md](ssfx509.md) |
+| ssfx509 | X.509 v3 certificate parser (zero-copy), generator, PKCS#10 CSR generator, and RFC 5280 chain verifier | ssfx509.c, ssfx509.h | [ssfx509.md](ssfx509.md) |
 
 ## See Also
 

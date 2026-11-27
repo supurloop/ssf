@@ -6,7 +6,10 @@ Decodes an unencrypted private key file, PEM or DER, into the form the SSF signi
 take: a PKCS#1 `RSAPrivateKey` for [`SSFRSASignPSS()`](../_crypto/ssfrsa.md), a curve-size
 scalar for [`SSFECDSASign()`](../_crypto/ssfecdsa.md), or a seed and public key for
 [`SSFEd25519Sign()`](../_crypto/ssfed25519.md). Every key is validated before it is returned.
-No filesystem access: the input is a buffer the caller supplies.
+No filesystem access: the input is a buffer the caller supplies. A P-256 / P-384 key can also
+be rebuilt from its raw scalar alone with [`SSFPKeyFromECPriv()`](#ssfpkeyfromecpriv), so a
+device can store just the 32 or 48 bytes that [`SSFECDSAKeyGen()`](../_crypto/ssfecdsa.md)
+produced.
 
 [Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference)
 
@@ -64,19 +67,22 @@ No filesystem access: the input is a buffer the caller supplies.
   zeroes all of `derBuf`. On success `derBuf` holds the key's DER; wipe it with
   `SSFCryptSecureZero()` when it is no longer needed, and the key with
   [`SSFPKeyWipe()`](#ssfpkeywipe). Key bytes are never traced.
-- **Cost (Cortex-M4, arm-none-eabi-gcc -Os).** Code: about 1.7 KB, plus 0.7 KB for
+- **Cost (Cortex-M4, arm-none-eabi-gcc -Os).** Code: about 1.8 KB, plus 0.7 KB for
   [`ssfpem`](ssfpem.md). Stack (reachable call-graph peak, default configuration): about
   7.2 KB for an EC key (the public-key derivation), about 19.1 KB for an RSA key
   (`SSFRSAPrivKeyIsValid()` at the default RSA-4096 cap, below RSA signing's own peak), about
   1.5 KB for Ed25519. EC and RSA loading each cost one private-key-sized operation, a
-  load-time cost, not a per-signature one.
+  load-time cost, not a per-signature one. [`SSFPKeyFromECPriv()`](#ssfpkeyfromecpriv) costs
+  the same as loading an EC key: one public-key derivation (a fixed-base scalar
+  multiplication, about the cost of one key generation), with the same stack peak.
 
 <a id="configuration"></a>
 
 ## [↑](#ssfpkey--private-key-decoder) Configuration
 
 No options file. The curves follow `SSF_EC_CONFIG_ENABLE_P256` / `_P384`
-([`ssfec`](../_crypto/ssfec.md)); a key on a disabled curve is refused as unknown. RSA
+([`ssfec`](../_crypto/ssfec.md)); a key on a disabled curve is refused as unknown, and
+`SSFPKeyFromECPriv()` returns false for one. RSA
 follows the `SSF_RSA_CONFIG_ENABLE_*` key sizes ([`ssfrsa`](../_crypto/ssfrsa.md)): with none
 built, an RSA key is refused, and one of a size not built fails validation. The
 unit-test entry point is gated by `SSF_CONFIG_PKEY_UNIT_TEST` in `ssfport.h`.
@@ -102,6 +108,7 @@ unit-test entry point is gated by `SSF_CONFIG_PKEY_UNIT_TEST` in `ssfport.h`.
 |---|-----------------|-------------|
 | [e.g.](#ex-pem) | [`bool SSFPKeyDecodePEM(pem, pemLen, derBuf, derBufSize, keyOut)`](#ssfpkeydecodepem) | Decode the one private key block of a PEM buffer |
 | | [`bool SSFPKeyDecodeDER(der, derLen, keyOut)`](#ssfpkeydecodeder) | Decode a DER private key |
+| [e.g.](#ex-fromecpriv) | [`bool SSFPKeyFromECPriv(type, priv, privLen, keyOut)`](#ssfpkeyfromecpriv) | Build a P-256 / P-384 key from its raw scalar |
 | | [`void SSFPKeyWipe(key)`](#ssfpkeywipe) | Zero a key |
 
 <a id="function-reference"></a>
@@ -163,6 +170,52 @@ as [`SSFPKeyDecodePEM()`](#ssfpkeydecodepem). `der` and `keyOut` must not be `NU
 `keyOut->rsaDer` points into `der`.
 
 **Returns:** `true` for a supported, valid key; on `false`, `*keyOut` is zeroed.
+
+---
+
+<a id="ssfpkeyfromecpriv"></a>
+
+### [↑](#ssfpkey--private-key-decoder) [`bool SSFPKeyFromECPriv()`](#functions)
+
+```c
+bool SSFPKeyFromECPriv(SSFPKeyType_t type, const uint8_t *priv, size_t privLen,
+                       SSFPKey_t *keyOut);
+```
+
+Builds the key from its big-endian private scalar and derives its public key. The result is
+the same, byte for byte, as [`SSFPKeyDecodeDER()`](#ssfpkeydecodeder) of the SEC 1 DER of that
+key, so it can go anywhere a decoded key can, e.g.
+[`SSFTLSCSetClientCert()`](../_net/README.md).
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `type` | in | `SSFPKeyType_t` | `SSF_PKEY_TYPE_P256` or `SSF_PKEY_TYPE_P384`; any other type asserts. |
+| `priv` | in | `const uint8_t *` | The scalar, fixed width: leading zero bytes are kept, not dropped. Must not be `NULL` and must not overlap `*keyOut`. |
+| `privLen` | in | `size_t` | Must equal the curve size, 32 for P-256 or 48 for P-384, or it asserts, as in [`ssfecdsa`](../_crypto/ssfecdsa.md). A length read from storage must be checked by the caller first. |
+| `keyOut` | out | `SSFPKey_t *` | Receives the key. Must not be `NULL`. |
+
+**Returns:** `true` if the scalar is in [1, n − 1]. `false` if it is not (0, n or more), or if
+the curve is compiled out; `*keyOut` is then zeroed (`SSF_PKEY_TYPE_NONE`).
+
+<a id="ex-fromecpriv"></a>
+
+```c
+/* Once, at provisioning: generate the key and store only its scalar */
+uint8_t scalar[32];
+uint8_t pub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+size_t pubLen;
+SSFECDSAKeyGen(SSF_EC_CURVE_P256, scalar, sizeof(scalar), pub, sizeof(pub), &pubLen);
+/* ... write scalar to secure storage, wipe it ... */
+
+/* At every boot: read the scalar back, rebuild the key, present it with the certificate */
+static SSFPKey_t key;
+/* ... read scalar from secure storage ... */
+if (SSFPKeyFromECPriv(SSF_PKEY_TYPE_P256, scalar, sizeof(scalar), &key))
+{
+    SSFTLSCSetClientCert(&session, chain, chainLens, 1u, &key);
+}
+SSFCryptSecureZero(scalar, sizeof(scalar));
+```
 
 ---
 

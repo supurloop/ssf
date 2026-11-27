@@ -2176,6 +2176,8 @@ static void _SSFTLSCUTClientCert(void)
     static SSFPKey_t kEd;
     static SSFPKey_t kRsa;
     static SSFPKey_t kNone;
+    static SSFPKey_t kRaw256;
+    static SSFPKey_t kRaw384;
     static uint8_t bad[sizeof(_utClientRSA2048Cert)];
     static uint8_t msg[1024];
     static uint8_t want[1024];
@@ -2210,6 +2212,20 @@ static void _SSFTLSCUTClientCert(void)
     SSF_ASSERT(SSFTLSCSetClientCert(s, chain2, lens2, 2u, &kP256));
     SSF_ASSERT(s->clientChainCount == 2u);
     SSF_ASSERT(SSFTLSCSetClientCert(s, NULL, NULL, 0u, NULL));                /* Clear */
+    SSF_ASSERT((s->clientChainCount == 0u) && (s->clientKey == NULL));
+
+    /* ---- SSFTLSCSetClientCert: keys rebuilt from their raw scalars (SSFPKeyFromECPriv) ---- */
+    SSF_ASSERT(SSFPKeyFromECPriv(SSF_PKEY_TYPE_P256, kP256.priv, kP256.privLen, &kRaw256));
+    SSF_ASSERT(SSFPKeyFromECPriv(SSF_PKEY_TYPE_P384, kP384.priv, kP384.privLen, &kRaw384));
+    SSF_ASSERT(_SSFTLSCUTSetOne(s, _utClientP256Cert, sizeof(_utClientP256Cert), &kRaw256));
+    SSF_ASSERT((s->clientChainCount == 1u) && (s->clientKey == &kRaw256));
+    SSF_ASSERT(_SSFTLSCUTSetOne(s, _utClientOtherCert, sizeof(_utClientOtherCert), &kRaw256) ==
+               false);
+    SSF_ASSERT((s->clientChainCount == 0u) && (s->clientKey == NULL));
+    SSF_ASSERT(_SSFTLSCUTSetOne(s, _utClientP384Cert, sizeof(_utClientP384Cert), &kRaw384));
+    SSF_ASSERT((s->clientChainCount == 1u) && (s->clientKey == &kRaw384));
+    SSF_ASSERT(_SSFTLSCUTSetOne(s, _utClientOtherCert, sizeof(_utClientOtherCert), &kRaw384) ==
+               false);
     SSF_ASSERT((s->clientChainCount == 0u) && (s->clientKey == NULL));
 
     /* ---- Refused, leaving no certificate set ---- */
@@ -2361,6 +2377,8 @@ static void _SSFTLSCUTClientCert(void)
     SSF_TLSC_UT_CV_SIGN(_utClientP256Cert, &kP256, SSF_TLS_SIG_ECDSA_SECP256R1_SHA256, 32u);
     SSF_TLSC_UT_CV_SIGN(_utClientP256Cert, &kP256, SSF_TLS_SIG_ECDSA_SECP256R1_SHA256, 48u);
     SSF_TLSC_UT_CV_SIGN(_utClientP384Cert, &kP384, SSF_TLS_SIG_ECDSA_SECP384R1_SHA384, 32u);
+    SSF_TLSC_UT_CV_SIGN(_utClientP256Cert, &kRaw256, SSF_TLS_SIG_ECDSA_SECP256R1_SHA256, 32u);
+    SSF_TLSC_UT_CV_SIGN(_utClientP384Cert, &kRaw384, SSF_TLS_SIG_ECDSA_SECP384R1_SHA384, 48u);
     SSF_TLSC_UT_CV_SIGN(_utClientEd25519Cert, &kEd, SSF_TLS_SIG_ED25519, 32u);
     SSF_TLSC_UT_CV_SIGN(_utClientEd25519Cert, &kEd, SSF_TLS_SIG_ED25519, 48u);
 #if _UT_TLSC_HAS_PSS
@@ -2376,6 +2394,8 @@ static void _SSFTLSCUTClientCert(void)
                                            16u, &len) == false);
 
     SSFTLSCDeInit(s);
+    SSFPKeyWipe(&kRaw256);
+    SSFPKeyWipe(&kRaw384);
     SSFPKeyWipe(&kP256);
     SSFPKeyWipe(&kP384);
     SSFPKeyWipe(&kEd);

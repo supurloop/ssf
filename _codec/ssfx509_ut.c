@@ -38,8 +38,10 @@
 #include "ssfed25519.h"
 #include "ssfsha2.h"
 #include "ssftls.h"
+#include "ssfpem.h"
 
 #if SSF_CONFIG_X509_UNIT_TEST == 1
+#include "ssfx509_ut_csr.h"
 
 /* RSA schemes ssfx509 verifies in this build (as in ssfx509.c) */
 #if (SSF_RSA_ANY_ENABLED == 1) && (SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1)
@@ -949,6 +951,443 @@ static uint32_t _utAppendJunk(const uint8_t *in, uint32_t inLen, const uint8_t *
     }
     if (!SSFASN1EncWrap(out, outSize, tag, buf, len, &w)) return 0;
     return w;
+}
+
+/* ---- CSR (PKCS#10) generation ---- */
+static const uint8_t _utCsrOidP256[] = { 0x2Au, 0x86u, 0x48u, 0xCEu, 0x3Du, 0x03u, 0x01u, 0x07u };
+static const uint8_t _utCsrOidP384[] = { 0x2Bu, 0x81u, 0x04u, 0x00u, 0x22u };
+static const uint8_t _utCsrOidSHA384[] = { 0x2Au, 0x86u, 0x48u, 0xCEu, 0x3Du, 0x04u, 0x03u, 0x03u };
+
+/* Fills CSR parameters for an EC key on P-256 or P-384 with an empty subject. */
+static void _UTCSRParams(SSFX509CSRParams_t *p, bool isP384, const uint8_t *pub)
+{
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(pub != NULL);
+
+    memset(p, 0, sizeof(*p));
+    p->sigAlgOidRaw = (isP384 ? _utCsrOidSHA384 : _utSigAlgOid);
+    p->sigAlgOidRawLen = (uint32_t)(isP384 ? sizeof(_utCsrOidSHA384) : sizeof(_utSigAlgOid));
+    p->pubKeyAlgOidRaw = _utPubKeyAlgOid;
+    p->pubKeyAlgOidRawLen = (uint32_t)sizeof(_utPubKeyAlgOid);
+    p->ecCurveOidRaw = (isP384 ? _utCsrOidP384 : _utCsrOidP256);
+    p->ecCurveOidRawLen = (uint32_t)(isP384 ? sizeof(_utCsrOidP384) : sizeof(_utCsrOidP256));
+    p->pubKey = pub;
+    p->pubKeyLen = (isP384 ? 97u : 65u);
+}
+
+/* Hashes data with the CSR's hash (SHA-256 for P-256, SHA-384 for P-384); returns its size. */
+static size_t _UTCSRHash(bool isP384, const uint8_t *data, uint32_t dataLen, uint8_t *hash)
+{
+    SSF_REQUIRE(data != NULL);
+    SSF_REQUIRE(hash != NULL);
+
+    /* P-384 key? */
+    if (isP384)
+    {
+        /* Yes, ecdsa-with-SHA384 */
+        SSFSHA384(data, dataLen, hash, SSF_SHA2_384_BYTE_SIZE);
+        return SSF_SHA2_384_BYTE_SIZE;
+    }
+    /* No, ecdsa-with-SHA256 */
+    SSFSHA256(data, dataLen, hash, SSF_SHA2_256_BYTE_SIZE);
+    return SSF_SHA2_256_BYTE_SIZE;
+}
+
+/* Builds a CSR the way a caller does: CSRInfo, hash, sign, wrap; returns its length. */
+static uint32_t _UTCSRBuild(const SSFX509CSRParams_t *p, bool isP384, const uint8_t *priv,
+                            uint8_t *out, uint32_t outSize)
+{
+    static uint8_t cri[1024];
+    uint8_t hash[SSF_SHA2_384_BYTE_SIZE];
+    uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+    size_t hashLen;
+    size_t sigLen;
+    uint32_t criLen;
+    uint32_t measured;
+    uint32_t len;
+
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(priv != NULL);
+    SSF_REQUIRE(out != NULL);
+
+    SSF_ASSERT(SSFX509EncodeCSRInfo(NULL, 0, p, &measured));
+    SSF_ASSERT(SSFX509EncodeCSRInfo(cri, sizeof(cri), p, &criLen));
+    SSF_ASSERT(criLen == measured);
+    hashLen = _UTCSRHash(isP384, cri, criLen, hash);
+    SSF_ASSERT(_SSFECDSAUTSign((isP384 ? SSF_EC_CURVE_P384 : SSF_EC_CURVE_P256), priv,
+                               (isP384 ? 48u : 32u), hash, hashLen, sig, sizeof(sig), &sigLen));
+    SSF_ASSERT(SSFX509EncodeCSR(NULL, 0, p, sig, (uint32_t)sigLen, &measured));
+    SSF_ASSERT(SSFX509EncodeCSR(out, outSize, p, sig, (uint32_t)sigLen, &len));
+    SSF_ASSERT(len == measured);
+    return len;
+}
+
+/* Walks a CSR, checks every field against p, and verifies its signature with the public key. */
+static void _UTCSRVerify(const uint8_t *csr, uint32_t csrLen, const SSFX509CSRParams_t *p,
+                         bool isP384)
+{
+    SSFASN1Cursor_t cur;
+    SSFASN1Cursor_t outer;
+    SSFASN1Cursor_t cri;
+    SSFASN1Cursor_t spki;
+    SSFASN1Cursor_t alg;
+    SSFASN1Cursor_t next;
+    const uint8_t *criStart;
+    const uint8_t *v;
+    uint32_t vLen;
+    uint64_t version;
+    uint16_t tag;
+    uint8_t unused;
+    uint8_t hash[SSF_SHA2_384_BYTE_SIZE];
+    size_t hashLen;
+
+    SSF_REQUIRE(csr != NULL);
+    SSF_REQUIRE(p != NULL);
+
+    cur.buf = csr;
+    cur.bufLen = csrLen;
+    SSF_ASSERT(SSFASN1DecOpenConstructed(&cur, SSF_ASN1_TAG_SEQUENCE, &outer, &next));
+    SSF_ASSERT(SSFASN1DecIsEmpty(&next));
+    criStart = outer.buf;
+    SSF_ASSERT(SSFASN1DecOpenConstructed(&outer, SSF_ASN1_TAG_SEQUENCE, &cri, &outer));
+
+    /* CertificationRequestInfo: version 0, subject, SPKI, empty attributes [0] */
+    SSF_ASSERT((SSFASN1DecGetIntU64(&cri, &version, &cri)) && (version == 0u));
+    SSF_ASSERT(SSFASN1DecSkip(&cri, &cri));
+    SSF_ASSERT(SSFASN1DecOpenConstructed(&cri, SSF_ASN1_TAG_SEQUENCE, &spki, &cri));
+    SSF_ASSERT(SSFASN1DecOpenConstructed(&spki, SSF_ASN1_TAG_SEQUENCE, &alg, &spki));
+    SSF_ASSERT(SSFASN1DecGetOIDRaw(&alg, &v, &vLen, &alg));
+    SSF_ASSERT((vLen == p->pubKeyAlgOidRawLen) && (memcmp(v, p->pubKeyAlgOidRaw, vLen) == 0));
+    SSF_ASSERT(SSFASN1DecGetOIDRaw(&alg, &v, &vLen, &alg));
+    SSF_ASSERT((vLen == p->ecCurveOidRawLen) && (memcmp(v, p->ecCurveOidRaw, vLen) == 0));
+    SSF_ASSERT(SSFASN1DecIsEmpty(&alg));
+    SSF_ASSERT((SSFASN1DecGetBitString(&spki, &v, &vLen, &unused, &spki)) && (unused == 0u));
+    SSF_ASSERT((vLen == p->pubKeyLen) && (memcmp(v, p->pubKey, vLen) == 0));
+    SSF_ASSERT(SSFASN1DecIsEmpty(&spki));
+    SSF_ASSERT(SSFASN1DecGetTLV(&cri, &tag, &v, &vLen, &cri));
+    SSF_ASSERT((tag == SSF_ASN1_CONTEXT_EXPLICIT(0)) && (vLen == 0u));
+    SSF_ASSERT(SSFASN1DecIsEmpty(&cri));
+
+    /* signatureAlgorithm without parameters, then the signature over the CRI's DER */
+    hashLen = _UTCSRHash(isP384, criStart, (uint32_t)(outer.buf - criStart), hash);
+    SSF_ASSERT(SSFASN1DecOpenConstructed(&outer, SSF_ASN1_TAG_SEQUENCE, &alg, &outer));
+    SSF_ASSERT(SSFASN1DecGetOIDRaw(&alg, &v, &vLen, &alg));
+    SSF_ASSERT((vLen == p->sigAlgOidRawLen) && (memcmp(v, p->sigAlgOidRaw, vLen) == 0));
+    SSF_ASSERT(SSFASN1DecIsEmpty(&alg));
+    SSF_ASSERT((SSFASN1DecGetBitString(&outer, &v, &vLen, &unused, &outer)) && (unused == 0u));
+    SSF_ASSERT(SSFASN1DecIsEmpty(&outer));
+    SSF_ASSERT(SSFECDSAVerify((isP384 ? SSF_EC_CURVE_P384 : SSF_EC_CURVE_P256), p->pubKey,
+                              p->pubKeyLen, hash, hashLen, v, vLen));
+}
+
+/* Checks a CSR built from the fixture key against its OpenSSL fixture. */
+static void _UTCSRFixture(const SSFX509CSRParams_t *p, bool isP384, const uint8_t *priv,
+                          const uint8_t *fix, uint32_t fixLen, const char *fixPemStrOpt)
+{
+    static uint8_t out[1024];
+    static uint8_t cri[1024];
+    static char pem[2048];
+    SSFASN1Cursor_t cur;
+    SSFASN1Cursor_t outer;
+    SSFASN1Cursor_t next;
+    uint32_t criLen;
+    uint32_t len;
+    size_t pemLen;
+
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(priv != NULL);
+    SSF_REQUIRE(fix != NULL);
+
+    /* The CSRInfo is the fixture's, byte for byte */
+    cur.buf = fix;
+    cur.bufLen = fixLen;
+    SSF_ASSERT(SSFASN1DecOpenConstructed(&cur, SSF_ASN1_TAG_SEQUENCE, &outer, &next));
+    SSF_ASSERT(SSFASN1DecSkip(&outer, &next));
+    SSF_ASSERT(SSFX509EncodeCSRInfo(cri, sizeof(cri), p, &criLen));
+    SSF_ASSERT(criLen == (uint32_t)(next.buf - outer.buf));
+    SSF_ASSERT(memcmp(cri, outer.buf, criLen) == 0);
+
+    /* The whole CSR verifies, and with SSF's RFC 6979 signer equals OpenSSL's nonce-type:1 */
+    len = _UTCSRBuild(p, isP384, priv, out, sizeof(out));
+    _UTCSRVerify(out, len, p, isP384);
+    _UTCSRVerify(fix, fixLen, p, isP384);
+#if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
+    SSF_ASSERT((len == fixLen) && (memcmp(out, fix, fixLen) == 0));
+    /* Is there a PEM form to match? */
+    if (fixPemStrOpt != NULL)
+    {
+        /* Yes, ssfpem gives OpenSSL's text */
+        SSF_ASSERT(SSFPEMEncode("CERTIFICATE REQUEST", out, len, pem, sizeof(pem), &pemLen));
+        SSF_ASSERT((pemLen == strlen(fixPemStrOpt)) && (memcmp(pem, fixPemStrOpt, pemLen) == 0));
+    }
+#else
+    (void)fixPemStrOpt;
+    (void)pem;
+    (void)pemLen;
+#endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN */
+}
+
+/* Checks that CSRInfo and CSR both refuse p in their measure and write passes. */
+static void _UTCSRRefuse(const SSFX509CSRParams_t *p, const uint8_t *sig, uint32_t sigLen)
+{
+    static uint8_t out[SSF_X509_CONFIG_MAX_CERT_SIZE + 16u];
+    uint32_t len;
+
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(sig != NULL);
+
+    len = 1u;
+    SSF_ASSERT((SSFX509EncodeCSRInfo(NULL, 0, p, &len) == false) && (len == 0u));
+    len = 1u;
+    SSF_ASSERT((SSFX509EncodeCSRInfo(out, sizeof(out), p, &len) == false) && (len == 0u));
+    len = 1u;
+    SSF_ASSERT((SSFX509EncodeCSR(NULL, 0, p, sig, sigLen, &len) == false) && (len == 0u));
+    len = 1u;
+    SSF_ASSERT((SSFX509EncodeCSR(out, sizeof(out), p, sig, sigLen, &len) == false) &&
+               (len == 0u));
+}
+
+/* Checks that CSRInfo and CSR both accept p. */
+static void _UTCSRAccept(const SSFX509CSRParams_t *p, const uint8_t *sig, uint32_t sigLen)
+{
+    static uint8_t out[SSF_X509_CONFIG_MAX_CERT_SIZE];
+    uint32_t len;
+
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(sig != NULL);
+
+    SSF_ASSERT((SSFX509EncodeCSRInfo(NULL, 0, p, &len)) && (len > 0u));
+    SSF_ASSERT((SSFX509EncodeCSRInfo(out, sizeof(out), p, &len)) && (len > 0u));
+    SSF_ASSERT((SSFX509EncodeCSR(NULL, 0, p, sig, sigLen, &len)) && (len > 0u));
+    SSF_ASSERT((SSFX509EncodeCSR(out, sizeof(out), p, sig, sigLen, &len)) && (len > 0u));
+}
+
+/* Checks the CSR buffer sizes, name bounds, size cap and contracts with a placeholder key. */
+static void _UTCSRLimits(void)
+{
+    static SSFX509CSRParams_t p;
+    static uint8_t pub[97];
+    static uint8_t sig[72];
+    static uint8_t big[SSF_X509_CONFIG_MAX_CERT_SIZE];
+    static uint8_t out[SSF_X509_CONFIG_MAX_CERT_SIZE];
+    static char name[130];
+    static uint32_t len;
+    static uint32_t need;
+    static uint32_t sigLen;
+
+    memset(pub, 0x04, sizeof(pub));
+    memset(sig, 0x30, sizeof(sig));
+    _UTCSRParams(&p, false, pub);
+    p.subject.cn = "dev-1";
+
+    /* ---- Measure, one byte short, exact fit ---- */
+    SSF_ASSERT(SSFX509EncodeCSRInfo(NULL, 0, &p, &need));
+    len = 1u;
+    SSF_ASSERT((SSFX509EncodeCSRInfo(out, (need - 1u), &p, &len) == false) && (len == 0u));
+    SSF_ASSERT((SSFX509EncodeCSRInfo(out, need, &p, &len)) && (len == need));
+    SSF_ASSERT(SSFX509EncodeCSR(NULL, 0, &p, sig, sizeof(sig), &need));
+    len = 1u;
+    SSF_ASSERT((SSFX509EncodeCSR(out, (need - 1u), &p, sig, sizeof(sig), &len) == false) &&
+               (len == 0u));
+    SSF_ASSERT((SSFX509EncodeCSR(out, need, &p, sig, sizeof(sig), &len)) && (len == need));
+
+    /* ---- Subject bounds (RFC 5280): at the bound accepted, one over refused ---- */
+    memset(name, 'a', sizeof(name));
+    name[64] = '\0';
+    p.subject.cn = name;
+    _UTCSRAccept(&p, sig, sizeof(sig));
+    p.subject.cn = NULL;
+    p.subject.o = name;
+    _UTCSRAccept(&p, sig, sizeof(sig));
+    p.subject.o = NULL;
+    p.subject.ou = name;
+    _UTCSRAccept(&p, sig, sizeof(sig));
+    name[64] = 'a';
+    name[65] = '\0';
+    p.subject.ou = NULL;
+    p.subject.cn = name;
+    _UTCSRRefuse(&p, sig, sizeof(sig));
+    p.subject.cn = NULL;
+    p.subject.o = name;
+    _UTCSRRefuse(&p, sig, sizeof(sig));
+    p.subject.o = NULL;
+    p.subject.ou = name;
+    _UTCSRRefuse(&p, sig, sizeof(sig));
+    p.subject.ou = NULL;
+    memset(name, 'a', sizeof(name));
+    name[128] = '\0';
+    p.subject.st = name;
+    _UTCSRAccept(&p, sig, sizeof(sig));
+    p.subject.st = NULL;
+    p.subject.l = name;
+    _UTCSRAccept(&p, sig, sizeof(sig));
+    name[128] = 'a';
+    name[129] = '\0';
+    p.subject.l = NULL;
+    p.subject.st = name;
+    _UTCSRRefuse(&p, sig, sizeof(sig));
+    p.subject.st = NULL;
+    p.subject.l = name;
+    _UTCSRRefuse(&p, sig, sizeof(sig));
+    p.subject.l = NULL;
+    p.subject.c = "US";
+    _UTCSRAccept(&p, sig, sizeof(sig));
+    p.subject.c = "U";
+    _UTCSRRefuse(&p, sig, sizeof(sig));
+    p.subject.c = "USA";
+    _UTCSRRefuse(&p, sig, sizeof(sig));
+    p.subject.c = "U*";
+    _UTCSRRefuse(&p, sig, sizeof(sig));
+    p.subject.c = NULL;
+
+    /* ---- Size cap: the largest signature that fits, and one byte more ---- */
+    memset(big, 0x30, sizeof(big));
+    sigLen = (uint32_t)sizeof(big);
+    while ((sigLen > 0u) && (!SSFX509EncodeCSR(NULL, 0, &p, big, sigLen, &need))) sigLen--;
+    SSF_ASSERT((sigLen > 0u) && (need == SSF_X509_CONFIG_MAX_CERT_SIZE));
+    SSF_ASSERT((SSFX509EncodeCSR(out, sizeof(out), &p, big, sigLen, &len)) && (len == need));
+    len = 1u;
+    SSF_ASSERT((SSFX509EncodeCSR(NULL, 0, &p, big, (sigLen + 1u), &len) == false) && (len == 0u));
+    len = 1u;
+    SSF_ASSERT((SSFX509EncodeCSR(out, sizeof(out), &p, big, (sigLen + 1u), &len) == false) &&
+               (len == 0u));
+
+    /* ---- A signature length near 4 GB is refused, not wrapped to a small size ---- */
+    len = 1u;
+    SSF_ASSERT((SSFX509EncodeCSR(NULL, 0, &p, sig, 0xFFFFFFF0u, &len) == false) && (len == 0u));
+    len = 1u;
+    SSF_ASSERT((SSFX509EncodeCSR(NULL, 0, &p, sig, 0xFFFFFFFEu, &len) == false) && (len == 0u));
+    {
+        static SSFX509GenParams_t gp;
+        static const uint8_t serial[] = { 0x01u };
+
+        _utGenBaseParams(&gp, serial, pub, 65u);
+        len = 1u;
+        SSF_ASSERT((SSFX509EncodeCert(NULL, 0, &gp, sig, 0xFFFFFFF0u, &len) == false) &&
+                   (len == 0u));
+        SSF_ASSERT((SSFX509EncodeCert(NULL, 0, &gp, sig, sizeof(sig), &len)) && (len > 0u));
+        gp.sigAlgParams = sig;
+        gp.sigAlgParamsLen = 0xFFFFFFFEu;
+        len = 1u;
+        SSF_ASSERT((SSFX509EncodeCert(NULL, 0, &gp, sig, sizeof(sig), &len) == false) &&
+                   (len == 0u));
+        len = 1u;
+        SSF_ASSERT((SSFX509EncodeTBS(NULL, 0, &gp, &len) == false) && (len == 0u));
+    }
+    p.pubKeyLen = 0xFFFFFFF0u;
+    len = 1u;
+    SSF_ASSERT((SSFX509EncodeCSRInfo(NULL, 0, &p, &len) == false) && (len == 0u));
+    p.pubKeyLen = 65u;
+    /* Content that fits 32 bits but whose outer header would not: CRI + AlgId + BIT STRING */
+    SSF_ASSERT(SSFX509EncodeCSRInfo(NULL, 0, &p, &need));
+    sigLen = 0xFFFFFFFCu - need - 12u - 7u;
+    len = 1u;
+    SSF_ASSERT((SSFX509EncodeCSR(NULL, 0, &p, sig, sigLen, &len) == false) && (len == 0u));
+
+    /* ---- Contracts ---- */
+    SSF_ASSERT_TEST(SSFX509EncodeCSRInfo(NULL, 0, NULL, &len));
+    SSF_ASSERT_TEST(SSFX509EncodeCSRInfo(NULL, 0, &p, NULL));
+    SSF_ASSERT_TEST(SSFX509EncodeCSRInfo(NULL, 1u, &p, &len));
+    SSF_ASSERT_TEST(SSFX509EncodeCSR(NULL, 0, NULL, sig, sizeof(sig), &len));
+    SSF_ASSERT_TEST(SSFX509EncodeCSR(NULL, 0, &p, sig, sizeof(sig), NULL));
+    SSF_ASSERT_TEST(SSFX509EncodeCSR(NULL, 1u, &p, sig, sizeof(sig), &len));
+    SSF_ASSERT_TEST(SSFX509EncodeCSR(NULL, 0, &p, NULL, sizeof(sig), &len));
+    SSF_ASSERT_TEST(SSFX509EncodeCSR(NULL, 0, &p, sig, 0u, &len));
+    SSF_ASSERT_TEST(SSFX509EncodeCSR(out, sizeof(out), &p, &out[8], sizeof(sig), &len));
+    SSF_ASSERT_TEST(SSFX509EncodeCSR(&out[8], 64u, &p, out, 9u, &len));
+    SSF_ASSERT(SSFX509EncodeCSR(&out[256], 1024u, &p, out, 256u, &len));
+    SSF_ASSERT(SSFX509EncodeCSR(out, 256u, &p, &out[256], 9u, &len));
+    memcpy(&out[512], pub, 65u);
+    p.pubKey = &out[512];
+    SSF_ASSERT_TEST(SSFX509EncodeCSRInfo(out, 1024u, &p, &len));
+    SSF_ASSERT_TEST(SSFX509EncodeCSR(out, 1024u, &p, sig, sizeof(sig), &len));
+    SSF_ASSERT_TEST(SSFX509EncodeCSRInfo(&out[576], 256u, &p, &len));
+    SSF_ASSERT(SSFX509EncodeCSRInfo(out, 512u, &p, &len));
+    SSF_ASSERT(SSFX509EncodeCSRInfo(&out[577], 256u, &p, &len));
+    SSF_ASSERT(SSFX509EncodeCSR(&out[577], 512u, &p, sig, sizeof(sig), &len));
+    p.pubKey = pub;
+    p.sigAlgOidRaw = NULL;
+    SSF_ASSERT_TEST(SSFX509EncodeCSRInfo(NULL, 0, &p, &len));
+    SSF_ASSERT_TEST(SSFX509EncodeCSR(NULL, 0, &p, sig, sizeof(sig), &len));
+    _UTCSRParams(&p, false, pub);
+    p.sigAlgOidRawLen = 0u;
+    SSF_ASSERT_TEST(SSFX509EncodeCSRInfo(NULL, 0, &p, &len));
+    _UTCSRParams(&p, false, pub);
+    p.pubKeyAlgOidRaw = NULL;
+    SSF_ASSERT_TEST(SSFX509EncodeCSRInfo(NULL, 0, &p, &len));
+    _UTCSRParams(&p, false, pub);
+    p.pubKeyAlgOidRawLen = 0u;
+    SSF_ASSERT_TEST(SSFX509EncodeCSRInfo(NULL, 0, &p, &len));
+    _UTCSRParams(&p, false, pub);
+    p.ecCurveOidRaw = NULL;
+    SSF_ASSERT_TEST(SSFX509EncodeCSRInfo(NULL, 0, &p, &len));
+    _UTCSRParams(&p, false, pub);
+    p.ecCurveOidRawLen = 0u;
+    SSF_ASSERT_TEST(SSFX509EncodeCSRInfo(NULL, 0, &p, &len));
+    _UTCSRParams(&p, false, pub);
+    p.pubKey = NULL;
+    SSF_ASSERT_TEST(SSFX509EncodeCSRInfo(NULL, 0, &p, &len));
+    _UTCSRParams(&p, false, pub);
+    p.pubKeyLen = 0u;
+    SSF_ASSERT_TEST(SSFX509EncodeCSRInfo(NULL, 0, &p, &len));
+}
+
+/* Runs the CSR generation tests. */
+static void _UTCSR(void)
+{
+    static SSFX509CSRParams_t p;
+    static uint8_t out[1024];
+    uint8_t priv[48];
+    uint8_t pub[97];
+    size_t pubLen;
+    uint32_t len;
+    uint32_t i;
+
+    /* ---- OpenSSL fixtures ---- */
+#if SSF_EC_CONFIG_ENABLE_P256 == 1
+    _UTCSRParams(&p, false, _utCsrP256Pub);
+    p.subject.cn = "dev-1";
+    _UTCSRFixture(&p, false, _utCsrP256Priv, _utCsrP256CN, sizeof(_utCsrP256CN),
+                  _utCsrP256CNPem);
+    p.subject.c = "US";
+    p.subject.st = "CA";
+    p.subject.l = "Test";
+    p.subject.o = "SSF";
+    p.subject.ou = "Dev";
+    p.subject.cn = "dev-2";
+    _UTCSRFixture(&p, false, _utCsrP256Priv, _utCsrP256All, sizeof(_utCsrP256All), NULL);
+    _UTCSRParams(&p, false, _utCsrP256Pub);
+    _UTCSRFixture(&p, false, _utCsrP256Priv, _utCsrP256Empty, sizeof(_utCsrP256Empty), NULL);
+#endif /* SSF_EC_CONFIG_ENABLE_P256 */
+#if SSF_EC_CONFIG_ENABLE_P384 == 1
+    _UTCSRParams(&p, true, _utCsrP384Pub);
+    p.subject.cn = "dev-384";
+    _UTCSRFixture(&p, true, _utCsrP384Priv, _utCsrP384CN, sizeof(_utCsrP384CN), NULL);
+#endif /* SSF_EC_CONFIG_ENABLE_P384 */
+
+    /* ---- Generated keys on each built curve ---- */
+    for (i = 0; i < 6u; i++)
+    {
+        bool isP384 = ((i & 1u) != 0u);
+
+        /* Is this curve compiled out? */
+        if (((isP384) && (SSF_EC_CONFIG_ENABLE_P384 == 0)) ||
+            ((!isP384) && (SSF_EC_CONFIG_ENABLE_P256 == 0)))
+        {
+            /* Yes, skip it */
+            continue;
+        }
+        SSF_ASSERT(SSFECDSAKeyGen((isP384 ? SSF_EC_CURVE_P384 : SSF_EC_CURVE_P256), priv,
+                                  sizeof(priv), pub, sizeof(pub), &pubLen));
+        _UTCSRParams(&p, isP384, pub);
+        p.subject.cn = "generated";
+        p.subject.c = ((i < 2u) ? "US" : NULL);
+        len = _UTCSRBuild(&p, isP384, priv, out, sizeof(out));
+        _UTCSRVerify(out, len, &p, isP384);
+    }
+    memset(priv, 0, sizeof(priv));
+
+    _UTCSRLimits();
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -9697,5 +10136,8 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(SSFX509EncodeCert(gen, sizeof(gen), &p, fakeSig, sizeof(fakeSig),
                                      &genLen) == true);
     }
+
+    /* ---- CSR (PKCS#10) generation ---- */
+    _UTCSR();
 }
 #endif /* SSF_CONFIG_X509_UNIT_TEST */

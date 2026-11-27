@@ -21,7 +21,7 @@ Encoding and decoding interfaces.
 | ssfstr | Safe C string interface | ssfstr.c, ssfstr.h | [ssfstr.md](ssfstr.md) |
 | ssftlv | TLV encoder/decoder | ssftlv.c, ssftlv.h | [ssftlv.md](ssftlv.md) |
 | ssfubjson | UBJSON (Universal Binary JSON) parser/generator | ssfubjson.c, ssfubjson.h | [ssfubjson.md](ssfubjson.md) |
-| ssfx509 | X.509 v3 certificate parser (zero-copy), generator, and RFC 5280 chain verifier | ssfx509.c, ssfx509.h | [ssfx509.md](ssfx509.md) |
+| ssfx509 | X.509 v3 certificate parser (zero-copy), generator, PKCS#10 CSR generator, and RFC 5280 chain verifier | ssfx509.c, ssfx509.h | [ssfx509.md](ssfx509.md) |
 
 ## See Also
 

@@ -16,8 +16,9 @@ Sources    : AWS docs read on 2026-11-26. Each fact in section 1 names its page.
                [Q]   general/latest/gr/iot-core.html (quotas)
                [API] apireference/API_CreateProvisioningTemplate.html
              (developerguide = https://docs.aws.amazon.com/iot/latest/developerguide/)
-Status     : G01 done (commit 9041eba, 2026-11-26). G02 done (2026-11-26, commit
-             "ssfpkey: build a key from a raw EC scalar"). Everything else is plan only.
+Status     : G01 done (commit 9041eba, 2026-11-26). G02 done (commit d510ab3, 2026-11-26).
+             G03 done (2026-11-26, commit "ssfx509: add PKCS#10 CSR encoder").
+             Everything else is plan only.
 
 Layout
   Section 1  Findings checked against AWS docs, including the TLS 1.3 answer.
@@ -313,21 +314,108 @@ AWSPROV-G02  ssfpkey: build a key from a raw EC scalar
            invalid scalar without zeroizing its local copy d. Tracked as AWSPROV-G08.
 
 AWSPROV-G03  ssfx509: PKCS#10 CSR encoder
-  Why    : CreateCertificateFromCsr needs a CSR. ssfx509 encodes certificates but not CSRs.
-  Change : Mirror the EncodeTBS / EncodeCert split so signing stays outside ssfx509:
-             SSFX509EncodeCSRInfo(bufOpt, size, params, lenOut)  CertificationRequestInfo
-             SSFX509EncodeCSR(bufOpt, size, params, sig, sigLen, lenOut)
-           params: subject (SSFX509GenName_t), public key (EC P-256 / P-384 uncompressed
-           point, with curve OID), signature algorithm (ecdsa-with-SHA256 / SHA384), empty
-           attributes [0]. Reuse the private _SSFX509EncDN and SPKI encoders in ssfx509.c.
-           RSA CSRs: not in this task (section 5).
-  Test   : Byte-exact against a fixture made with "openssl req -new" from a fixed key, using
-           SSFECDSASign's RFC 6979 deterministic signature; a generated CSR self-verifies (parse
-           with ssfasn1, verify with SSFECDSAVerify); measure mode; one byte short fails;
-           subject with only CN, with all fields, with empty subject; P-384 variant;
-           tools/tlsc-interop or a script runs "openssl req -verify" on generated output.
-  Done   : ./ssf passes; ssfx509.md documents the API; coverage of the new code is 100%
-           (tools/coverage).
+  Why    : CreateCertificateFromCsr needs the device's CSR (RFC 2986) as PEM. ssfx509 encodes
+           certificates but not CSRs. As for certificates, signing stays outside ssfx509: one
+           call encodes what is signed, the caller signs it, a second call wraps the signature.
+
+  Checked (OpenSSL 4.0.3, 2026-11-26)
+    - "openssl req -new -sha256 -sigopt nonce-type:1" signs deterministically (RFC 6979):
+      two runs are identical. SSFECDSASign is RFC 6979 and does not normalize s, so whole
+      CSRs, signature included, should match OpenSSL byte for byte.
+    - Layout: SEQ { SEQ { INTEGER 0, Name, SPKI, [0] {} }, SEQ { ecdsa-with-SHA256 },
+      BIT STRING }. Attributes are an empty A0 00; the signature AlgorithmIdentifier has no
+      parameters (as _SSFX509EncAlgId writes); strings are UTF8String except C
+      (PrintableString), as _SSFX509EncDNAttr writes.
+    - An empty subject ("-subj /") encodes as 30 00 and verifies; _SSFX509EncDN writes that
+      when every name field is NULL.
+    - SSF enforces ub-common-name = 64 (RFC 5280); AWS thing names are up to 128 bytes, so
+      M03 must not put a long thing name in CN. Whether AWS accepts an empty subject is
+      unverified: V02 checks it.
+
+  API (_codec/ssfx509.h)
+    typedef struct SSFX509CSRParams
+    {
+        SSFX509GenName_t subject;       /* All NULL gives an empty subject */
+        const uint8_t *sigAlgOidRaw;    /* ecdsa-with-SHA256 / SHA384 (raw DER content) */
+        uint32_t sigAlgOidRawLen;
+        const uint8_t *pubKeyAlgOidRaw; /* id-ecPublicKey */
+        uint32_t pubKeyAlgOidRawLen;
+        const uint8_t *ecCurveOidRaw;   /* prime256v1 / secp384r1 */
+        uint32_t ecCurveOidRawLen;
+        const uint8_t *pubKey;          /* Uncompressed point, e.g. SSFPKey_t.pub */
+        uint32_t pubKeyLen;
+    } SSFX509CSRParams_t;
+
+    bool SSFX509EncodeCSRInfo(uint8_t *bufOpt, uint32_t bufOptSize,
+                              const SSFX509CSRParams_t *params, uint32_t *lenOut);
+    bool SSFX509EncodeCSR(uint8_t *bufOpt, uint32_t bufOptSize, const SSFX509CSRParams_t *params,
+                          const uint8_t *signature, uint32_t signatureLen, uint32_t *lenOut);
+    Raw OIDs, as in SSFX509GenParams_t (no ssfx509 -> ssfpkey dependency); M03 supplies them.
+
+  Behavior (mirrors EncodeTBS / EncodeCert)
+    - Measure-then-write: bufOpt NULL returns true with *lenOut = size. On failure *lenOut
+      is 0 and false is returned: a subject field over its RFC 5280 bound, C not two
+      PrintableString letters, total over SSF_X509_CONFIG_MAX_CERT_SIZE, buffer too small.
+      A CSR is public: a failed buffer is not zeroed (same policy as certificates).
+    - SSF_REQUIRE: params / lenOut NULL; bufOpt NULL with a size; any OID or pubKey NULL or
+      length 0; ecCurveOidRaw NULL (EC keys only: the SPKI encoder gives a non-EC key a bare
+      AlgorithmIdentifier, which is wrong for RSA); signature NULL or signatureLen 0; bufOpt
+      overlapping signature or params->pubKey (added in the audit: an overlapping key would
+      be overwritten before it is copied, silently corrupting the CSR).
+    - signature is the DER ECDSA-Sig-Value from SSFECDSASign, wrapped in a BIT STRING with 0
+      unused bits, not checked (as EncodeCert).
+
+  Implementation (_codec/ssfx509.c, about 100 lines; certificate paths unchanged)
+    1. _SSFX509EncCRIContent: INTEGER 0 (_SSFX509EncIntU64), _SSFX509EncDN(&subject), SPKI
+       (a zeroed local SSFX509GenParams_t holding only the four public-key fields, through
+       _SSFX509EncSPKIContent in a SEQUENCE), then A0 00 (_SSFX509EncTagLen).
+    2. _SSFX509EncCSRContent: CRI, _SSFX509EncAlgId(sigAlg), _SSFX509EncBitString(sig).
+    3. The two public functions follow EncodeTBS / EncodeCert (measure, size cap, write);
+       _SSFX509RequireCSRParams holds the DBC checks.
+    Caller (M03): EncodeCSRInfo -> SSFSHA256/384 -> SSFECDSASign(key.priv) -> EncodeCSR ->
+    SSFPEMEncode("CERTIFICATE REQUEST"). About 200 B + subject (P-256), 260 B + subject (P-384).
+
+  Tests (_codec/ssfx509_ut.c)
+    1. Byte-exact against OpenSSL: fixtures from "openssl req -new -key <fixed key> -subj ...
+       -sha256|-sha384 -sigopt nonce-type:1 -outform DER" (each command in a comment):
+       P-256 CN only; P-256 all six fields (/C=/ST=/L=/O=/OU=/CN=, SSF's order); P-256 empty
+       subject; P-384 with ecdsa-with-SHA384. Each: CRI equals the fixture's CRI;
+       SSFECDSASign over its hash + EncodeCSR equals the whole fixture; SSFPEMEncode of it
+       equals OpenSSL's PEM text. If a signature differs: compare the CRI byte for byte,
+       verify the signature, and report the RFC 6979 difference.
+    2. Self-check: SSFECDSAKeyGen keys per curve; build a CSR, walk it with ssfasn1 (version
+       0, SPKI point equals the key, empty [0]), verify the signature over the CRI bytes
+       with SSFECDSAVerify.
+    3. Measure / sizes, both functions: NULL measures the written length; len - 1 fails with
+       *lenOut 0; exactly len succeeds.
+    4. Names: CN 64 succeeds, 65 fails; C "U", "USA", non-printable fail; other fields at
+       their bound succeed and one over fail; measure and write passes agree.
+    5. Size cap: a total over SSF_X509_CONFIG_MAX_CERT_SIZE is refused.
+    6. SSF_REQUIRE (SSF_ASSERT_TEST): every NULL / zero-length field in the contract, missing
+       curve OID, overlapping buffers.
+    7. Audit-time (not committed): 1000 CSRs from random keys and subjects pass
+       "openssl req -verify" and "openssl asn1parse -strict".
+
+  Docs   : ssfx509.md: CSR generation in the overview; SSFX509CSRParams_t and both functions
+           with an example (KeyGen, CRI, hash, sign, CSR, PEM); EC keys only, the 64-character
+           CN bound and what it means for AWS thing names, empty subject allowed.
+           _codec/README.md / README.md: CSR in the ssfx509 row; size after measuring on
+           Cortex-M4.
+  Done   : ./ssf and ASan pass; tools/coverage 100% of the new lines; features.sh passes
+           (p256off, p384off, signoff: fixture tests gated per curve and on signing); ARM and
+           XC32 no new warnings. One commit, TDD: ssfx509.{h,c,md}, ssfx509_ut.c, fixtures,
+           READMEs.
+  Audit  : Fixed (pre-existing, also in EncodeTBS / EncodeCert): the encoder's running uint32_t
+           lengths (_SSFX509Add, _SSFX509AddBytes, _SSFX509EncConstructed) could wrap, so a
+           signature or sigAlgParams length near 4 GB measured as a small "success" (the write
+           pass still refused it; no out-of-bounds write). Now refused in both passes.
+           Not fixed (pre-existing): subject strings are not checked to be valid UTF-8, for
+           certificates and CSRs alike; invalid input gives a non-conforming UTF8String that
+           strict parsers refuse. Inputs come from the caller. Tracked as AWSPROV-G09. ssfx509.md now says C is a
+           PrintableString (it said every value was a UTF8String).
+           Coverage: two failure returns in _SSFX509EncCRIContent (INTEGER 0, empty [0]) cannot
+           be reached, since the enclosing size check precedes every write; EncodeTBS has the
+           same defensive returns.
 
 AWSPROV-G04  ssfjson: allow a larger input limit per build
   Why    : The CSR response is ~2.1..2.5 KB (1.8) and SSF_JSON_CONFIG_MAX_IN_LEN is 2047 and
@@ -397,6 +485,26 @@ AWSPROV-G08  ssfecdsa: wipe the scalar copy on every SSFECDSAPubKeyFromPrivKey r
            scalar. Existing ssfecdsa vectors unchanged.
   Done   : ./ssf and ASan pass; tools/coverage 100% of the changed lines; ARM / XC32 no
            warnings. Needs approval to modify ssfecdsa.
+
+AWSPROV-G09  ssfx509: refuse subject / issuer strings that are not valid UTF-8
+  Why    : Found in the G03 audit (pre-existing). The generator writes every Name value except
+           countryName as a UTF8String but only bounds its length (SSFStrLen); the bytes are
+           never checked. Invalid UTF-8 (a stray 0x80, an overlong form, a surrogate, a value
+           above U+10FFFF, a truncated sequence) gives a non-conforming certificate or CSR that
+           strict parsers refuse (Python cryptography does; AWS may). Names usually come from
+           device data (serial numbers, thing names), so this is a data error to report.
+  Change : A strict RFC 3629 validator, e.g. static _SSFX509IsUTF8(str, len), applied in
+           _SSFX509EncDNAttr to every UTF8String value; on failure both passes return false,
+           as for an over-long value. No SSF module validates UTF-8 today (checked: none in
+           _codec, ssfjson, ssfmqttc); if another module needs it later, it can move to a
+           shared helper. The RFC 5280 bounds stay in bytes, as now.
+  Test   : Accept: ASCII, 2/3/4-byte forms, U+FFFF, U+10FFFF, the existing fixtures. Refuse in
+           EncodeTBS, EncodeCert, EncodeCSRInfo and EncodeCSR, measure and write: lone
+           continuation byte, C0/C1 overlong forms, E0 80..9F, ED A0..BF (surrogates), F0 80..8F,
+           F4 90+ and F5..FF, a sequence cut off by the NUL. Exhaustive check of every 1- and
+           2-byte string and every 3-byte lead/continuation combination against a reference.
+  Done   : ./ssf and ASan pass; coverage 100% of the new lines; features.sh passes; ARM / XC32
+           no new warnings; ssfx509.md says values must be valid UTF-8. Needs approval (ssfx509).
 
 No gap for ssftlsc: TLS 1.3, mutual TLS, SNI and ALPN already cover AWS (1.2).
 No gap for ssfmqttc routing: its rx and event callbacks are bound at SSFMQTTCInit, and
@@ -583,3 +691,4 @@ AWSPROV-V03  End-to-end with ssfawsprov
   M07 needs M02..M06 and G05.  M08 needs G02 and M07.  M09, M10 after M08.  V03 last.
   G06 only if requested; G07 must land before G06 (or anything else that encodes a secret).
   G08 is independent; best before field deployment of G02.
+  G09 is independent; best before M03 puts device data into CSR subjects.

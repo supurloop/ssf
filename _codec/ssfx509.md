@@ -12,6 +12,9 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
 - A **certificate generator** that encodes a TBSCertificate and a complete Certificate from an
   [`SSFX509GenParams_t`](#type-genparams) using the measure-then-write pattern, for self-signed
   device certificates, test fixtures, and small embedded CAs.
+- A **CSR generator** that encodes a PKCS#10 CertificationRequest (RFC 2986) for an EC key from
+  an [`SSFX509CSRParams_t`](#type-csrparams), signed the same way, e.g. for AWS IoT
+  `CreateCertificateFromCsr`.
 - A **chain verifier** that checks signatures (ECDSA P-256 / P-384, RSA PKCS#1 v1.5 and RSA-PSS,
   Ed25519), validity periods, CA constraints, path length, Key Usage, Extended Key Usage, Name
   Constraints, SKID / AKID consistency, unrecognized critical extensions, and the leaf's SAN
@@ -45,7 +48,8 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
 - **Generation input bounds.** The encoders refuse, with `0` from both passes, any Distinguished
   Name attribute over its RFC 5280 Appendix A upper bound (CN, O, OU 64 characters; ST, L 128;
   C exactly 2), any `dNSName` over 253 octets, and any key identifier over 64 octets (the longest
-  RFC 7093 method, SHA-512). Values are emitted as `UTF8String` regardless of attribute type.
+  RFC 7093 method, SHA-512). Values are emitted as `UTF8String`, except `countryName`, which is
+  a `PrintableString` (RFC 5280 Appendix A).
   String lengths are measured with a bounded scan of at most the limit plus one byte, so an
   over-long or unterminated value is refused without reading past its bound; the same bound caps
   the `hostnameStr` scan in [`SSFX509VerifyChain()`](#ssfx509verifychain), where a hostname over
@@ -244,6 +248,19 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   both calls. The write pass emits every element directly into the caller's buffer, header first
   using the measured content length, and asserts that the bytes written equal the bytes measured,
   so a `true` return always leaves a complete, well-formed encoding of exactly `*lenOut` bytes.
+- **CSR generation.** [`SSFX509EncodeCSRInfo()`](#ssfx509encodecsrinfo) and
+  [`SSFX509EncodeCSR()`](#ssfx509encodecsr) follow the same pattern: encode the
+  CertificationRequestInfo, hash and sign those exact bytes, then encode the CertificationRequest
+  with the signature (the CSRInfo is re-encoded, so pass the same `params`). The output is laid
+  out as `openssl req -new` writes it: version 0, the subject in C, ST, L, O, OU, CN order, the
+  SubjectPublicKeyInfo, an empty attributes `[0]`, and a signature AlgorithmIdentifier without
+  parameters; with RFC 6979 signing (`SSFECDSASign()`) a CSR is byte-identical to one from
+  `openssl req -new -sigopt nonce-type:1`. EC keys only: `ecCurveOidRaw` is required, since an
+  RSA SubjectPublicKeyInfo needs NULL algorithm parameters this encoder does not write. An
+  empty subject (every name field `NULL`) is allowed. The subject follows the generation bounds
+  under [Limitations](#limitations): a Common Name is at most 64 characters, so a longer
+  identifier, such as a 128-byte AWS IoT thing name, must not go in `cn`. A CSR is public data:
+  a failed buffer is not zeroed.
 - **Generation parameters.** String fields in [`SSFX509GenName_t`](#type-genname) that are `NULL`
   are omitted from the Name. `sanDNSNames`, `sanIPAddrs`, and the four `nc*` arrays are
   `NULL`-terminated pointer arrays and may themselves be `NULL` when empty. `sanIPAddrs` entries
@@ -289,7 +306,7 @@ Options live in [`_opt/ssfx509_opt.h`](../_opt/ssfx509_opt.h).
 
 | Macro | Default | Description |
 |-------|---------|-------------|
-| <a id="cfg-max-cert-size"></a>`SSF_X509_CONFIG_MAX_CERT_SIZE` | `4096` | Largest DER TBSCertificate or Certificate [`SSFX509EncodeTBS()`](#ssfx509encodetbs) / [`SSFX509EncodeCert()`](#ssfx509encodecert) will produce. Both the measuring and the writing call return `false` when the result would exceed it. No buffers are sized from it. |
+| <a id="cfg-max-cert-size"></a>`SSF_X509_CONFIG_MAX_CERT_SIZE` | `4096` | Largest DER TBSCertificate, Certificate, CertificationRequestInfo or CertificationRequest [`SSFX509EncodeTBS()`](#ssfx509encodetbs) / [`SSFX509EncodeCert()`](#ssfx509encodecert) / [`SSFX509EncodeCSRInfo()`](#ssfx509encodecsrinfo) / [`SSFX509EncodeCSR()`](#ssfx509encodecsr) will produce. Both the measuring and the writing call return `false` when the result would exceed it. No buffers are sized from it. |
 | <a id="cfg-max-chain-depth"></a>`SSF_X509_CONFIG_MAX_CHAIN_DEPTH` | `6` | Maximum `chainLen` accepted by [`SSFX509VerifyChain()`](#ssfx509verifychain) (leaf plus intermediates, plus any root sent). The default covers a leaf, two intermediates, a cross-signed root and the root. Also the [`ssftlsc`](../_net/ssftlsc.h) chain limit: a server's certificates past it are dropped, and a resulting verification failure is traced as a truncation. Costs 2 bytes of stack per certificate; the verifier parses at most two at a time. With [`ssfcms`](../_crypto/ssfcms.md) it must be at least `SSF_CMS_CONFIG_MAX_CERTS + 1`, which `ssfcms.c` enforces. Must be 1 to 255 (chain lengths and path indexes are `uint8_t`), enforced by `ssfx509.c`. Can be set on the compiler command line (`-DSSF_X509_CONFIG_MAX_CHAIN_DEPTH=10u`); every file that includes the SSF headers must then see the same value. |
 | <a id="cfg-max-extensions"></a>`SSF_X509_CONFIG_MAX_EXTENSIONS` | `16` | Number of extension records retained in `SSFX509Cert_t.exts[]`. A certificate with more extensions fails to parse, so the critical-extension and duplicate checks always see every extension. Raise it if a deployment's certificates legitimately carry more. |
 | <a id="cfg-max-name-constraints"></a>`SSF_X509_CONFIG_MAX_NAME_CONSTRAINTS` | `8` | Number of `dNSName` / `iPAddress` permitted subtrees and, separately, excluded subtrees retained per CA certificate. A certificate with more fails to parse, because dropping an exclusion would loosen the constraint. Raise it if a deployment's CAs legitimately carry more. |
@@ -334,6 +351,7 @@ The unit-test entry point is gated by `SSF_CONFIG_X509_UNIT_TEST` in `ssfport.h`
 | <a id="type-nc"></a>`SSFX509NameConstraint_t` | Struct | One Name Constraints subtree: `type` is `SSF_X509_SAN_DNS` (`val` is a DNS suffix) or `SSF_X509_SAN_IP` (`val` is 8 bytes: IPv4 address then mask; IPv6-sized 16 / 32-byte values are kept as parsed and are handled as described in [Limitations](#limitations)). |
 | <a id="type-cert"></a>`SSFX509Cert_t` | Struct | Parsed certificate. `version` (`0` = v1, `2` = v3); `serial`; TBS and outer signature algorithm OIDs plus their raw parameters (`sigAlgParams`, `outerSigAlgParams`); `issuer` / `subject` names; `notBefore` / `notAfter` in Unix seconds; `pubKeyAlgOidRaw`, `pubKey` / `pubKeyLen` / `pubKeyUnusedBits`, `ecCurveOidRaw`; `exts[]` / `extsLen`; decoded flags `hasBasicConstraints`, `isCA`, `pathLenConstraint` (`-1` = absent), `hasKeyUsage`, `keyUsageBits`, `hasExtKeyUsage`, `ekuServerAuth`, `ekuClientAuth`, `ekuCodeSigning`, `ekuAnyPurpose`; `san[]` / `sanLen`; `skid`, `akid`; `hasNameConstraints` with `permittedSubtrees[]` / `excludedSubtrees[]`; `tbsRaw` / `tbsRawLen` (bytes the signature covers); `signature` / `signatureLen` / `signatureUnusedBits`. All pointers reference the source DER buffer. |
 | <a id="type-genname"></a>`SSFX509GenName_t` | Struct | Name attributes for generation as null-terminated strings: `cn`, `o`, `ou`, `c`, `st`, `l`. `NULL` omits the attribute. |
+| <a id="type-csrparams"></a>`SSFX509CSRParams_t` | Struct | Everything needed to build a CSR: `subject`, signature algorithm OID `sigAlgOidRaw` / `sigAlgOidRawLen`, public key algorithm OID `pubKeyAlgOidRaw` / `pubKeyAlgOidRawLen`, EC curve OID `ecCurveOidRaw` / `ecCurveOidRawLen`, and the uncompressed point `pubKey` / `pubKeyLen`. All pointers and lengths are required. |
 | <a id="type-genparams"></a>`SSFX509GenParams_t` | Struct | Everything needed to build a certificate: `version` (`0` or `2`), `serial` / `serialLen` (an unsigned big-endian magnitude, written as a positive DER INTEGER), signature algorithm OID and optional parameters, `issuer` / `subject`, `notBefore` / `notAfter`, public key algorithm OID, optional EC curve OID, `pubKey` / `pubKeyLen`; extension controls `addBasicConstraints` / `isCA` / `pathLenConstraint`, `addKeyUsage` / `keyUsageBits`, `addExtKeyUsage` / `ekuServerAuth` / `ekuClientAuth` / `ekuCodeSigning`, `sanDNSNames` / `sanIPAddrs`, `skid` / `skidLen`, `akid` / `akidLen`, one optional raw extension (`addRawExt`, `rawExtOid*`, `rawExtValue*`, `rawExtCritical`), and Name Constraints (`addNameConstraints`, `ncPermittedDNS`, `ncPermittedIPs`, `ncExcludedDNS`, `ncExcludedIPs`). |
 
 <a id="functions-parse"></a>
@@ -365,6 +383,8 @@ The unit-test entry point is gated by `SSF_CONFIG_X509_UNIT_TEST` in `ssfport.h`
 |---|----------|-------------|
 | [e.g.](#ex-generate) | [`bool SSFX509EncodeTBS(bufOpt, bufOptSize, params, lenOut)`](#ssfx509encodetbs) | Encode a TBSCertificate; `bufOpt == NULL` measures |
 | [e.g.](#ex-generate) | [`bool SSFX509EncodeCert(bufOpt, bufOptSize, params, signature, signatureLen, lenOut)`](#ssfx509encodecert) | Encode a complete Certificate around a precomputed signature |
+| [e.g.](#ex-csr) | [`bool SSFX509EncodeCSRInfo(bufOpt, bufOptSize, params, lenOut)`](#ssfx509encodecsrinfo) | Encode a CertificationRequestInfo; `bufOpt == NULL` measures |
+| [e.g.](#ex-csr) | [`bool SSFX509EncodeCSR(bufOpt, bufOptSize, params, signature, signatureLen, lenOut)`](#ssfx509encodecsr) | Encode a complete CertificationRequest around a precomputed signature |
 
 <a id="functions-verify"></a>
 
@@ -593,6 +613,95 @@ if (!SSFECDSASign(SSF_EC_CURVE_P256, priv, privLen, hash, sizeof(hash), sig, siz
 if (SSFX509EncodeCert(cert, sizeof(cert), &p, sig, (uint32_t)sigLen, &certLen))
 {
     /* cert[0..certLen) is a self-signed DER certificate */
+}
+```
+
+---
+
+<a id="ssfx509encodecsrinfo"></a>
+
+### [↑](#functions-gen) [`bool SSFX509EncodeCSRInfo()`](#functions-gen)
+
+```c
+bool SSFX509EncodeCSRInfo(uint8_t *bufOpt, uint32_t bufOptSize, const SSFX509CSRParams_t *params,
+                          uint32_t *lenOut);
+```
+
+Encodes the CertificationRequestInfo, the bytes the CSR signature covers:
+`SEQUENCE { version 0, subject, subjectPKInfo, attributes [0] }` with no attributes.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `bufOpt` | out (opt) | `uint8_t *` | Output buffer, or `NULL` to measure. Must not overlap `params->pubKey`. |
+| `bufOptSize` | in | `uint32_t` | Size of `bufOpt` in bytes; must be `0` when `bufOpt` is `NULL`. |
+| `params` | in | `const SSFX509CSRParams_t *` | Subject and EC public key. Must not be `NULL`; every OID and `pubKey` must be non-`NULL` with a non-zero length. |
+| `lenOut` | out | `uint32_t *` | Receives the bytes written, or the bytes required when measuring; `0` on `false`. Must not be `NULL`. |
+
+**Returns:** `true` with `*lenOut` set on success; `false` if `bufOptSize` is too small, the result
+would exceed `SSF_X509_CONFIG_MAX_CERT_SIZE`, or the subject fails a generation bound.
+
+---
+
+<a id="ssfx509encodecsr"></a>
+
+### [↑](#functions-gen) [`bool SSFX509EncodeCSR()`](#functions-gen)
+
+```c
+bool SSFX509EncodeCSR(uint8_t *bufOpt, uint32_t bufOptSize, const SSFX509CSRParams_t *params,
+                      const uint8_t *signature, uint32_t signatureLen, uint32_t *lenOut);
+```
+
+Encodes a complete CertificationRequest:
+`SEQUENCE { certificationRequestInfo, signatureAlgorithm, signature }`. The CSRInfo is
+re-encoded from `params`, the AlgorithmIdentifier is `params->sigAlgOidRaw` with no parameters,
+and `signature` is wrapped in a BIT STRING with zero unused bits.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `bufOpt` | out (opt) | `uint8_t *` | Output buffer, or `NULL` to measure. Must not overlap `signature` or `params->pubKey`. |
+| `bufOptSize` | in | `uint32_t` | Size of `bufOpt` in bytes; must be `0` when `bufOpt` is `NULL`. |
+| `params` | in | `const SSFX509CSRParams_t *` | The same parameters used to encode the signed CSRInfo. Must not be `NULL`. |
+| `signature` | in | `const uint8_t *` | The DER `ECDSA-Sig-Value` over the CSRInfo bytes, as `SSFECDSASign()` writes it. Must not be `NULL`. |
+| `signatureLen` | in | `uint32_t` | Length of `signature`; must not be `0`. |
+| `lenOut` | out | `uint32_t *` | Receives the bytes written, or the bytes required when measuring; `0` on `false`. Must not be `NULL`. |
+
+**Returns:** `true` with `*lenOut` set on success; `false` if `bufOptSize` is too small, the result
+would exceed `SSF_X509_CONFIG_MAX_CERT_SIZE`, or the subject fails a generation bound.
+
+<a id="ex-csr"></a>
+
+```c
+static const uint8_t oidEcdsaSHA256[] = { 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x02 };
+static const uint8_t oidEcPublicKey[] = { 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01 };
+static const uint8_t oidP256[]        = { 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07 };
+SSFX509CSRParams_t p;
+uint8_t cri[512];
+uint8_t csr[512];
+char pem[800];
+uint8_t hash[SSF_SHA2_256_BYTE_SIZE];
+uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+size_t sigLen;
+size_t pemLen;
+uint32_t criLen;
+uint32_t csrLen;
+
+memset(&p, 0, sizeof(p));
+p.subject.cn = "device-0001";
+p.sigAlgOidRaw = oidEcdsaSHA256;     p.sigAlgOidRawLen = sizeof(oidEcdsaSHA256);
+p.pubKeyAlgOidRaw = oidEcPublicKey;  p.pubKeyAlgOidRawLen = sizeof(oidEcPublicKey);
+p.ecCurveOidRaw = oidP256;           p.ecCurveOidRawLen = sizeof(oidP256);
+p.pubKey = key.pub;                  p.pubKeyLen = (uint32_t)key.pubLen;  /* an SSFPKey_t */
+
+if (SSFX509EncodeCSRInfo(cri, sizeof(cri), &p, &criLen))
+{
+    SSFSHA256(cri, criLen, hash, sizeof(hash));
+    if (SSFECDSASign(SSF_EC_CURVE_P256, key.priv, key.privLen, hash, sizeof(hash), sig,
+                     sizeof(sig), &sigLen) &&
+        SSFX509EncodeCSR(csr, sizeof(csr), &p, sig, (uint32_t)sigLen, &csrLen) &&
+        SSFPEMEncode("CERTIFICATE REQUEST", csr, csrLen, pem, sizeof(pem), &pemLen))
+    {
+        /* pem[0..pemLen) is the CSR as PEM, NUL-terminated */
+    }
 }
 ```
 

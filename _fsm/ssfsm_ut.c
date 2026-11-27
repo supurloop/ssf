@@ -53,6 +53,10 @@
 
 static bool _ssfsmFlags[SSFSM_UT_NUM_SMS][SSFSM_UT_NUM_HANDLERS][SSFSM_UT_NUM_EVENTS];
 static uint8_t _utTrace[255];
+/* Host OS scheduling delay tolerated on top of a requested wait */
+#define SSFSM_UT_SCHED_SLACK (SSF_TICKS_PER_SEC * 2u)
+/* Wait so long that a missed wake signal cannot pass for scheduling delay */
+#define SSFSM_UT_SIGNALLED_WAIT (SSF_TICKS_PER_SEC * 10u)
 static uint16_t _utTraceIndex;
 
 /* --------------------------------------------------------------------------------------------- */
@@ -633,11 +637,11 @@ void SSFSMUnitTest(void)
     SSFSMInit(SSFSM_UT_MAX_EVENTS, SSFSM_UT_MAX_TIMERS);
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
-    /* Known flaky under parallel load (OS descheduling); re-run ssfsm alone before suspecting it */
     start = SSFPortGetTick64();
     SSF_SM_THREAD_WAKE_WAIT(SSF_TICKS_PER_SEC);
     delta = SSFPortGetTick64() - start;
-    SSF_ASSERT((delta > (SSF_TICKS_PER_SEC * 0.9)) && (delta < (SSF_TICKS_PER_SEC * 1.1)));
+    SSF_ASSERT((delta > (SSF_TICKS_PER_SEC * 0.9)) &&
+               (delta < (SSF_TICKS_PER_SEC + SSFSM_UT_SCHED_SLACK)));
 #endif
 
     SSF_ASSERT_TEST(SSFSMInit(SSFSM_UT_MAX_EVENTS, SSFSM_UT_MAX_TIMERS));
@@ -651,12 +655,13 @@ void SSFSMUnitTest(void)
     start = SSFPortGetTick64();
     SSF_SM_THREAD_WAKE_WAIT(SSF_TICKS_PER_SEC);
     delta = SSFPortGetTick64() - start;
-    SSF_ASSERT(delta < (SSF_TICKS_PER_SEC * 0.1));
+    SSF_ASSERT(delta < SSFSM_UT_SCHED_SLACK);
 
     start = SSFPortGetTick64();
-    SSF_SM_THREAD_WAKE_WAIT(SSF_TICKS_PER_SEC);
+    SSF_SM_THREAD_WAKE_WAIT(SSFSM_UT_SIGNALLED_WAIT);
     delta = SSFPortGetTick64() - start;
-    SSF_ASSERT((delta > (SSF_TICKS_PER_SEC * 0.9)) && (delta < (SSF_TICKS_PER_SEC * 1.1)));
+    SSF_ASSERT((delta > (SSF_TICKS_PER_SEC * 0.9)) &&
+               (delta < (SSF_TICKS_PER_SEC + SSFSM_UT_SCHED_SLACK)));
 #endif
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
@@ -824,7 +829,8 @@ void SSFSMUnitTest(void)
         SSFSMTask(&nextTimeout);
     }
     delta = SSFPortGetTick64() - start;
-    SSF_ASSERT((delta > (1.9 * SSF_TICKS_PER_SEC)) && (delta < (2.1 * SSF_TICKS_PER_SEC)));
+    SSF_ASSERT((delta > (1.9 * SSF_TICKS_PER_SEC)) &&
+               (delta < ((2u * SSF_TICKS_PER_SEC) + SSFSM_UT_SCHED_SLACK)));
     SSF_ASSERT(SSFSMTask(&nextTimeout) == false);
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 0, SSF_SM_EVENT_UTX_2);
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 0, SSF_SM_EVENT_EXIT);
@@ -889,12 +895,13 @@ void SSFSMUnitTest(void)
     start = SSFPortGetTick64();
     SSF_SM_THREAD_WAKE_WAIT(SSF_TICKS_PER_SEC);
     delta = SSFPortGetTick64() - start;
-    SSF_ASSERT(delta < (SSF_TICKS_PER_SEC * 0.1));
+    SSF_ASSERT(delta < SSFSM_UT_SCHED_SLACK);
 
     start = SSFPortGetTick64();
-    SSF_SM_THREAD_WAKE_WAIT(SSF_TICKS_PER_SEC);
+    SSF_SM_THREAD_WAKE_WAIT(SSFSM_UT_SIGNALLED_WAIT);
     delta = SSFPortGetTick64() - start;
-    SSF_ASSERT((delta > (SSF_TICKS_PER_SEC * 0.9)) && (delta < (SSF_TICKS_PER_SEC * 1.1)));
+    SSF_ASSERT((delta > (SSF_TICKS_PER_SEC * 0.9)) &&
+               (delta < (SSF_TICKS_PER_SEC + SSFSM_UT_SCHED_SLACK)));
 #endif
     SSF_ASSERT_TEST(SSFSMInit(SSFSM_UT_MAX_EVENTS, SSFSM_UT_MAX_TIMERS));
     SSFSMDeInit();

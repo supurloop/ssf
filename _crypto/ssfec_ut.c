@@ -695,6 +695,122 @@ static void _SSFECUTCombMul(SSFECPoint_t *r, const SSFBN_t *k, SSFECCurve_t curv
 #pragma warning(push)
 #pragma warning(disable:6262)
 #endif
+/* --------------------------------------------------------------------------------------------- */
+/* ToAffine zeroization audit                                                                    */
+/* --------------------------------------------------------------------------------------------- */
+typedef struct
+{
+    bool sawHook;
+    bool nonZero;
+} _SSFECUTInvAudit_t;
+
+/* Returns true if every limb of bn up to its capacity is zero. */
+static bool _ECUTLimbsAllZero(const SSFBN_t *bn)
+{
+    uint16_t i;
+
+    SSF_REQUIRE(bn != NULL);
+    SSF_REQUIRE(bn->limbs != NULL);
+
+    for (i = 0u; i < bn->cap; i++)
+    {
+        /* Is this limb non-zero? */
+        if (bn->limbs[i] != 0u)
+        {
+            /* Yes, residue */
+            return false;
+        }
+        /* No */
+    }
+    return true;
+}
+
+/* ToAffine exit hook: records whether any of the three Z inverses was left non-zero. */
+static void _ECUTToAffineHook(void *ctx, const SSFBN_t *zInv, const SSFBN_t *zInv2,
+                              const SSFBN_t *zInv3)
+{
+    _SSFECUTInvAudit_t *a;
+
+    SSF_REQUIRE(ctx != NULL);
+    SSF_REQUIRE(zInv != NULL);
+    SSF_REQUIRE(zInv2 != NULL);
+    SSF_REQUIRE(zInv3 != NULL);
+
+    a = (_SSFECUTInvAudit_t *)ctx;
+    a->sawHook = true;
+    /* Was any inverse left non-zero? */
+    if ((!_ECUTLimbsAllZero(zInv)) || (!_ECUTLimbsAllZero(zInv2)) ||
+        (!_ECUTLimbsAllZero(zInv3)))
+    {
+        /* Yes */
+        a->nonZero = true;
+    }
+    /* No */
+}
+
+/* Returns ToAffine's result on pt after asserting the hook saw all three inverses wiped. */
+static bool _ECUTToAffineAudited(SSFBN_t *x, SSFBN_t *y, const SSFECPoint_t *pt,
+                                 SSFECCurve_t curve)
+{
+    _SSFECUTInvAudit_t audit = { false, false };
+    bool ok;
+
+    SSF_REQUIRE(x != NULL);
+    SSF_REQUIRE(y != NULL);
+    SSF_REQUIRE(pt != NULL);
+
+    _SSFECToAffineTestExitHookCtx = &audit;
+    _SSFECToAffineTestExitHook = _ECUTToAffineHook;
+    ok = SSFECPointToAffine(x, y, pt, curve);
+    _SSFECToAffineTestExitHook = NULL;
+    _SSFECToAffineTestExitHookCtx = NULL;
+    SSF_ASSERT(audit.sawHook);
+    SSF_ASSERT(audit.nonZero == false);
+    return ok;
+}
+
+/* Asserts ToAffine on Z == 1, Z != 1, Z == 0 and Z == p for curve, inverses wiped each time. */
+static void _ECUTToAffineAudit(SSFECCurve_t curve)
+{
+    const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
+    SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
+    SSFECPOINT_DEFINE(P, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(k, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(x, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(y, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(x0, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(y0, SSF_EC_MAX_LIMBS);
+
+    SSF_REQUIRE(c != NULL);
+
+    /* Z == 1: G converts to its own affine coordinates */
+    SSFECPointFromAffine(&G, &c->gx, &c->gy, curve);
+    SSF_ASSERT(_ECUTToAffineAudited(&x, &y, &G, curve));
+    SSF_ASSERT((SSFBNCmp(&x, &c->gx) == 0) && (SSFBNCmp(&y, &c->gy) == 0));
+
+    /* Z != 1: 3 * G from the scalar mul converts to a point on the curve, not G */
+    SSFBNSetUint32(&k, 3u, c->limbs);
+    SSFECScalarMul(&P, &k, &G, curve);
+    SSF_ASSERT(SSFBNIsOne(&P.z) == false);
+    SSF_ASSERT(_ECUTToAffineAudited(&x, &y, &P, curve));
+    SSF_ASSERT(SSFBNCmp(&x, &c->gx) != 0);
+    SSFECPointFromAffine(&P, &x, &y, curve);
+    SSF_ASSERT(SSFECPointOnCurve(&P, curve));
+
+    /* Z == 0 (identity): refused, x and y unchanged */
+    SSFBNCopy(&x0, &x);
+    SSFBNCopy(&y0, &y);
+    SSFECPointSetIdentity(&P, curve);
+    SSF_ASSERT(_ECUTToAffineAudited(&x, &y, &P, curve) == false);
+    SSF_ASSERT((SSFBNCmp(&x, &x0) == 0) && (SSFBNCmp(&y, &y0) == 0));
+
+    /* Z == p (non-zero, but 0 mod p): refused by the inversion, x and y unchanged */
+    SSFECPointFromAffine(&P, &c->gx, &c->gy, curve);
+    SSFBNCopy(&P.z, &c->p);
+    SSF_ASSERT(_ECUTToAffineAudited(&x, &y, &P, curve) == false);
+    SSF_ASSERT((SSFBNCmp(&x, &x0) == 0) && (SSFBNCmp(&y, &y0) == 0));
+}
+
 void SSFECUnitTest(void)
 {
     /* SSFECPOINT_DEFINE leaves storage uninitialized; unit-test builds fill it with a pattern */
@@ -712,6 +828,14 @@ void SSFECUnitTest(void)
             SSF_ASSERT(fp_z_storage[i] == SSF_BN_UT_UNINIT_FILL);
         }
     }
+
+    /* ---- ToAffine wipes zInv, zInv2, zInv3 on every return ---- */
+#if SSF_EC_CONFIG_ENABLE_P256 == 1
+    _ECUTToAffineAudit(SSF_EC_CURVE_P256);
+#endif
+#if SSF_EC_CONFIG_ENABLE_P384 == 1
+    _ECUTToAffineAudit(SSF_EC_CURVE_P384);
+#endif
 
 #if SSF_EC_OSSL_VERIFY == 1
     /* OpenSSL EC cross-check runs first so any disagreement surfaces before self-tests. */

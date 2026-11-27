@@ -224,9 +224,12 @@ follow up with [`SSFECPointValidate()`](#ssfecpointvalidate).
 bool SSFECPointToAffine(SSFBN_t *x, SSFBN_t *y, const SSFECPoint_t *pt, SSFECCurve_t curve);
 ```
 Computes affine `(x, y) = (X/Z², Y/Z³)` by inverting `Z` modulo `p`. Returns `false` if `pt`
-is the identity (no finite affine representation). The modular inversion is the expensive
-part of this call; defer it until just before you need the affine value on the wire or as
-an input to a non-EC primitive.
+is the identity (no finite affine representation) or `Z` has no inverse mod `p`; `x` and `y`
+are then not written. The modular inversion is the expensive part of this call; defer it
+until just before you need the affine value on the wire or as an input to a non-EC
+primitive. The inverses `Z⁻¹`, `Z⁻²`, `Z⁻³` are [`SSFBNZeroize`](ssfbn.md#ssfbnzeroize)'d
+on every return: they reveal `Z`, and the `Z` of a scalar-multiplication result leaks bits of
+the scalar.
 
 ---
 

@@ -37,6 +37,13 @@
 #include "ssfec.h"
 #include "ssfusexport.h"
 
+#if SSF_CONFIG_EC_UNIT_TEST == 1
+/* Test-only exit hook fired AFTER zeroization, BEFORE return; NULL in production. */
+void (*_SSFECToAffineTestExitHook)(void *ctx, const SSFBN_t *zInv, const SSFBN_t *zInv2,
+                                   const SSFBN_t *zInv3) = NULL;
+void *_SSFECToAffineTestExitHookCtx = NULL;
+#endif /* SSF_CONFIG_EC_UNIT_TEST */
+
 /* --------------------------------------------------------------------------------------------- */
 /* NIST curve parameters (FIPS 186-4, little-endian limb order)                                  */
 /* --------------------------------------------------------------------------------------------- */
@@ -654,6 +661,7 @@ bool SSFECPointToAffine(SSFBN_t *x, SSFBN_t *y, const SSFECPoint_t *pt, SSFECCur
     SSFBN_DEFINE(zInv, SSF_EC_MAX_LIMBS);
     SSFBN_DEFINE(zInv2, SSF_EC_MAX_LIMBS);
     SSFBN_DEFINE(zInv3, SSF_EC_MAX_LIMBS);
+    bool ok = false;
 
     SSF_REQUIRE(x != NULL);
     SSF_REQUIRE(x->limbs != NULL);
@@ -668,10 +676,10 @@ bool SSFECPointToAffine(SSFBN_t *x, SSFBN_t *y, const SSFECPoint_t *pt, SSFECCur
     SSF_REQUIRE(y->cap >= c->limbs);
 
     /* Reject identity (Z=0) -- undefined affine coordinate. */
-    if (SSFBNIsZero(&pt->z)) return false;
+    if (SSFBNIsZero(&pt->z)) goto cleanup;
 
     /* zInv = Z^(-1) mod p, constant-time at curve width */
-    if (!SSFBNModInvSmall(&zInv, &pt->z, &c->p)) return false;
+    if (!SSFBNModInvSmall(&zInv, &pt->z, &c->p)) goto cleanup;
 
     /* zInv2 = Z^(-2), zInv3 = Z^(-3) */
     SSFBNModMulNISTPrime(&zInv2, &zInv, &zInv, &c->p);
@@ -680,8 +688,20 @@ bool SSFECPointToAffine(SSFBN_t *x, SSFBN_t *y, const SSFECPoint_t *pt, SSFECCur
     /* x = X * Z^(-2), y = Y * Z^(-3) */
     SSFBNModMulNISTPrime(x, &pt->x, &zInv2, &c->p);
     SSFBNModMulNISTPrime(y, &pt->y, &zInv3, &c->p);
+    ok = true;
 
-    return true;
+cleanup:
+    /* Wipe the Z inverses, which reveal Z. */
+    SSFBNZeroize(&zInv);
+    SSFBNZeroize(&zInv2);
+    SSFBNZeroize(&zInv3);
+#if SSF_CONFIG_EC_UNIT_TEST == 1
+    if (_SSFECToAffineTestExitHook != NULL)
+    {
+        _SSFECToAffineTestExitHook(_SSFECToAffineTestExitHookCtx, &zInv, &zInv2, &zInv3);
+    }
+#endif
+    return ok;
 }
 
 /* --------------------------------------------------------------------------------------------- */

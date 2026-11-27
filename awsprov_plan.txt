@@ -19,8 +19,8 @@ Sources    : AWS docs read on 2026-11-26. Each fact in section 1 names its page.
 Status     : G01 done (commit 9041eba, 2026-11-26). G02 done (commit d510ab3, 2026-11-26).
              G03 done (commit 0557f94, 2026-11-26). G04 done (commit 7900292, 2026-11-26).
              G05 done (commit d4bcd2d, 2026-11-26). G06 skipped (2026-11-26).
-             G09 done (commit f16516a, 2026-11-27). G08 implemented (2026-11-27), not yet
-             committed.
+             G09 done (commit f16516a, 2026-11-27). G08 done (commit 5030e65,
+             2026-11-27). G13 implemented (2026-11-27), not yet committed.
              Everything else is plan only.
 
 Layout
@@ -767,15 +767,67 @@ AWSPROV-G12  (optional, not AWS) ssfnetws: fail on a Close reason that is not UT
   Done   : After G09. Needs approval (ssfnetws). Not needed for ssfawsprov.
 
 AWSPROV-G13  ssfec: wipe the Z inverses in SSFECPointToAffine
-  Why    : Found while planning G08 (pre-existing). zInv = Z^-1, zInv2, zInv3 are left on the
-           stack on every return (ssfec.c:654-656). Z of a scalar-multiplication result leaks
-           scalar bits (see G08), and ToAffine is called on k * G (Sign), d * Q (ECDH) and
-           d * G (KeyGen, PubKeyFromPrivKey via SSFECPointEncode).
-  Change : SSFBNZeroize zInv, zInv2, zInv3 before each return (one exit). Check the other
-           ssfec helpers that take a secret-derived point for the same gap.
-  Test   : Test-only exit hook auditing the three locals on success and on the Z = 0 refusal;
-           existing ssfec / ssfecdsa vectors unchanged.
-  Done   : After G08. Needs approval (ssfec). Best before field deployment, with G08.
+  Approved 2026-11-27 (ssfec change).
+  Why    : Found while planning G08 (pre-existing). SSFECPointToAffine (ssfec.c:651) leaves
+           zInv = Z^-1, zInv2 = Z^-2 and zInv3 = Z^-3 on its stack on every return; each one
+           gives Z back with one modular inversion. Z of a scalar-multiplication result leaks
+           bits of the scalar (Naccache, Smart, Stern, EUROCRYPT 2004), which is why G08 and
+           the existing Sign / ECDH cleanups wipe R.z, S.z and Q.z; this frame undoes that.
+           Callers with a secret-derived Z: SSFECDSASign (R = k * G, ssfecdsa.c:813),
+           SSFECDHComputeSecret (S = d * Q, :1162), and SSFECPointEncode on Q = d * G
+           (SSFECDSAKeyGen :681, SSFECDSAPubKeyFromPrivKey :729).
+           Checked, no change needed: _SSFECPointDouble, _SSFECPointAddFull, _AddMixed,
+           _AddMixedNoDouble, SSFECScalarMul and _SSFECScalarMulComb already wipe their
+           secret-derived locals; SSFECScalarMulDual / DualBase / _SSFECScalarMulVTwNAF are
+           verify-only on public scalars (documented variable-time); SSFECPointOnCurve and
+           SSFECPointValidate run only on decoded (public) points; SSFECPointEncode's ax, ay
+           are the affine coordinates it writes to the caller's buffer anyway.
+           SSFBNModInvSmall already wipes its own table and accumulators.
+  Change : SSFECPointToAffine: one exit:
+               bool ok = false;
+               if (SSFBNIsZero(&pt->z)) goto cleanup;
+               if (!SSFBNModInvSmall(&zInv, &pt->z, &c->p)) goto cleanup;
+               ... zInv2, zInv3, x, y as now ...
+               ok = true;
+           cleanup: SSFBNZeroize zInv, zInv2, zInv3 (to cap, so the never-written ones on
+           the early paths are cleared too; SSFBN_DEFINE no longer zero-fills); test exit
+           hook; return ok. x and y are the caller's outputs and are not touched on failure
+           (as now).
+           Test-only hook (SSF_CONFIG_EC_UNIT_TEST): _SSFECToAffineTestExitHook(ctx, zInv,
+           zInv2, zInv3) + Ctx in ssfec.c / ssfec.h, fired after the wipe, before return; NULL
+           in production. ssfec.md: ToAffine note says the inverses are wiped.
+  Test   : TDD: red with hook plumbing only (the inverses are non-zero after a success), then
+           green. ssfec_ut.c audit, P-256 and P-384 (each where enabled): a projective point
+           with Z != 1 (from SSFECScalarMul) converts to the expected affine point and leaves
+           all three zero; a Z = 1 point (SSFECPointFromAffine); the identity (Z = 0) is
+           refused, leaves x and y unchanged and the three zero; the SSFBNModInvSmall failure
+           path with Z = p (non-zero but 0 mod p: ModInvSmall takes it, and its a * r == 1
+           check refuses it), same checks.
+           Existing ssfec, ssfecdsa, ssfpkey, ssftls and ssftlsc vectors unchanged.
+  Done   : ./ssf and ASan pass; tools/coverage 100% of the changed lines; mutants (each wipe
+           removed, ok forced) killed; features.sh all rows; ARM M4 / M0+ and XC32 no new
+           warnings; size by function in the production config (expected under 20 B).
+  Result : Implemented 2026-11-27, TDD. Red with hook plumbing only (ssfec_ut.c:768, the
+           inverses non-zero after a success); still red with the success path wiped, so the
+           Z = 0 and Z = p refusals are caught on their own (unit-test builds fill uninitialised
+           SSFBN storage with a pattern). Green after the single-exit rewrite.
+           Coverage: every changed line runs, both refusal branches taken; the hook runs 8
+           times (4 cases x P-256, P-384). Mutants 7/8 killed: each wipe removed, wipe only on
+           success, ok starting true, ok never set, inversion result ignored. Survivor
+           (equivalent): dropping the Z == 0 check, since SSFBNModInvSmall refuses zero itself
+           (pre-existing redundancy, kept as the explicit identity check).
+           Sizes (production config, -Os, SSFECPointToAffine .text): +36 B M4 (272 -> 308),
+           +40 B M0+ (312 -> 352), +52 B XC32 (420 -> 472); more than the 20 B estimate (three
+           extra calls plus the single-exit epilogue). Stack unchanged (M4 192 B, M0+ 200 B).
+           Audit: no new findings. x, y untouched on both refusals (tested); hook compiled only
+           under SSF_CONFIG_EC_UNIT_TEST. ssfec.md ToAffine section says the inverses are wiped.
+           Verified: ./ssf 63/63, 0 warnings; ASan/UBSan ec, ecdsa, pkey, tls, tlsc, x509;
+           features.sh all 23 rows build with 0 warnings and pass (EC in every row); ARM M4 /
+           M0+ and XC32 0 warnings (the 3 pre-existing ARM failed files unchanged).
+  Not in G13: _SSFBNModMulNISTFast (ssfbn) leaves the unreduced 2n-limb product of its last
+           multiply (here Y * zInv3) in its own frame. It is the hot inner multiply (called
+           thousands of times per scalar mul), so a wipe per call costs real time; the module
+           wipes at the EC layer instead. Not proposed; noted for a future ssfbn review.
 
 No gap for ssftlsc: TLS 1.3, mutual TLS, SNI and ALPN already cover AWS (1.2).
 No gap for ssfmqttc routing: its rx and event callbacks are bound at SSFMQTTCInit, and
@@ -964,6 +1016,6 @@ AWSPROV-V03  End-to-end with ssfawsprov
   V02 before M04/M05 fixtures are final.
   M07 needs M02..M06 and G05.  M08 needs G02 and M07.  M09, M10 after M08.  V03 last.
   G06 only if requested; G07 must land before G06 (or anything else that encodes a secret).
-  G08 is independent; best before field deployment of G02. G13 (ssfec) after G08.
+  G08 is independent; best before field deployment of G02. G13 (ssfec, approved) after G08.
   G09 is independent; best before M03 puts device data into CSR subjects.
   G10 (if V02 needs it) after G09.  G11, G12 optional, after G09, not needed for ssfawsprov.

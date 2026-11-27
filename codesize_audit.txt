@@ -1,0 +1,152 @@
+SSF CODE SIZE AUDIT: ARM CORTEX-M, -Os
+======================================
+Audit date : 2026-11-26
+Scope      : flash savings that cost little or no performance or RAM. Code at commit da0b8c8
+             (branch mqtt).
+Status     : #6 DONE; every other item is OPEN (measurement only).
+
+SUMMARY
+-------
+A representative MQTT-over-TLS client image links at 105,344 bytes of flash (text + data).
+Measured savings, against that image:
+
+  #  Change                                              Saving      Perf / RAM impact
+  1  Build with LTO                                      18.4 KB     neutral or faster
+  2  Cheaper assert call (still always on)                9.8 KB     none (failure path only)
+       trap 9.8 KB / no arguments 7.3 KB / line only 1.8 KB
+  3  EC comb window H 6 -> 4  (H 6 -> 5: 6.1 KB)          9.2 KB     keygen/sign ~15% slower
+  4  P-384 comb table off, P-384 kept                     7.2 KB     only when P-384 is used
+  5  TLS algorithm switches (new)                     up to 9.5 KB   none; fewer algorithms
+  6  No zero-fill of bignum stack buffers                 2.3 KB     faster
+  7  Remove 64-bit divisions                             ~0.8 KB     slightly faster
+  8  Selectable HMAC/HKDF hashes (drops SHA-1)            0.7 KB     none
+
+  Stacked #2 (line only) + #3 (H=4) + #4 + #6: 90,176 bytes, -15.2 KB (-14.4%).
+  LTO on top of that was not measured; expect roughly another 15-18 KB.
+
+  - With -ffunction-sections and --gc-sections, unused functions are already dropped at link
+    time. Switching off a feature the application never calls (RSA keygen, JSON gobj, AES
+    decrypt) saves nothing in a real image. Every number above is from code that is linked.
+  - Object-file totals for all 61 modules (no unit-test code) are 180,165 bytes on Cortex-M4 and
+    195,591 on Cortex-M0+. ssfnetsock is excluded: it needs POSIX sockets.
+
+METHOD
+------
+Toolchain : arm-none-eabi-gcc 15.2.0, newlib-nano.
+Flags     : -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard -std=gnu11 -Os
+            -ffunction-sections -fdata-sections, -DSSF_CONFIG_HAVE_OPENSSL=0
+            -DSSF_CONFIG_ENABLE_THREAD_SUPPORT=0 (the build-arm.sh flags).
+Tree      : a copy of the repo with every SSF_CONFIG_*_UNIT_TEST set to 0.
+Image     : app.c takes the address of every public SSFMQTTC* and SSFTLSC* function and stubs
+            SSFPortAssert, SSFPortGetTick64 and SSFPortGetEntropy. Linked with --gc-sections
+            and nosys.specs. Size = text + data of the ELF.
+Variants  : each change applied to the copied tree (sed on headers or -D overrides), rebuilt and
+            relinked. Feature-removal estimates (#5, #8) sum the sizes of the linked symbols
+            that belong only to that feature; dispatch code in ssftlsc is not included.
+Perf      : host x86-64, gcc -O2, 200 iterations per operation. Absolute times do not carry
+            over to a microcontroller; only the ratios are meaningful, and host noise is a few
+            percent.
+
+FINDINGS
+--------
+1. Build with LTO (-flto at compile and link)                                  18.4 KB, OPEN
+   Image 105,344 -> 86,919 bytes (-17.5%); bss 1,052 -> 984. Checked that the client entry
+   points, the comb tables, X.509 parsing and the AEADs are all still present. Usually neutral
+   or faster. This is a port build setting: document it in ssfport.md and offer it in
+   build-arm.sh.
+
+2. Cheaper assert call                                                          9.8 KB, OPEN
+   SSF_ASSERT stays always on; only the arguments passed on failure change. Image savings:
+     __builtin_trap()                       9.8 KB  port handler does not run; location from
+                                                    the faulting PC. The compiler may merge
+                                                    traps within a function.
+     SSFPortAssert(NULL, 0)                 7.3 KB  handler runs; calls in a function can
+                                                    merge, so the return address identifies
+                                                    the function, not the line.
+     SSFPortAssert(NULL, __LINE__)          1.8 KB  exact: return address gives the file,
+                                                    the argument the line.
+   No performance or RAM impact. Suggest a compile-time option (e.g. in ssfassert.h) with the
+   current form as default. For reference, removing asserts entirely saves 37.8 KB of object
+   code but breaks the always-on DBC rule.
+
+3. EC comb window SSF_EC_FIXED_BASE_COMB_H 6 -> 4                             9.2 KB, OPEN
+   Image: H=5 saves 6.1 KB, H=4 saves 9.2 KB, no comb saves 15.7 KB. Host timings (us):
+
+     Setting   P256 keygen  sign  verify  ecdh   P384 keygen  sign  verify  ecdh
+     H=6           149       163    487    453        322      374   1023    943
+     H=5           153       169    437    400        294      347    985    902
+     H=4           171       193    460    396        336      390   1021    899
+     no comb       454       500    724    397        904      958   1516    899
+
+   H=4 makes keygen and sign ~15% slower; verify and ECDH do not change beyond noise. A P-256
+   handshake (one keygen, one ECDH, about three verifies, one sign) changes by less than the
+   noise. Dropping the comb entirely is not a small impact: keygen/sign ~3x, verify +50%.
+
+4. P-384 comb table off (SSF_EC_CONFIG_FIXED_BASE_P384=0), P-384 kept       7.2 KB, OPEN
+   No impact unless P-384 keys or certificates are used. When they are, P-384 keygen and sign
+   are ~3x slower and verify ~50% slower (row "no comb" above). Disabling P-384 entirely saves
+   7.7 KB, only 0.5 KB more. Candidate default for a "P-256 device" profile.
+
+5. TLS algorithm switches (none exist today)                            up to 9.5 KB, OPEN
+   Linked bytes that belong only to each algorithm:
+     Ed25519                               3.1 KB
+     ChaCha20-Poly1305                     2.9 KB
+     AES-CCM                               1.5 KB
+     X25519                                1.0 KB
+     FE25519 (if both 25519 algs dropped)  1.0 KB
+   No performance or RAM impact; the cost is fewer algorithms offered to servers. AWS IoT does
+   not use CCM or Ed25519. Proposed: options in ssftlsc_opt.h, in the same style as the
+   existing _SSF_TLSC_P256 / _SSF_TLSC_P384 / _SSF_TLSC_PSS guards.
+
+6. Stop zero-filling bignum stack buffers                                       2.3 KB, DONE
+   Result: client image -2,272 B (M4); ECC 1.4-3.6% fewer instructions, RSA unchanged; stack
+   equal or lower except +8 B on SSFRSASignPKCS1 (M4). See bnzero_report.txt.
+   SSFBN_DEFINE, SSFBNMONT_DEFINE (ssfbn.h) and SSFECPOINT_DEFINE (ssfec.h) declare their limb
+   storage with "= {0u}", so every temporary is cleared on entry. Dropping the initializer
+   saves 2.3 KB in the image (3.3 KB across ssfbn, ssfec, ssfecdsa and ssfrsa objects) and a
+   memset per temporary at run time (512 bytes each for RSA-4096). Safe only if no function
+   reads limbs at or above a value's len. Needs proof (Valgrind/MSan plus the full suite)
+   before it is changed.
+
+7. Remove 64-bit divisions                                                     ~0.8 KB, OPEN
+   __udivmoddi4 (800 bytes from libgcc) is linked for _SSFASN1YMDHMSToUnix,
+   SSFDTimeUnixToStruct and _SSFTLSCPollOpen. SSFBNModUint32 also uses it but is not in the
+   client image. Every site in the image must change or the routine stays linked. Slightly
+   faster on Cortex-M.
+
+8. Selectable HMAC/HKDF hashes                                                  0.7 KB, OPEN
+   SHA-1 (708 bytes) is linked only because SSFHMAC dispatches on any hash type. TLS 1.3 in
+   ssftlsc never uses it (ssfnetws does, for the WebSocket key). Proposed: an option listing
+   the hashes ssfhmac supports.
+
+MODULE-LEVEL ITEMS (only when the module is linked)
+---------------------------------------------------
+9. ssfrs: GF_MUL / GF_DIV / GF_POW as out-of-line functions                    1.7 KB, OPEN
+   Module 7,365 -> 5,681 bytes (-23%). One call per field operation; Reed-Solomon decode will
+   be somewhat slower (not measured).
+
+10. Existing options, when the feature is called but not needed                       OPEN
+    SSF_JSON_GOBJ_ENABLE 0       1.7 KB      SSF_INI_GOBJ_ENABLE 0          0.8 KB
+    JSON_CONFIG_ENABLE_FLOAT_GEN 0  0.3 KB   SSF_BFIFO_MULTI_BYTE_ENABLE 0  0.3 KB
+
+RULED OUT
+---------
+  - Compiler inlining: -fno-inline-small-functions, -fno-inline-functions-called-once,
+    -fno-inline, -finline-limit=8, -fno-ipa-cp-clone -fno-ipa-sra were all within +-0.1% or
+    larger. The excess is in the source (macros, initializers), not the inliner.
+  - Duplicate code: no byte-identical functions of 12+ instructions in the image.
+  - __attribute__((cold)) on SSFPortAssert: 20 bytes. It is already noreturn.
+  - Strings: almost none; __FILE__ strings merge per file. Assert overhead is the instructions
+    that pass the arguments.
+
+DOCUMENTATION ERRORS FOUND
+--------------------------
+  - _opt/ssfrs_opt.h says SSF_RS_ENABLE_GF_MUL_OPT 0 "reduce[s] code space". Measured, it makes
+    ssfrs 503 bytes larger.
+  - _opt/ssfec_opt.h says turning the comb off saves "~1.5 KB P-256 / ~2.3 KB P-384". At the
+    default H=6 the measured saving is ~7.9 KB for P-256 alone.
+
+RAM NOTE
+--------
+ssfcfg reserves 12,288 bytes of bss for RAM storage emulation (SSF_CFG_ENABLE_STORAGE_RAM 1 by
+default). It is not in the client image; a real port that uses flash storage sets it to 0.

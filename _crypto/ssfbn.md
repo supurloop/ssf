@@ -13,8 +13,8 @@ generation for RSA key creation.
 
 Numbers are stored as a struct ([`SSFBN_t`](#ssfbn-t)) carrying a *pointer* to caller-supplied
 limb storage plus `len` (active limb count) and `cap` (storage capacity in limbs). The
-[`SSFBN_DEFINE`](#ssfbn-define) macro is the normal way to declare a local: it pairs a
-zero-initialised limb array with the struct in one expansion, sized exactly for the working
+[`SSFBN_DEFINE`](#ssfbn-define) macro is the normal way to declare a local: it pairs an
+uninitialized limb array with the struct in one expansion, sized exactly for the working
 width. There is no dynamic allocation.
 
 This module is intended as a back-end — most callers will use it indirectly through the
@@ -40,7 +40,10 @@ other big-integer libraries.
   limb buffer, `len` is the working limb count for the current operation, and `cap` is the
   size of the buffer. Use the [`SSFBN_DEFINE`](#ssfbn-define) macro (or
   [`SSFBNMONT_DEFINE`](#ssfbnmont-define) for a Montgomery context) to declare a local
-  paired with its zero-initialised storage in one step. Static constants (the NIST primes,
+  paired with its storage in one step. The storage is not initialized: every limb below
+  `len` must be written (for example by `SSFBNSetZero`, `SSFBNSetUint32`, `SSFBNFromBytes` or
+  `SSFBNCopy`) before it is read. Unit-test builds fill it with `SSF_BN_UT_UNINIT_FILL` so code
+  that relies on zeroed limbs fails its tests. Static constants (the NIST primes,
   curve parameters) declare a separate `SSFBNLimb_t[]` array and point at it from the
   struct initialiser.
 - **`len`-matching is mandatory for two-operand arithmetic.** Every same-length
@@ -191,8 +194,8 @@ The `ssfrsa` and `ssfbn` modules sanity-check against this macro at compile time
 | `SSFBNDLimb_t` | Typedef | `uint64_t` — the double-wide type used internally for carry propagation. |
 | <a id="ssfbn-t"></a>`SSFBN_t` | Struct | `{ SSFBNLimb_t *limbs; uint16_t len; uint16_t cap; }`. `limbs` points at caller-supplied limb storage in little-endian order (`limbs[0]` is least significant); `len` is the working limb count for the current operation (`1 ≤ len ≤ cap`); `cap` is the size of the storage in limbs. |
 | <a id="ssfbnmont-t"></a>`SSFBNMont_t` | Struct | Precomputed Montgomery reduction context for a given modulus: holds the modulus `mod` (an `SSFBN_t`), `rr` (`R² mod m`, an `SSFBN_t`), `mp` (`-m⁻¹ mod 2³²`), and `len`. Treat members as opaque; declare via [`SSFBNMONT_DEFINE`](#ssfbnmont-define) and initialise via [`SSFBNMontInit()`](#montinit). |
-| <a id="ssfbn-define"></a>`SSFBN_DEFINE(name, nlimbs)` | Macro | Declare an `SSFBN_t` named `name` backed by a fresh zero-initialised `SSFBNLimb_t[nlimbs]` array. Expands to two declarations (storage + struct), so it must appear in a scope that admits multiple declarations (function body or block — not an initialiser expression). Pick `nlimbs` to fit the widest operand the code path will see (`SSF_EC_MAX_LIMBS` (12) for P-384-capable ECC, `SSF_BN_BITS_TO_LIMBS(256)` (8) for P-256-only, `SSF_BN_MAX_LIMBS` for generic / RSA code). |
-| <a id="ssfbnmont-define"></a>`SSFBNMONT_DEFINE(name, nlimbs)` | Macro | Declare an `SSFBNMont_t` named `name` with fresh zero-initialised limb storage for both `mod` and `rr` (each of capacity `nlimbs`). Same scope restrictions as `SSFBN_DEFINE`. |
+| <a id="ssfbn-define"></a>`SSFBN_DEFINE(name, nlimbs)` | Macro | Declare an `SSFBN_t` named `name` backed by a fresh, uninitialized `SSFBNLimb_t[nlimbs]` array (`len` starts at 0). Expands to two declarations (storage + struct), so it must appear in a scope that admits multiple declarations (function body or block — not an initialiser expression). Pick `nlimbs` to fit the widest operand the code path will see (`SSF_EC_MAX_LIMBS` (12) for P-384-capable ECC, `SSF_BN_BITS_TO_LIMBS(256)` (8) for P-256-only, `SSF_BN_MAX_LIMBS` for generic / RSA code). |
+| <a id="ssfbnmont-define"></a>`SSFBNMONT_DEFINE(name, nlimbs)` | Macro | Declare an `SSFBNMont_t` named `name` with fresh, uninitialized limb storage for both `mod` and `rr` (each of capacity `nlimbs`). Same scope restrictions as `SSFBN_DEFINE`. |
 | <a id="nist-constants"></a>`SSF_BN_NIST_P256`, `SSF_BN_NIST_P384` | `extern const SSFBN_t` | The NIST P-256 and P-384 curve primes (8 / 12 limbs respectively), ready to pass as a modulus to [`SSFBNModMulNIST()`](#modmulnist). Defined when `SSF_BN_CONFIG_MAX_BITS` is at least 512 / 768 — the cap must hold the 2N-limb intermediate product from [`SSFBNMul()`](#mul). |
 | `SSF_BN_NIST_P256_LIMBS`, `SSF_BN_NIST_P384_LIMBS` | `extern const SSFBNLimb_t[8]` / `[12]` | The limb storage behind those two constants, in flash. [`SSFBNModMulNIST()`](#modmulnist) recognises a modulus whose `limbs` points here without comparing it limb by limb; ssfec's curve parameters point here for that reason. Any other modulus, including a copy of a NIST prime, is still compared in full. Read only. |
 

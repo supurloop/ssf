@@ -126,7 +126,7 @@ comb table, and compiles out any code paths that reference it. Disabling both pr
 | <a id="ssf-ec-max-coord-bytes"></a>`SSF_EC_MAX_COORD_BYTES` | Constant | `48` if P-384 is enabled, `32` otherwise — the coordinate byte length of the widest enabled curve. |
 | <a id="ssf-ec-max-limbs"></a>`SSF_EC_MAX_LIMBS` | Constant | `SSF_EC_MAX_COORD_BYTES / 4` — widest ECC scalar / field element in 32-bit limbs (`8` for P-256-only, `12` if P-384 is enabled). Pass to [`SSFBN_DEFINE`](ssfbn.md#ssfbn-define) / [`SSFECPOINT_DEFINE`](#ssfecpoint-define) when allocating ECC-only storage smaller than `SSF_BN_MAX_LIMBS`. |
 | <a id="ssf-ec-max-encoded-size"></a>`SSF_EC_MAX_ENCODED_SIZE` | Constant | `1 + 2 × SSF_EC_MAX_COORD_BYTES` — the SEC 1 uncompressed-form encoded length for the widest enabled curve (`65` or `97`). |
-| <a id="ssfecpoint-define"></a>`SSFECPOINT_DEFINE(name, nlimbs)` | Macro | Declare an `SSFECPoint_t` named `name` backed by three fresh zero-initialised `SSFBNLimb_t[nlimbs]` arrays (one for `x`, `y`, `z`). Same scope restrictions as [`SSFBN_DEFINE`](ssfbn.md#ssfbn-define). Pick `nlimbs` to fit the curves the code path will see — `SSF_EC_MAX_LIMBS` for any enabled-curves combination, or a curve-specific value (8 for P-256, 12 for P-384). |
+| <a id="ssfecpoint-define"></a>`SSFECPOINT_DEFINE(name, nlimbs)` | Macro | Declare an `SSFECPoint_t` named `name` backed by three fresh, uninitialized `SSFBNLimb_t[nlimbs]` arrays (one for `x`, `y`, `z`). Same scope restrictions as [`SSFBN_DEFINE`](ssfbn.md#ssfbn-define). Pick `nlimbs` to fit the curves the code path will see — `SSF_EC_MAX_LIMBS` for any enabled-curves combination, or a curve-specific value (8 for P-256, 12 for P-384). |
 
 <a id="functions"></a>
 

@@ -697,6 +697,22 @@ static void _SSFECUTCombMul(SSFECPoint_t *r, const SSFBN_t *k, SSFECCurve_t curv
 #endif
 void SSFECUnitTest(void)
 {
+    /* SSFECPOINT_DEFINE leaves storage uninitialized; unit-test builds fill it with a pattern */
+    {
+        uint16_t i;
+        SSFECPOINT_DEFINE(fp, 4u);
+
+        SSF_ASSERT(fp.x.cap == 4u);
+        SSF_ASSERT(fp.y.cap == 4u);
+        SSF_ASSERT(fp.z.cap == 4u);
+        for (i = 0; i < 4u; i++)
+        {
+            SSF_ASSERT(fp_x_storage[i] == SSF_BN_UT_UNINIT_FILL);
+            SSF_ASSERT(fp_y_storage[i] == SSF_BN_UT_UNINIT_FILL);
+            SSF_ASSERT(fp_z_storage[i] == SSF_BN_UT_UNINIT_FILL);
+        }
+    }
+
 #if SSF_EC_OSSL_VERIFY == 1
     /* OpenSSL EC cross-check runs first so any disagreement surfaces before self-tests. */
     SSF_UT_PRINTF("--- ssfec OpenSSL cross-check ---\n");

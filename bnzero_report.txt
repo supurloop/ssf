@@ -1,0 +1,127 @@
+SSF BIGNUM STORAGE ZERO-FILL REMOVAL: BEFORE / AFTER
+====================================================
+Date       : 2026-11-26
+Scope      : codesize_audit.txt item #6. SSFBN_DEFINE, SSFBNMONT_DEFINE (ssfbn.h) and
+             SSFECPOINT_DEFINE (ssfec.h) no longer zero their limb storage. Before = commit
+             da0b8c8 (branch mqtt); after = that commit plus this change.
+Status     : implemented.
+
+SUMMARY
+-------
+  Code space   client image -2,272 B (M4) / -2,452 B (M0+); all objects -3,332 / -3,692 B
+  Performance  ECC 1.4-3.6% fewer instructions; RSA unchanged (<0.1%)
+  Stack        ECC entry points 112-128 B less; RSA within +-32 B (worst: +8 B on ARM,
+               +32 B host RSA-2048 keygen)
+  RAM          no change to static RAM (data/bss)
+
+THE CHANGE
+----------
+  - The three macros declare storage without "= {0u}". len still starts at 0.
+  - Unit-test builds (SSF_CONFIG_UNIT_TEST == 1) fill the storage with SSF_BN_UT_UNINIT_FILL
+    (0xA5A5A5A5) through _SSFBNUTFill(), so any code that relies on zeroed limbs fails its tests.
+    Production builds get no extra code.
+  - New tests at the top of SSFBNUnitTest and SSFECUnitTest check that freshly declared storage
+    holds the fill pattern (red before the change: SSF_BN_UT_UNINIT_FILL undefined).
+  - ssfbn.md and ssfec.md now say the storage is uninitialized and every limb below len must be
+    written before it is read.
+
+VERIFICATION
+------------
+  - Full suite in a scratch tree with fill 0xA5A5A5A5, with fill 0xFFFFFFFF, and with no fill
+    at all: 62/62 passed each time. ASan suite with 0xA5A5A5A5: 62/62, no reports.
+  - In the repo after the change: ssfbn, ssfec, ssfecdsa, ssfrsa, ssfx509, ssfcms, ssfpkey,
+    ssftls and ssftlsc unit tests pass. Host build: 0 warnings. build-arm.sh: 0 warnings (the
+    3 POSIX-only files fail to compile, as before).
+  - Residual risk: tests only cover the paths they exercise. No SSF code relied on zeroed
+    storage, consistent with the existing rule that callers zero-pad shorter inputs.
+
+CODE SPACE
+----------
+arm-none-eabi-gcc 15.2.0, -Os, -ffunction-sections -fdata-sections, newlib-nano, unit tests
+off. Bytes of text + data.
+
+  Module / image              M4 before   M4 after   delta    M0+ before  M0+ after   delta
+  ssfbn                          16,624     15,872    -752       19,766     18,978     -788
+  ssfec                          21,656     20,548  -1,108       22,580     21,444   -1,136
+  ssfecdsa                        3,791      3,335    -456        4,101      3,569     -532
+  ssfrsa                          8,672      7,656  -1,016        9,308      8,072   -1,236
+  All 61 library objects        180,166    176,834  -3,332      195,592    191,900   -3,692
+  MQTT/TLS client image (1)     105,344    103,072  -2,272      114,672    112,220   -2,452
+
+  (1) app.c references every public SSFMQTTC* and SSFTLSC* function, linked with
+      --gc-sections (see codesize_audit.txt METHOD).
+
+PERFORMANCE
+-----------
+ARM instruction counts: arm-linux-gnueabihf-gcc 14, -mthumb -march=armv7-a+fp -Os, static, run
+under qemu-arm 10.0 in the ssf-cross image with -d in_asm,exec,nochain; instructions = sum over
+translation blocks of (block size x executions). One operation per run; program start-up and
+any setup (deriving a public key, making the signature to verify) are measured separately and
+subtracted. Thumb-2 on ARMv7-A is a close proxy for Cortex-M4. Entropy is a fixed xorshift
+generator, so before and after run the identical path.
+
+  Operation                Before (instr)   After (instr)      Delta
+  RSA-2048 sign PKCS#1         88,246,857      88,235,449     -11,408   -0.01%
+  RSA-2048 verify PKCS#1        2,481,830       2,479,559      -2,271   -0.09%
+  RSA-4096 sign PKCS#1        555,303,779     555,292,374     -11,405   -0.00%
+  RSA-4096 verify PKCS#1        9,768,554       9,766,283      -2,271   -0.02%
+  P-256 keygen                  4,550,668       4,418,955    -131,713   -2.89%
+  P-256 sign                    5,446,184       5,313,526    -132,658   -2.44%
+  P-256 verify                 16,725,941      16,127,339    -598,602   -3.58%
+  P-256 ECDH                   15,962,693      15,382,350    -580,343   -3.64%
+  P-384 keygen                 11,269,884      11,077,013    -192,871   -1.71%
+  P-384 sign                   13,752,123      13,558,339    -193,784   -1.41%
+  P-384 verify                 42,153,178      41,269,218    -883,960   -2.10%
+  P-384 ECDH                   39,425,027      38,593,084    -831,943   -2.11%
+
+  ECC point code declares many short-lived temporaries per point operation, so the saved
+  memsets add up. RSA declares few, large temporaries per operation, so the saving is small
+  next to the modular exponentiation.
+
+Host cross-check: x86-64, gcc -O2, best of 5 timed batches. Changes are within host noise
+(a few percent) except where they agree with the ARM counts above.
+
+  Operation                Before (us)   After (us)
+  RSA-2048 keygen (1x)       199,757.6    188,380.6
+  RSA-4096 keygen (1x)       478,438.4    471,809.4
+  RSA-2048 sign PKCS#1         2,401.1      2,386.0
+  RSA-2048 verify PKCS#1          71.1         70.9
+  RSA-4096 sign PKCS#1        16,010.0     15,894.5
+  RSA-4096 verify PKCS#1         322.8        324.3
+  P-256 keygen / sign            112.9 / 139.9     111.3 / 137.7
+  P-256 verify / ECDH            424.6 / 398.8     420.0 / 392.4
+  P-384 keygen / sign            260.2 / 319.1     260.2 / 318.5
+  P-384 verify / ECDH            965.1 / 903.3     957.1 / 909.2
+
+STACK
+-----
+ARM worst-case stack per entry point, from -fstack-usage -fcallgraph-info=su over all library
+objects (sum of frames along the deepest static call path; calls through function pointers are
+not followed). Bytes.
+
+  Entry point                   M4 before  M4 after  delta   M0+ before  M0+ after  delta
+  SSFRSAKeyGen                     25,048    25,048      0       25,184     25,176     -8
+  SSFRSASignPKCS1                  20,352    20,360     +8       20,440     20,408    -32
+  SSFRSAVerifyPKCS1                 8,520     8,504    -16        8,608      8,592    -16
+  SSFRSASignPSS                    21,136    21,136      0       21,224     21,200    -24
+  SSFRSAVerifyPSS                   8,800     8,784    -16        8,888      8,872    -16
+  SSFECDSAKeyGen                    4,368     4,256   -112        4,480      4,352   -128
+  SSFECDSASign                      5,384     5,272   -112        5,488      5,368   -120
+  SSFECDSAVerify                   10,000     9,872   -128       10,112      9,992   -120
+  SSFECDHComputeSecret              7,248     7,128   -120        7,368      7,248   -120
+  SSFX509VerifyChainPurpose        12,088    11,960   -128       12,184     12,064   -120
+  _SSFTLSCPollOpen (handshake)     21,864    21,864      0       21,960     21,936    -24
+
+Host peak stack, measured by painting 512 KB of stack before each operation and finding the
+deepest overwritten byte (x86-64, -O2). Bytes.
+
+  Operation                 Before    After        Operation         Before    After
+  RSA-2048/4096 keygen      25,848   25,880 /      P-256 keygen       3,528    3,528
+                            25,736   25,736        P-256 sign         4,536    4,536
+  RSA sign PKCS#1           21,208   21,208        P-256 verify       6,040    5,856
+  RSA verify PKCS#1          8,744    8,728        P-256 ECDH         6,024    5,872
+                                                   P-384 verify       6,040    5,888
+                                                   P-384 ECDH         6,024    5,904
+
+  The stack shrinks slightly because the compiler no longer needs registers saved around the
+  memset calls. The largest increase anywhere is +32 B (host RSA-2048 keygen).

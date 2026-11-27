@@ -2013,6 +2013,25 @@ static void _SSFBNUTFib(SSFBN_t *f, uint32_t n, uint16_t len)
 
 void SSFBNUnitTest(void)
 {
+    /* ---- DEFINE macros leave storage uninitialized; unit-test builds fill it with a pattern ---- */
+    {
+        uint16_t i;
+        SSFBN_DEFINE(fa, 4u);
+        SSFBNMONT_DEFINE(fm, 4u);
+
+        SSF_ASSERT(fa.limbs == fa_storage);
+        SSF_ASSERT(fa.len == 0u);
+        SSF_ASSERT(fa.cap == 4u);
+        SSF_ASSERT(fm.mod.cap == 4u);
+        SSF_ASSERT(fm.rr.cap == 4u);
+        for (i = 0; i < 4u; i++)
+        {
+            SSF_ASSERT(fa_storage[i] == SSF_BN_UT_UNINIT_FILL);
+            SSF_ASSERT(fm_mod_storage[i] == SSF_BN_UT_UNINIT_FILL);
+            SSF_ASSERT(fm_rr_storage[i] == SSF_BN_UT_UNINIT_FILL);
+        }
+    }
+
     /* ---- SetZero, SetUint32, IsZero, IsOne ---- */
     {
         SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);

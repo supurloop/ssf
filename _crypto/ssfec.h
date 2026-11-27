@@ -95,13 +95,13 @@ typedef struct SSFECPoint
 
 /* Declares an SSFECPoint_t backed by three zero-initialized SSFBNLimb_t arrays (X, Y, Z). */
 #define SSFECPOINT_DEFINE(name, nlimbs) \
-    SSFBNLimb_t name##_x_storage[(nlimbs)] = {0u}; \
-    SSFBNLimb_t name##_y_storage[(nlimbs)] = {0u}; \
-    SSFBNLimb_t name##_z_storage[(nlimbs)] = {0u}; \
+    SSFBNLimb_t name##_x_storage[(nlimbs)]; \
+    SSFBNLimb_t name##_y_storage[(nlimbs)]; \
+    SSFBNLimb_t name##_z_storage[(nlimbs)]; \
     SSFECPoint_t name = { \
-        { name##_x_storage, 0u, (uint16_t)(nlimbs) }, \
-        { name##_y_storage, 0u, (uint16_t)(nlimbs) }, \
-        { name##_z_storage, 0u, (uint16_t)(nlimbs) } \
+        { _SSF_BN_STORAGE(name##_x_storage, (nlimbs)), 0u, (uint16_t)(nlimbs) }, \
+        { _SSF_BN_STORAGE(name##_y_storage, (nlimbs)), 0u, (uint16_t)(nlimbs) }, \
+        { _SSF_BN_STORAGE(name##_z_storage, (nlimbs)), 0u, (uint16_t)(nlimbs) } \
     }
 
 /* Curve parameters (FIPS 186-4 / NIST SP 800-186). */

@@ -38,6 +38,7 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 #include "ssfport.h"
+#include "ssfassert.h"
 #include "ssfprng.h"
 
 /* --------------------------------------------------------------------------------------------- */
@@ -153,9 +154,30 @@ typedef struct SSFBN
     uint16_t cap;
 } SSFBN_t;
 
+/* DEFINE storage is uninitialized; unit-test builds fill it so reliance on zeroed limbs fails */
+#if SSF_CONFIG_UNIT_TEST == 1
+#define SSF_BN_UT_UNINIT_FILL (0xA5A5A5A5u)
+
+/* --------------------------------------------------------------------------------------------- */
+/* Fills storageLen limbs of storage with SSF_BN_UT_UNINIT_FILL and returns storage.             */
+/* --------------------------------------------------------------------------------------------- */
+static inline SSFBNLimb_t *_SSFBNUTFill(SSFBNLimb_t *storage, uint16_t storageLen)
+{
+    uint16_t i;
+
+    SSF_REQUIRE(storage != NULL);
+
+    for (i = 0; i < storageLen; i++) { storage[i] = (SSFBNLimb_t)SSF_BN_UT_UNINIT_FILL; }
+    return storage;
+}
+#define _SSF_BN_STORAGE(storage, nlimbs) _SSFBNUTFill((storage), (uint16_t)(nlimbs))
+#else
+#define _SSF_BN_STORAGE(storage, nlimbs) (storage)
+#endif
+
 #define SSFBN_DEFINE(name, nlimbs) \
-    SSFBNLimb_t name##_storage[(nlimbs)] = {0u}; \
-    SSFBN_t name = { name##_storage, 0u, (uint16_t)(nlimbs) }
+    SSFBNLimb_t name##_storage[(nlimbs)]; \
+    SSFBN_t name = { _SSF_BN_STORAGE(name##_storage, (nlimbs)), 0u, (uint16_t)(nlimbs) }
 
 typedef struct SSFBNMont
 {
@@ -166,11 +188,11 @@ typedef struct SSFBNMont
 } SSFBNMont_t;
 
 #define SSFBNMONT_DEFINE(name, nlimbs) \
-    SSFBNLimb_t name##_mod_storage[(nlimbs)] = {0u}; \
-    SSFBNLimb_t name##_rr_storage[(nlimbs)] = {0u}; \
+    SSFBNLimb_t name##_mod_storage[(nlimbs)]; \
+    SSFBNLimb_t name##_rr_storage[(nlimbs)]; \
     SSFBNMont_t name = { \
-        { name##_mod_storage, 0u, (uint16_t)(nlimbs) }, \
-        { name##_rr_storage,  0u, (uint16_t)(nlimbs) }, \
+        { _SSF_BN_STORAGE(name##_mod_storage, (nlimbs)), 0u, (uint16_t)(nlimbs) }, \
+        { _SSF_BN_STORAGE(name##_rr_storage, (nlimbs)), 0u, (uint16_t)(nlimbs) }, \
         0u, 0u \
     }
 

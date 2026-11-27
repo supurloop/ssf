@@ -633,12 +633,10 @@ R3. Faster blinding inverse r^-1 mod n                  (a) DONE (0b3114d); (c) 
              in-tree m is public (RSA n, curve p and n), but SSFBNModInvCT / Ext / Odd are
              public and may be given a secret prime. ms is now wiped. The scrub-count tests
              went 4 -> 5 (ModInvCT, ModInvExt) and 9 -> 10 (ModInvSmall), red first.
-          A2 OPEN (decision). The proposal said SSFBNModInvCT would keep the constant-time
-             a * r == 1 fault check. P1 shipped without it and nothing recorded the change.
-             Only SSFBNModInvSmall (ECC) has it. In tree this leaves no gap: RSA sign checks
-             every signature by verifying it, so a faulted r^-1 gives a bad signature that
-             is refused. Adding it to SSFBNModInvCT costs one n-width ModMulCTOdd (0.64 M,
-             about 1% of RSA-2048 sign).
+          A2 FIXED (follow-up commit). The proposal said SSFBNModInvCT would keep the
+             constant-time a * r == 1 fault check. P1 shipped without it and nothing recorded
+             the change. Only SSFBNModInvSmall had it. In tree this left no gap, because RSA
+             sign checks every signature by verifying it. Details below.
           A3 NIT. Even m: SSFBNModInvCT REQUIREs odd m, SSFBNModInvSmall returns false,
              SSFBNModInvExt runs Euclid. As documented.
           A4 NIT. (int32_t) narrowing of values outside int32 range is implementation-defined
@@ -648,6 +646,39 @@ R3. Faster blinding inverse r^-1 mod n                  (a) DONE (0b3114d); (c) 
              the count is fixed, not that the bound is right. The bound is covered by the
              g == 0 assert in the core and the Euclid / Fermat oracles on random and edge
              inputs.
+
+      A2 FAULT CHECK (follow-up)
+        Change: SSFBNModInvCT (so also ModInvOdd and ModInvExt with odd m) and
+          SSFBNModInvSmall have the core write a local candidate x. They check
+          a * x == 1 (mod m) in constant time (ModMulCTOdd at full width, ModMulSmall at
+          curve width) and copy x to r only when the check holds. Before this, ModInvSmall
+          wrote r before its check, so a detected fault returned false with r already
+          overwritten, against its "r written only on success" contract. The local x also
+          covers r aliasing a, so ModInvSmall's copy of a is gone.
+        TDD: a test-only hook (_SSFBNModInvCTFaultTest) flips bit 0 of the core's result.
+          The test runs ModInvCT, ModInvOdd, ModInvExt and ModInvSmall on P-256, and all but
+          ModInvSmall at 64 limbs. Under the fault each must return false and leave r as it
+          was; without the fault the same call returns Euclid's inverse.
+          - Red first: ModInvCT returned true under the fault.
+          - Mutation: with ModInvSmall's check disabled, the test fails.
+          - Scrub counts: ModInvCT / ModInvExt 5 -> 10 (the check multiply's three, x, t);
+            ModInvSmall stays 10 (x replaces a's copy).
+          Full unit suite passes.
+        Speed: ARM instructions, before = P4, after = P4 + check. Same signatures.
+          Operation              Before          After         Delta
+          RSA-2048 sign PKCS#1  64,257,550     64,904,674      +647,124   +1.01%
+          RSA-2048 sign PSS     64,304,043     64,951,167      +647,124   +1.01%
+          RSA-4096 sign PKCS#1 410,402,779*   412,857,351    +2,454,572   +0.60%
+          RSA-4096 sign PSS    410,487,920*   412,942,492    +2,454,572   +0.60%
+          * P3's count plus P4's +7 / +8 (P4 was not re-traced at 4096 bits).
+          R3(c) overall against P2: RSA-2048 sign -7.60%, RSA-4096 sign -5.02%.
+          ECC: ModInvSmall only moves its copy (a's copy -> the candidate), so it is not
+          re-measured.
+        RAM: frames (M4 -Os) SSFBNModInvCT 2,784 -> 3,824 B (x and t), SSFBNModInvSmall
+          416 -> 424 B. The inverse's call below its caller (frame + check multiply) is about
+          5.4 KB. Peak stack (painted, ARM): RSA-2048 / 4096 PKCS#1 sign 20,136 -> 20,192 B,
+          PSS 20,944 -> 21,000 B (+56). The blinding inverse is now, by 56 B, the deepest
+          point of signing. README footnote 48 (call-graph figures) is not updated.
 
     (b) Half-width blinding inverse (r^-1 mod p and mod q)                    NOT RECOMMENDED
       Without (c) it is unsafe (above). With (c), the measured parts show it does not pay:

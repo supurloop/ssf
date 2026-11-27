@@ -101,6 +101,9 @@ uint32_t _SSFBNModInvCTBatches = 0u;
 
 /* Test-only count of SSFBNModInvCT batches that left d or e outside (-2m, m) */
 uint32_t _SSFBNModInvCTRangeErrs = 0u;
+
+/* Test-only: when true the safegcd core flips bit 0 of its result (a simulated fault) */
+bool _SSFBNModInvCTFaultTest = false;
 #define _SSF_BN_COUNT(c) do { (c)++; } while (0)
 #define _SSF_BN_COUNT_ADD(c, n) do { (c) += (n); } while (0)
 #else
@@ -2418,6 +2421,11 @@ static bool _SSFBNModInvCTCore(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m, i
     _SSFBNS30Carry(d, n);
     _SSFBNS30AddIfNeg(d, ms, n);
 
+#if SSF_CONFIG_BN_UNIT_TEST == 1
+    /* Test-only fault injection: the a * r == 1 check in the callers must catch it */
+    if (_SSFBNModInvCTFaultTest) d[0] ^= 1;
+#endif /* SSF_CONFIG_BN_UNIT_TEST */
+
     /* Is a invertible (the answer is returned, so this branch leaks nothing more)? */
     if (ok)
     {
@@ -2453,6 +2461,9 @@ bool SSFBNModInvCT(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
     int32_t d[_SSF_BN_S30_MAX_LIMBS];
     int32_t e[_SSF_BN_S30_MAX_LIMBS];
     int32_t ms[_SSF_BN_S30_MAX_LIMBS];
+    SSFBN_DEFINE(x, SSF_BN_MAX_MOD_LIMBS); /* the candidate inverse, copied to r once checked */
+    SSFBN_DEFINE(t, SSF_BN_MAX_MOD_LIMBS); /* a * x mod m */
+    bool ok;
 
     SSF_REQUIRE(r != NULL);
     SSF_REQUIRE(r->limbs != NULL);
@@ -2466,7 +2477,23 @@ bool SSFBNModInvCT(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
     SSF_REQUIRE(m->len <= SSF_BN_MAX_MOD_LIMBS);
     SSF_REQUIRE((m->limbs[0] & 1u) != 0u);
 
-    return _SSFBNModInvCTCore(r, a, m, f, g, d, e, ms, (uint16_t)_SSF_BN_S30_MAX_LIMBS);
+    ok = _SSFBNModInvCTCore(&x, a, m, f, g, d, e, ms, (uint16_t)_SSF_BN_S30_MAX_LIMBS);
+    /* Was an inverse found? */
+    if (ok)
+    {
+        /* Yes, check a * x == 1 (mod m) in constant time (x < m), to catch a fault in the */
+        /* computation; r is written only when it holds (a is still intact if r aliases a) */
+        SSFBNModMulCTOdd(&t, a, &x, m);
+        ok = SSFBNIsOne(&t);
+        if (ok) SSFBNCopy(r, &x);
+    }
+    /* No */
+
+    SSFBNZeroize(&x);
+    _SSF_BN_SCRUB_HOOK(x.limbs, (size_t)x.cap * sizeof(SSFBNLimb_t));
+    SSFBNZeroize(&t);
+    _SSF_BN_SCRUB_HOOK(t.limbs, (size_t)t.cap * sizeof(SSFBNLimb_t));
+    return ok;
 }
 
 #if SSF_BN_CONFIG_MAX_BITS >= 512
@@ -2938,7 +2965,7 @@ bool SSFBNModInvSmall(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
     int32_t e[_SSF_BN_S30_LIMBS(SSF_BN_SMALL_MAX_LIMBS)];
     int32_t ms[_SSF_BN_S30_LIMBS(SSF_BN_SMALL_MAX_LIMBS)];
     SSFBN_DEFINE(t, SSF_BN_SMALL_MAX_LIMBS);
-    SSFBN_DEFINE(ac, SSF_BN_SMALL_MAX_LIMBS); /* a, kept for the check when r aliases a */
+    SSFBN_DEFINE(x, SSF_BN_SMALL_MAX_LIMBS); /* the candidate inverse, copied to r once checked */
     bool ok;
 
     SSF_REQUIRE(r != NULL);
@@ -2959,23 +2986,24 @@ bool SSFBNModInvSmall(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
         return false;
     }
     /* No, constant-time safegcd at curve width (a = 0 and m = 1 return false) */
-    SSFBNCopy(&ac, a);
-    ok = _SSFBNModInvCTCore(r, &ac, m, f, g, d, e, ms,
+    ok = _SSFBNModInvCTCore(&x, a, m, f, g, d, e, ms,
                             (uint16_t)_SSF_BN_S30_LIMBS(SSF_BN_SMALL_MAX_LIMBS));
     /* Was an inverse found? */
     if (ok)
     {
-        /* Yes, check a * r == 1 (mod m) in constant time: catches a fault in the computation */
-        SSFBNModMulSmall(&t, &ac, r, m);
+        /* Yes, check a * x == 1 (mod m) in constant time, to catch a fault in the computation; */
+        /* r is written only when it holds (a is still intact if r aliases a)                 */
+        SSFBNModMulSmall(&t, a, &x, m);
         ok = SSFBNIsOne(&t);
+        if (ok) SSFBNCopy(r, &x);
         SSFBNZeroize(&t);
         _SSF_BN_SCRUB_HOOK(t.limbs, (size_t)t.cap * sizeof(SSFBNLimb_t));
     }
     /* No */
 
-    /* a may be secret (an ECDSA nonce, a Z coordinate) */
-    SSFBNZeroize(&ac);
-    _SSF_BN_SCRUB_HOOK(ac.limbs, (size_t)ac.cap * sizeof(SSFBNLimb_t));
+    /* x is the inverse of a, which may be secret (an ECDSA nonce, a Z coordinate) */
+    SSFBNZeroize(&x);
+    _SSF_BN_SCRUB_HOOK(x.limbs, (size_t)x.cap * sizeof(SSFBNLimb_t));
     return ok;
 }
 

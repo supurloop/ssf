@@ -377,6 +377,9 @@ extern uint32_t _SSFBNModInvCTBatches;
 /* Test-only count of SSFBNModInvCT batches that left d or e outside (-2m, m) */
 extern uint32_t _SSFBNModInvCTRangeErrs;
 
+/* Test-only: when true the safegcd core flips bit 0 of its result (a simulated fault) */
+extern bool _SSFBNModInvCTFaultTest;
+
 /* Test-only: r = a^-1 mod m by extended Euclid (any m), the oracle for the safegcd tests */
 bool _SSFBNModInvEuclidTest(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
 

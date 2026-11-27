@@ -4225,7 +4225,7 @@ void SSFBNUnitTest(void)
         _scrubDirty = 0u;
         _SSFBNScrubTestHook = _ScrubCheck;
         /* ModInvSmall: f, g, d, e, m's copy; the a * r check (ModMulSmall's three, its product); */
-        /* a's copy                                                                                */
+        /* the candidate inverse                                                                   */
         SSF_ASSERT(SSFBNModInvSmall(&r, &a, &m) == true);
         SSF_ASSERT(_scrubCalls == 10u);
         /* ModMulSmall: t, ctx.mod, ctx.rr */
@@ -4358,10 +4358,11 @@ void SSFBNUnitTest(void)
         /* ModMulCT: t, ctx.mod, ctx.rr (MontInit keeps no copy, BN-09) */
         SSFBNModMulCT(&r, &a, &b, &m);
         SSF_ASSERT(_scrubCalls == 3u);
-        /* ModInvExt (odd m, the safegcd): f, g, d, e and m's copy (m may be a secret prime) */
+        /* ModInvExt (odd m, the safegcd): f, g, d, e, m's copy; the a * r check (ModMulCTOdd's */
+        /* three, its product) and the candidate inverse                                        */
         _scrubCalls = 0u;
         SSF_ASSERT(SSFBNModInvExt(&r, &a, &m) == true);
-        SSF_ASSERT(_scrubCalls == 5u);
+        SSF_ASSERT(_scrubCalls == 10u);
         _SSFBNScrubTestHook = NULL;
         SSF_ASSERT(_scrubDirty == 0u);
     }
@@ -4763,16 +4764,64 @@ void SSFBNUnitTest(void)
             }
         }
 
-        /* Every working array is wiped (BN-11 scrub hook): f, g, d, e and m's copy */
+        /* Every working array is wiped (BN-11 scrub hook): f, g, d, e, m's copy; the a * r   */
+        /* check (ModMulCTOdd's three, its product) and the candidate inverse                */
         SSFBNCopy(&m, &SSF_BN_NIST_P256);
         _SSFBNUTFillBelow(&a, &m, 77u);
         _scrubCalls = 0u;
         _scrubDirty = 0u;
         _SSFBNScrubTestHook = _ScrubCheck;
         SSF_ASSERT(SSFBNModInvCT(&r, &a, &m) == true);
-        SSF_ASSERT(_scrubCalls == 5u);
+        SSF_ASSERT(_scrubCalls == 10u);
         _SSFBNScrubTestHook = NULL;
         SSF_ASSERT(_scrubDirty == 0u);
+
+        /* Fault check (R3(c) A2): a corrupted core result fails a * r == 1, every entry point */
+        /* returns false and leaves r as it was; without the fault the same inputs invert      */
+        for (pass = 0u; pass < 2u; pass++)
+        {
+            /* P-256 (all four entry points), then 64 limbs (all but the curve-width one) */
+            if (pass == 0u) SSFBNCopy(&m, &SSF_BN_NIST_P256);
+            else
+            {
+                if (64u > SSF_BN_MAX_MOD_LIMBS) break;
+                SSFBNSetZero(&m, 64u);
+                for (i = 0u; i < 64u; i++) m.limbs[i] = 0x9E3779B9u * (uint32_t)(i + 7u);
+                m.limbs[0] |= 1u;
+                m.limbs[63] |= 0x80000000u;
+            }
+            _SSFBNUTFillBelow(&a, &m, 4242u);
+            if (SSFBNIsZero(&a)) SSFBNSetOne(&a, m.len);
+            SSF_ASSERT(_SSFBNModInvEuclidTest(&ref, &a, &m) == true);
+            for (gl = 0u; gl < 4u; gl++)
+            {
+                /* Is this the curve-width entry point on the wide modulus? */
+                if ((gl == 3u) && (m.len > SSF_BN_SMALL_MAX_LIMBS)) continue;
+                /* No */
+                SSFBNSetZero(&r, m.len);
+                for (i = 0u; i < m.len; i++) r.limbs[i] = 0xA5A5A5A5u;
+                SSFBNCopy(&check, &r);
+                _SSFBNModInvCTFaultTest = true;
+                switch (gl)
+                {
+                    case 0u: ok = SSFBNModInvCT(&r, &a, &m); break;
+                    case 1u: ok = SSFBNModInvOdd(&r, &a, &m); break;
+                    case 2u: ok = SSFBNModInvExt(&r, &a, &m); break;
+                    default: ok = SSFBNModInvSmall(&r, &a, &m); break;
+                }
+                _SSFBNModInvCTFaultTest = false;
+                SSF_ASSERT(ok == false);
+                SSF_ASSERT(SSFBNCmp(&r, &check) == 0);
+                switch (gl)
+                {
+                    case 0u: ok = SSFBNModInvCT(&r, &a, &m); break;
+                    case 1u: ok = SSFBNModInvOdd(&r, &a, &m); break;
+                    case 2u: ok = SSFBNModInvExt(&r, &a, &m); break;
+                    default: ok = SSFBNModInvSmall(&r, &a, &m); break;
+                }
+                SSF_ASSERT((ok == true) && (SSFBNCmp(&r, &ref) == 0));
+            }
+        }
 
         /* a >= m acts as its residue (11: none; 14 = 3 mod 11: 4). Contracts: even m, */
         /* a and m of different lengths, NULL arguments */

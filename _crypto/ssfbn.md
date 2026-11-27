@@ -780,7 +780,11 @@ bool SSFBNModInvCT(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
 `r = a⁻¹ mod m` in constant time for any odd `m > 1`, prime or not (`SSF_REQUIRE`: odd `m`,
 `a->len == m->len`, `m->len` at most [`SSF_BN_MAX_MOD_LIMBS`](#ssf-bn-max-mod-limbs)). `a`
 need not be reduced; it acts as `a mod m`. Returns `false` when `gcd(a, m) ≠ 1`, including
-`a ≡ 0`, and for `m = 1`; `r` is written only on success. `r` may alias `a`.
+`a ≡ 0`, and for `m = 1`; `r` is written only on success. `r` may alias `a`. Before writing
+`r` it checks `a · r ≡ 1 (mod m)` with the constant-time
+[`SSFBNModMulCTOdd`](#ssfbnmodmulct), a fault check, and returns `false` if that fails (about
+0.6 M instructions at 2048 bits, ARMv7-A). [`SSFBNModInvOdd`](#modinv) and the odd-`m` path
+of [`SSFBNModInvExt`](#modinv) are this function, so they have the check too.
 
 The algorithm is Bernstein and Yang's safegcd ("Fast constant-time gcd computation and
 modular inversion", TCHES 2019), with signed 30-bit limbs as described in libsecp256k1's
@@ -802,10 +806,12 @@ Cost (ARMv7-A Thumb-2 `-Os` instructions; the old inverses for comparison):
 | 2048-bit | 1.25 M | — | 7.27 M |
 | 4096-bit | 4.51 M | — | 28.8 M |
 
-The working arrays (`f`, `g`, `d`, `e` and the modulus, each `⌈(32 · n + 2) / 30⌉` limbs) are
-sized for `SSF_BN_MAX_MOD_LIMBS`; the frame is about 2.9 KB at the RSA-4096 cap.
-`f`, `g`, `d`, `e`, the copy of `m` and the batch matrix are wiped before it returns (`m`
-may be a secret prime). Requires two's complement integers and arithmetic right shifts of negative values; a compile-time check rejects other
+The working arrays (`f`, `g`, `d`, `e` and the modulus, each `⌈(32 · n + 2) / 30⌉` limbs) and
+the candidate inverse and check product are sized for `SSF_BN_MAX_MOD_LIMBS`. On Cortex-M4
+`-Os` at the RSA-4096 cap the frame is 3.8 KB, and the whole call about 5.4 KB with the check
+multiply. `f`, `g`, `d`, `e`, the copy of `m`, the batch matrix, the candidate and the
+product are wiped before it returns (`m` may be a secret prime). Requires two's complement
+integers and arithmetic right shifts of negative values; a compile-time check rejects other
 compilers.
 
 <a id="modinvsmall"></a>
@@ -817,8 +823,8 @@ Curve-width counterparts of [`SSFBNModInvCT`](#modinvct) and [`SSFBNModMulCT`](#
 moduli of at most `SSF_BN_SMALL_MAX_LIMBS` limbs (12, a P-384 value, or the whole BN cap in
 builds narrower than that). Their working storage is sized by that constant rather than by
 `SSF_BN_CONFIG_MAX_BITS`, so in a build that also enables RSA they need a small fraction of the
-stack of the full-width routines: on Cortex-M4 `-Os` the `SSFBNModInvSmall` frame is 416 B plus
-144 B for the shared safegcd core, against 2.9 KB for `SSFBNModInvCT` at the RSA-4096 cap and
+stack of the full-width routines: on Cortex-M4 `-Os` the `SSFBNModInvSmall` frame is 424 B plus
+144 B for the shared safegcd core, against 3.8 KB for `SSFBNModInvCT` at the RSA-4096 cap and
 about 16.8 KB under `SSFBNModInv` → `SSFBNModExp` → `SSFBNModExpMont`. ssfec and ssfecdsa use them for every inverse and mod-n
 product.
 
@@ -829,7 +835,7 @@ product.
   then checks `a · r ≡ 1 (mod m)` with `SSFBNModMulSmall`, a constant-time fault check, and
   returns `false` if that fails. Returns `false` for `a ≡ 0`, an even `m` (treated as public),
   `m = 1` or `gcd(a, m) ≠ 1`; `r` is written only on success. `r` may alias `a`. The working
-  arrays, the check product and the copy of `a` are wiped before return. Until R3(c) (2026-11)
+  arrays, the check product and the candidate inverse are wiped before return. Until R3(c) (2026-11)
   this was a Fermat inverse, which also returned `false` for a composite `m`; safegcd returns
   the inverse whenever it exists. P-256: 49 K instructions against Fermat's 702 K (ARMv7-A,
   see [`SSFBNModInvCT`](#modinvct)).

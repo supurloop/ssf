@@ -497,8 +497,8 @@ void SSFBNShiftLeft1(SSFBN_t *a);
 void SSFBNShiftRight1(SSFBN_t *a);
 ```
 In-place 1-bit shifts. `ShiftLeft1` discards the top bit if it overflows the active limb
-count; `ShiftRight1` discards the LSB. These are the building blocks for the binary-GCD
-and binary-extended-GCD paths elsewhere in the module.
+count; `ShiftRight1` discards the LSB. The module's shift-and-subtract reductions use them;
+the binary extended GCD shifts its working values over their shrinking length instead.
 
 <a id="shift-multi"></a>
 ```c
@@ -757,7 +757,10 @@ bool SSFBNModInvOdd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
   RSA-4096 cap.
 - [`SSFBNModInvExt`](#modinv) works for any coprime `a` and `m`. For odd `m` and
   `0 < a < m` it runs the binary extended GCD (halvings and subtractions only;
-  about 6× faster than extended Euclid at 2048 bits); for even `m` or an unreduced `a` it runs extended Euclid.
+  about 6× faster than extended Euclid at 2048 bits). Its shifts, compares and subtractions
+  work over the limbs `u` and `v` still occupy, which shrink as they converge, and each
+  halving of a coefficient mod `m` is one pass. For even `m` or an unreduced `a` it runs
+  extended Euclid.
   **Variable-time** in both paths — do not use on long-term secrets. No in-tree module calls
   it (RSA keygen derives `d` without a general inverse), so with
   `--gc-sections` extended Euclid is linked only when an application calls it.

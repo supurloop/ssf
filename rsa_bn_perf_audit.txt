@@ -5,7 +5,8 @@ Scope      : run time of RSA sign / verify / keygen and the ssfbn code under the
              speedup costs in code size, RAM and security properties. Code at commit e9cd857
              (branch mqtt). Nothing here is applied to the tree; all numbers are from
              prototypes in a scratch copy.
-Status     : R5 DONE (f8b3342); R1 implemented in the working tree; others OPEN.
+Status     : R5 DONE (f8b3342); R1 DONE (cfccdaa); R3(a) DONE;
+             others OPEN.
 
 SUMMARY
 -------
@@ -76,7 +77,7 @@ WHERE THE TIME GOES (base, RSA-2048, ARM instructions)
 
 FINDINGS
 --------
-R1. Row kernel for the Montgomery inner loops (portable C)                     DONE (tree)
+R1. Row kernel for the Montgomery inner loops (portable C)                     DONE (cfccdaa)
     Change: one static helper _SSFBNMulAddRow(r, x, b, a, n, carry) computes
     r[j] = low(a * b[j] + x[j] + carry) with a 32-bit carry and a uint32_t count. MontMul (both
     CIOS loops; the reduction writes r = x - 1 to fuse the word shift), MontSquare (triangle
@@ -197,7 +198,7 @@ R2. UMAAL in the row kernel (ARMv7E-M: M4, M7, M33/M55 with DSP; ARMv6+ A/R)    
     back to C unless given their own syntax). Cortex-M3 (ARMv7-M, no DSP) has no UMAAL and
     uses the C path. UMAAL has fixed timing, so constant time is kept.
 
-R3. Faster blinding inverse r^-1 mod n                                                OPEN
+R3. Faster blinding inverse r^-1 mod n                  (a) DONE; (b), (c) OPEN
     Today _SSFBNModInvBinary runs every step at the full width of n, and halving x needs a
     separate add pass plus a shift pass.
     (a) Prototyped: shrink the working length of u and v as they lose limbs, and halve x in
@@ -206,12 +207,106 @@ R3. Faster blinding inverse r^-1 mod n                                          
         (ssfrsa.md); no change to what leaks.
     (b) Not prototyped: invert r mod p and mod q (half width, so about half the binary-GCD
         work) and unblind m1 and m2 before the CRT recombination, dropping the full-width
-        unblinding multiply. Estimate: a further -4 to -6% of sign. The exponentiations still
-        see only blinded input.
+        unblinding multiply. Estimate: a further -4 to -6% of sign.
+        NOT SAFE ON ITS OWN (found while planning R3): the binary GCD's branches depend on
+        both operands, so with the secret prime p as the modulus every sign would leak
+        timing that depends on p, not only on the throwaway blind r. The mod-n inverse
+        leaks only about r. Do (b) only together with a constant-time inverse (c).
     (c) Not prototyped: a constant-time inverse (Bernstein-Yang safegcd or Pornin's
         optimized binary GCD). This removes the documented variable-time step in signing and
         is several times faster than the bit-at-a-time loop. Estimate: -10 to -12% of sign
         after R0. Cost about 1-2 KB code and the most review effort of any item here.
+
+    R3 IMPLEMENTATION PLAN (scope: (a); (b) needs (c); (c) is a separate decision)
+    Design, all in _SSFBNModInvBinary / _SSFBNHalveMod (ssfbn.c):
+      - Working length L for u and v, starting at m->len. Before each pass L drops while
+        u[L-1] and v[L-1] are both zero. u and v never grow, so their limbs at and above L
+        stay zero. Shifts, the compare and the subtract run over L limbs, not m->len.
+      - Termination by the compare: u starts non-zero (0 < a < m) and a shift never makes a
+        non-zero value zero, so u reaches zero only by u -= v with u == v. The loop stops
+        when the compare returns equal: then v = gcd(a, m), and x2 is the answer when v = 1
+        (the same x2 as today: the old last pass changed only u and x1). This replaces the
+        full-width SSFBNIsZero(u) per pass. (The prototype stopped only at L = 1 and u = 0;
+        that never ends when gcd(a, m) is more than one limb. The new tests cover it.)
+      - _SSFBNHalveMod in one pass: x = (x + (m & mask)) >> 1 with mask = -(x & 1) and a
+        64-bit accumulator. Today an odd x takes an add pass and then a shift pass.
+      - x1, x2 stay at full width (they are residues mod m). The x1 / x2 ModSub is unchanged.
+      - Timing: still variable-time, as documented (ssfbn.md, ssfrsa.md). The shrinking L
+        depends on u and v, which the loop's branches already depend on. Nothing new leaks.
+      - Pass bound assert, scrub of u, v, x1, x2 and the a * r check callers rely on: kept.
+    Steps (TDD):
+      1. Red: test-only counters _SSFBNModInvUVLimbs (limbs touched by the u / v shifts,
+         compares and subtracts), _SSFBNModInvUVSteps (number of those operations) and
+         _SSFBNHalveModPasses / _SSFBNHalveModCalls, counted in the current code. New tests:
+           - 2048-bit-class inverse (SSF_BN_MAX_MOD_LIMBS and 64 limbs): average working
+             length UVLimbs / UVSteps below 0.6 * len (today exactly len).
+           - every halving is one pass: HalveModPasses == HalveModCalls (today an odd x
+             takes 2).
+           - gcd(a, m) of 2 and 3 limbs (m = g * k, a = g * j), and a | m: no inverse, from
+             both ModInvOdd and ModInvExt (this guards the termination change).
+           - a of 1 limb in a full-width m, and a = m - 2: inverse correct.
+         Expected: the two counter tests fail, the others pass.
+      2. Green: the shrinking length, the compare-based stop and the one-pass halving.
+         Existing BN-O4/O5, BN-07, BN-10 and the scrub-count tests must pass unchanged.
+      3. Spot check: BN, EC, ECDSA, RSA unit tests (r5_drv all).
+      4. Docs: ssfbn.md modinv text if it describes the algorithm; audit results.
+      5. Measure before (HEAD 21712ba) and after, as for R1: every RSA / ECC sign and verify
+         path, keygen, M0+ BN counts, client image M4 / M0+ with and without LTO, static RAM,
+         painted peak stack.
+      6. Only if asked: full suites, commit.
+
+    R3 RESULTS (a)
+    TDD: step 1 counter tests failed as expected (average u / v working length 1.0 * len;
+    an odd halving took 2 passes). The gcd tests (gcd of 2 and 3 limbs, a | m) and the
+    a = 2, a = m - 2 tests passed on the old code. Step 2 green: measured average working
+    length 0.51 * len at 64 and 128 limbs (0.53-0.58 at 8-16 limbs). BN, EC, ECDSA, RSA unit
+    tests pass. Host and ARM builds 0 warnings (the same 3 POSIX-only files fail on ARM).
+    Constant-time guard (added, TDD): RSA sign + verify + PSS sign must run the binary-GCD
+    inverse at least once and only at the width of n (_SSFBNModInvBinaryCalls,
+    _SSFBNModInvBinaryMinLen == 64 for RSA-2048), so it can never run on secret p or q. It
+    failed to build before the counters existed. ECC was already guarded (EC-O3:
+    _SSFBNFullWidthCalls == 0 over keygen, sign, verify and ECDH).
+    Constant time: unchanged. Only _SSFBNModInvBinary and its helpers changed; they are
+    reached only through SSFBNModInvOdd / SSFBNModInvExt (documented variable-time), whose
+    one in-tree caller is the RSA blinding inverse r^-1 mod the public n. The ECC, ECDSA and
+    RSA keygen inverses (SSFBNModInvSmall, SSFBNModInv: Fermat) and every exponentiation and
+    CRT step are untouched. _SSFBNHalveMod now selects "add m" with a mask, not a branch.
+    Files: ssfbn.c (_SSFBNHalveMod, _SSFBNRawShiftRight1, _SSFBNModInvBinary, test counters),
+    ssfbn.h (counter externs), ssfbn_ut.c (R3 tests), ssfrsa_ut.c (guard), ssfbn.md.
+
+    Speed: ARM instructions, before = 21712ba, after = 21712ba + R3(a), method as for R1.
+      Operation                    Before          After        Delta
+      RSA-2048 sign PKCS#1       73,758,518     70,357,561     -4.61%
+      RSA-2048 verify PKCS#1      1,802,734      1,802,734      0.00%
+      RSA-2048 sign PSS          73,921,988     70,543,556     -4.57%
+      RSA-2048 verify PSS         1,843,947      1,843,947      0.00%
+      RSA-4096 sign PKCS#1      447,742,301    434,461,181     -2.97%
+      RSA-4096 verify PKCS#1      6,788,314      6,788,314      0.00%
+      RSA-4096 sign PSS         447,939,132    434,641,444     -2.97%
+      RSA-4096 verify PSS         6,867,705      6,867,705      0.00%
+      RSA-2048 keygen         5,950,306,214  5,950,306,214      0.00%  (same key generated)
+      P-256 / P-384 keygen, sign, verify, ECDH; X25519; Ed25519: identical (no inverse)
+
+    Cortex-M0+ (ssfbn compiled for ARMv6-M, rest of the harness ARMv7; totals incl. setup):
+      RSA-2048 sign       359,470,073 -> 356,749,036   -0.76%
+      RSA-4096 sign     2,487,991,219 -> 2,477,625,619 -0.42%
+      RSA-2048 / 4096 verify, P-256 / P-384 sign: identical
+    M0+ gains less: there the exponentiations (an __aeabi_lmul call per limb product) dwarf
+    the inverse, which has no multiplies.
+
+    Code size: arm-none-eabi-gcc 15.2.0 -Os, client image (text + data, bytes).
+      Image                Before     After   Delta
+      Cortex-M4           103,040   103,184    +144
+      Cortex-M0+          112,164   112,400    +236
+      Cortex-M4, LTO       84,839    84,967    +128
+      Cortex-M0+, LTO      89,963    90,167    +204
+      ssfbn.o: +144 B (M4), +236 B (M0+). More than the prototype's +68 / +148 B: the
+      helpers keep their DBC checks, and the shift is a separate helper.
+
+    RAM: static data / bss 96 / 1,052 (LTO 96 / 984) before and after. Painted peak stack
+    (ARM) unchanged for every operation (RSA sign 21,536, PSS sign 22,344, verify 9,664,
+    keygen 26,272; P-256 / P-384 keygen 4,248, sign 5,112, verify 6,368, ECDH 6,320; X25519
+    2,680; Ed25519 3,728).
 
 R4. Fused constant-time table select in _SSFBNModExpMontCore                          OPEN
     Change: 16 masks computed once per window, then one pass over the limbs ORs in the
@@ -221,7 +316,7 @@ R4. Fused constant-time table select in _SSFBNModExpMontCore                    
     instead avoids that at a small speed cost. Constant time: unchanged (every entry read).
     Low value; do it only alongside R1/R2.
 
-R5. MontInit: more doublings, fewer squarings for R^2 mod m                    DONE (tree)
+R5. MontInit: more doublings, fewer squarings for R^2 mod m                    DONE (f8b3342)
     MontInit doubles 2^(bitLen-1) up to 2^(w+j) and then squares s times (w = j * 2^s).
     For RSA moduli w is a power of two, so it does 1 doubling and 10-11 full Montgomery
     squarings. Moving factors of two from s into j, up to j = 64, swaps about 6 squarings for

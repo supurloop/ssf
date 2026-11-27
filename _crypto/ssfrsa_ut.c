@@ -2654,6 +2654,8 @@ void SSFRSAUnitTest(void)
                                 pubKeyDer, sizeof(pubKeyDer), &pubKeyDerLen) == true);
         _SSFBNSlowPathCalls = 0u;
         _SSFBNModShiftCalls = 0u;
+        _SSFBNModInvBinaryCalls = 0u;
+        _SSFBNModInvBinaryMinLen = 0xFFFFu;
 #if SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1
         SSF_ASSERT(SSFRSASignPKCS1(privKeyDer, privKeyDerLen, SSF_RSA_HASH_SHA256, hash,
                                    sizeof(hash), sig, sizeof(sig), &sigLen) == true);
@@ -2668,6 +2670,11 @@ void SSFRSAUnitTest(void)
 
         /* The CRT split cB mod p, cB mod q is constant-time Montgomery, not shift-subtract */
         SSF_ASSERT(_SSFBNModShiftCalls == 0u);
+
+        /* The variable-time binary-GCD inverse runs only for the blind r mod the public n (full */
+        /* width), never on a secret prime (half width): its timing must not depend on p or q */
+        SSF_ASSERT(_SSFBNModInvBinaryCalls >= 1u);
+        SSF_ASSERT(_SSFBNModInvBinaryMinLen == 64u);
     }
 #endif /* SSF_CONFIG_BN_UNIT_TEST && SSF_RSA_CONFIG_ENABLE_2048 && KEYGEN */
 #endif /* SSF_RSA_ANY_ENABLED */

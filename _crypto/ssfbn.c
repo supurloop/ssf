@@ -95,6 +95,18 @@ uint32_t _SSFBNSlowPathCalls = 0u;
 
 /* Test-only count of SSFBNMod's variable-time shift-and-subtract reductions */
 uint32_t _SSFBNModShiftCalls = 0u;
+
+/* Test-only counts of the binary-GCD inverse's u / v operations and the limbs they touch */
+uint32_t _SSFBNModInvUVSteps = 0u;
+uint32_t _SSFBNModInvUVLimbs = 0u;
+
+/* Test-only counts of _SSFBNHalveMod calls and the passes over x they make */
+uint32_t _SSFBNHalveModCalls = 0u;
+uint32_t _SSFBNHalveModPasses = 0u;
+
+/* Test-only count of binary-GCD inverses and the narrowest modulus one ran on (in limbs) */
+uint32_t _SSFBNModInvBinaryCalls = 0u;
+uint16_t _SSFBNModInvBinaryMinLen = 0xFFFFu;
 #define _SSF_BN_COUNT(c) do { (c)++; } while (0)
 #define _SSF_BN_COUNT_ADD(c, n) do { (c) += (n); } while (0)
 #else
@@ -1933,30 +1945,58 @@ static bool _SSFBNModInvExtEuclid(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* x = x / 2 mod m for odd m and x < m: adds m first when x is odd, keeping its carry bit.       */
+/* x = x / 2 mod m for odd m and x < m: (x + (m if x is odd)) >> 1 in one pass over the limbs.  */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFBNHalveMod(SSFBN_t *x, const SSFBN_t *m)
 {
-    SSFBNLimb_t carry = 0u;
-    uint16_t i;
+    SSFBNLimb_t mask;
+    SSFBNLimb_t prev;
+    SSFBNDLimb_t acc;
+    uint32_t i;
+    uint32_t n;
 
     SSF_REQUIRE(x != NULL);
     SSF_REQUIRE(m != NULL);
     SSF_REQUIRE(x->len == m->len);
+    SSF_REQUIRE(x->len >= 1u);
 
-    /* Is x odd? */
-    if ((x->limbs[0] & 1u) != 0u)
-    {
-        /* Yes, x + m is even (m is odd) and below 2m: one carry bit above the top limb */
-        carry = _SSFBNRawAdd(x->limbs, x->limbs, m->limbs, m->len);
-    }
-    /* No */
-    for (i = 0u; i < x->len; i++)
-    {
-        SSFBNLimb_t hi = ((uint16_t)(i + 1u) < x->len) ? x->limbs[i + 1u] : carry;
+    _SSF_BN_COUNT(_SSFBNHalveModCalls);
+    _SSF_BN_COUNT(_SSFBNHalveModPasses);
 
-        x->limbs[i] = (SSFBNLimb_t)((x->limbs[i] >> 1) | (hi << (SSF_BN_LIMB_BITS - 1u)));
+    /* All ones when x is odd: x + m is then even (m is odd) and below 2m, one bit above x */
+    mask = (SSFBNLimb_t)0u - (x->limbs[0] & 1u);
+    n = x->len;
+    acc = (SSFBNDLimb_t)x->limbs[0] + (SSFBNDLimb_t)(m->limbs[0] & mask);
+    prev = (SSFBNLimb_t)acc;
+    acc >>= SSF_BN_LIMB_BITS;
+    for (i = 1u; i < n; i++)
+    {
+        acc += (SSFBNDLimb_t)x->limbs[i] + (SSFBNDLimb_t)(m->limbs[i] & mask);
+        x->limbs[i - 1u] = (SSFBNLimb_t)((prev >> 1) |
+                                         ((SSFBNLimb_t)acc << (SSF_BN_LIMB_BITS - 1u)));
+        prev = (SSFBNLimb_t)acc;
+        acc >>= SSF_BN_LIMB_BITS;
     }
+    /* acc now holds the carry bit of x + m, which becomes the top bit */
+    x->limbs[n - 1u] = (SSFBNLimb_t)((prev >> 1) |
+                                     ((SSFBNLimb_t)acc << (SSF_BN_LIMB_BITS - 1u)));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Shifts the n-limb value a right by one bit in place (n >= 1).                                 */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFBNRawShiftRight1(SSFBNLimb_t *a, uint16_t n)
+{
+    uint16_t i;
+
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(n >= 1u);
+
+    for (i = 0u; (uint16_t)(i + 1u) < n; i++)
+    {
+        a[i] = (SSFBNLimb_t)((a[i] >> 1) | (a[i + 1u] << (SSF_BN_LIMB_BITS - 1u)));
+    }
+    a[n - 1u] >>= 1;
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -1969,52 +2009,82 @@ static bool _SSFBNModInvBinary(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
     SSFBN_DEFINE(x1, SSF_BN_MAX_MOD_LIMBS);
     SSFBN_DEFINE(x2, SSF_BN_MAX_MOD_LIMBS);
     uint32_t passes = 0u;
+    uint16_t len;
+    int8_t cmp;
     bool ok;
 
     SSF_REQUIRE(r != NULL);
     SSF_REQUIRE(a != NULL);
     SSF_REQUIRE(m != NULL);
+    SSF_REQUIRE(m->len >= 1u);
     SSF_REQUIRE(m->len <= SSF_BN_MAX_MOD_LIMBS);
     SSF_REQUIRE((m->limbs[0] & 1u) != 0u);
+
+#if SSF_CONFIG_BN_UNIT_TEST == 1
+    _SSFBNModInvBinaryCalls++;
+    if (m->len < _SSFBNModInvBinaryMinLen) _SSFBNModInvBinaryMinLen = m->len;
+#endif /* SSF_CONFIG_BN_UNIT_TEST */
 
     /* Invariants: x1 * a == u and x2 * a == v (mod m); u + v shrinks every pass, v stays odd */
     SSFBNCopy(&u, a);
     SSFBNCopy(&v, m);
     SSFBNSetOne(&x1, m->len);
     SSFBNSetZero(&x2, m->len);
-    while (!SSFBNIsZero(&u))
+
+    /* u and v never grow, so their limbs at and above len stay zero once len drops */
+    len = m->len;
+    for (;;)
     {
         /* Each pass halves at least once after it, and u + v has at most 64 * len bits to lose */
         passes++;
         SSF_ASSERT(passes <= (((2u * (uint32_t)m->len) * SSF_BN_LIMB_BITS) + 1u));
 
+        /* Drop top limbs that are zero in both u and v */
+        while ((len > 1u) && (u.limbs[len - 1u] == 0u) && (v.limbs[len - 1u] == 0u)) len--;
+
+        /* u is never zero here (a > 0, and u -= v below never runs with u == v): this ends */
         while ((u.limbs[0] & 1u) == 0u)
         {
-            SSFBNShiftRight1(&u);
+            _SSFBNRawShiftRight1(u.limbs, len);
+            _SSF_BN_COUNT(_SSFBNModInvUVSteps);
+            _SSF_BN_COUNT_ADD(_SSFBNModInvUVLimbs, len);
             _SSFBNHalveMod(&x1, m);
         }
         while ((v.limbs[0] & 1u) == 0u)
         {
-            SSFBNShiftRight1(&v);
+            _SSFBNRawShiftRight1(v.limbs, len);
+            _SSF_BN_COUNT(_SSFBNModInvUVSteps);
+            _SSF_BN_COUNT_ADD(_SSFBNModInvUVLimbs, len);
             _SSFBNHalveMod(&x2, m);
         }
 
-        /* Is u >= v? */
-        if (_SSFBNRawCmp(u.limbs, v.limbs, m->len) >= 0)
+        /* The compare and the subtract below */
+        _SSF_BN_COUNT_ADD(_SSFBNModInvUVSteps, 2u);
+        _SSF_BN_COUNT_ADD(_SSFBNModInvUVLimbs, 2u * (uint32_t)len);
+        cmp = _SSFBNRawCmp(u.limbs, v.limbs, len);
+
+        /* Is u == v? */
+        if (cmp == 0)
         {
-            /* Yes, u -= v keeps u >= 0 */
-            (void)_SSFBNRawSub(u.limbs, u.limbs, v.limbs, m->len);
+            /* Yes, u -= v would make u zero: v = gcd(a, m) and x2 * a == v (mod m) */
+            break;
+        }
+        /* Is u > v? */
+        if (cmp > 0)
+        {
+            /* Yes, u -= v keeps u > 0 */
+            (void)_SSFBNRawSub(u.limbs, u.limbs, v.limbs, len);
             SSFBNModSub(&x1, &x1, &x2, m);
         }
         else
         {
-            /* No, v -= u */
-            (void)_SSFBNRawSub(v.limbs, v.limbs, u.limbs, m->len);
+            /* No, v -= u keeps v > 0 */
+            (void)_SSFBNRawSub(v.limbs, v.limbs, u.limbs, len);
             SSFBNModSub(&x2, &x2, &x1, m);
         }
     }
 
-    /* u reached 0, so v = gcd(a, m): an inverse exists exactly when it is 1 */
+    /* v = gcd(a, m): an inverse exists exactly when it is 1 */
     ok = SSFBNIsOne(&v);
     if (ok) SSFBNCopy(r, &x2);
 

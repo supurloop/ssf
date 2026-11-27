@@ -369,6 +369,18 @@ extern uint32_t _SSFBNSlowPathCalls;
 
 /* Test-only count of SSFBNMod's variable-time shift-and-subtract reductions */
 extern uint32_t _SSFBNModShiftCalls;
+
+/* Test-only counts of the binary-GCD inverse's u / v operations and the limbs they touch */
+extern uint32_t _SSFBNModInvUVSteps;
+extern uint32_t _SSFBNModInvUVLimbs;
+
+/* Test-only counts of _SSFBNHalveMod calls and the passes over x they make */
+extern uint32_t _SSFBNHalveModCalls;
+extern uint32_t _SSFBNHalveModPasses;
+
+/* Test-only count of binary-GCD inverses and the narrowest modulus one ran on (in limbs) */
+extern uint32_t _SSFBNModInvBinaryCalls;
+extern uint16_t _SSFBNModInvBinaryMinLen;
 #endif /* SSF_CONFIG_BN_UNIT_TEST */
 
 #ifdef __cplusplus

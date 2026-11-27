@@ -4329,6 +4329,122 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(_scrubDirty == 0u);
     }
 
+    /* ---- RSA-PERF R3: the binary-GCD inverse shrinks u, v and halves x in one pass ---- */
+    {
+        static const uint16_t widths[] = { 64u, SSF_BN_MAX_MOD_LIMBS };
+        SSFBN_DEFINE(m, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(a, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(r, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(check, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(g, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(k, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS);
+        uint32_t s = 0x2545F491u;
+        uint16_t w;
+        uint16_t n;
+        uint16_t i;
+        uint16_t gl;
+
+        for (w = 0u; w < (uint16_t)(sizeof(widths) / sizeof(widths[0])); w++)
+        {
+            n = widths[w];
+            /* Is this width beyond the configured maximum? */
+            if (n > SSF_BN_MAX_MOD_LIMBS)
+            {
+                /* Yes, skip it */
+                continue;
+            }
+            /* No, random odd full-width m and random a < m */
+            SSFBNSetZero(&m, n);
+            SSFBNSetZero(&a, n);
+            for (i = 0u; i < n; i++)
+            {
+                s ^= s << 13; s ^= s >> 17; s ^= s << 5;
+                m.limbs[i] = s;
+                s ^= s << 13; s ^= s >> 17; s ^= s << 5;
+                a.limbs[i] = s;
+            }
+            m.limbs[0] |= 1u;
+            m.limbs[n - 1u] |= 0x80000000u;
+            a.limbs[n - 1u] &= 0x7FFFFFFFu;
+
+            _SSFBNModInvUVSteps = 0u;
+            _SSFBNModInvUVLimbs = 0u;
+            _SSFBNHalveModCalls = 0u;
+            _SSFBNHalveModPasses = 0u;
+            /* Does a have an inverse? */
+            if (SSFBNModInvOdd(&r, &a, &m))
+            {
+                /* Yes, a * r == 1 mod m */
+                SSFBNModMul(&check, &a, &r, &m);
+                SSF_ASSERT(SSFBNIsOne(&check));
+            }
+            /* No, the counts below hold either way */
+
+            /* u and v lose limbs as they shrink: average working length below 0.6 * n */
+            SSF_ASSERT(_SSFBNModInvUVSteps > 0u);
+            SSF_ASSERT(((uint64_t)_SSFBNModInvUVLimbs * 10u) <
+                       ((uint64_t)_SSFBNModInvUVSteps * (uint64_t)n * 6u));
+            /* Every halving of x1 or x2 is one pass, odd x included */
+            SSF_ASSERT(_SSFBNHalveModCalls > 0u);
+            SSF_ASSERT(_SSFBNHalveModPasses == _SSFBNHalveModCalls);
+
+            /* a = 2 (one limb in a full-width m) and a = m - 2 both invert (m is odd) */
+            SSFBNSetUint32(&a, 2u, n);
+            SSF_ASSERT(SSFBNModInvOdd(&r, &a, &m) == true);
+            SSFBNModMul(&check, &a, &r, &m);
+            SSF_ASSERT(SSFBNIsOne(&check));
+            (void)SSFBNSubUint32(&a, &m, 2u);
+            SSF_ASSERT(SSFBNModInvOdd(&r, &a, &m) == true);
+            SSFBNModMul(&check, &a, &r, &m);
+            SSF_ASSERT(SSFBNIsOne(&check));
+        }
+
+        /* gcd(a, m) of 2 and 3 limbs, and a dividing m: no inverse, and the loop still ends */
+        for (gl = 2u; gl <= 3u; gl++)
+        {
+            n = 16u;
+            if (n > SSF_BN_MAX_MOD_LIMBS) break;
+            /* m = g * k with odd g of gl limbs and odd k of n - gl limbs */
+            SSFBNSetZero(&g, gl);
+            SSFBNSetZero(&k, (uint16_t)(n - gl));
+            for (i = 0u; i < gl; i++)
+            {
+                s ^= s << 13; s ^= s >> 17; s ^= s << 5;
+                g.limbs[i] = s;
+            }
+            for (i = 0u; i < (uint16_t)(n - gl); i++)
+            {
+                s ^= s << 13; s ^= s >> 17; s ^= s << 5;
+                k.limbs[i] = s;
+            }
+            g.limbs[0] |= 1u;
+            g.limbs[gl - 1u] |= 0x80000000u;
+            k.limbs[0] |= 1u;
+            k.limbs[n - gl - 1u] |= 0x80000000u;
+            SSFBNMul(&prod, &g, &k);
+            SSF_ASSERT(prod.len == n);
+            SSFBNSetZero(&m, n);
+            memcpy(m.limbs, prod.limbs, (size_t)n * sizeof(SSFBNLimb_t));
+
+            /* a = g * j with j of n - gl - 1 limbs, so a < m */
+            k.len = (uint16_t)(n - gl - 1u);
+            k.limbs[k.len - 1u] |= 1u;
+            SSFBNMul(&prod, &g, &k);
+            SSFBNSetZero(&a, n);
+            memcpy(a.limbs, prod.limbs, (size_t)prod.len * sizeof(SSFBNLimb_t));
+            SSF_ASSERT(SSFBNCmp(&a, &m) < 0);
+            SSF_ASSERT(SSFBNModInvOdd(&r, &a, &m) == false);
+            SSF_ASSERT(SSFBNModInvExt(&r, &a, &m) == false);
+
+            /* a = g divides m */
+            SSFBNSetZero(&a, n);
+            memcpy(a.limbs, g.limbs, (size_t)gl * sizeof(SSFBNLimb_t));
+            SSF_ASSERT(SSFBNModInvOdd(&r, &a, &m) == false);
+            SSF_ASSERT(SSFBNModInvExt(&r, &a, &m) == false);
+        }
+    }
+
     /* ---- OPTIMIZE BN-O8: ModMulNIST recognises its own primes by pointer; a copy works ---- */
     {
         SSFBNLimb_t pCopyLimbs[8];

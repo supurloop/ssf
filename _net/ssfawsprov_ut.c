@@ -1315,6 +1315,361 @@ static void _SSFAWSProvUTCsrAccepted(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* RegisterThing test data                                                                       */
+/* --------------------------------------------------------------------------------------------- */
+#define SSF_AWSPROV_UT_REG_SIZE (SSF_JSON_CONFIG_MAX_IN_LEN + 8u)
+
+static char _utReg[SSF_AWSPROV_UT_REG_SIZE];
+static char _utRegTok[SSF_AWSPROV_UT_REG_SIZE];
+static char _utThing[SSF_AWSPROV_CONFIG_THING_NAME_SIZE + 8u];
+static char _utCfg[256];
+static size_t _utRxAligned[4];
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the request for the token and params equals expectStr exactly.                */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFAWSProvUTRegIs(const char *tokenStr, const SSFAWSProvParam_t *paramsOpt,
+                               size_t paramCount, const char *expectStr)
+{
+    size_t outLen = 0;
+    size_t size;
+    size_t n;
+
+    SSF_REQUIRE(tokenStr != NULL);
+    SSF_REQUIRE(expectStr != NULL);
+
+    n = strlen(expectStr);
+    memset(_utReg, 'x', sizeof(_utReg));
+    if (SSFAWSProvBuildRegisterRequest(tokenStr, strlen(tokenStr), paramsOpt, paramCount, _utReg,
+                                       sizeof(_utReg), &outLen) == false) return false;
+    if ((outLen != n) || (strcmp(_utReg, expectStr) != 0)) return false;
+
+    /* Exact fit passes; every smaller size fails, leaves "" and writes nothing past outSize */
+    if (SSFAWSProvBuildRegisterRequest(tokenStr, strlen(tokenStr), paramsOpt, paramCount, _utReg,
+                                       (n + 1u), &outLen) == false) return false;
+    if (strcmp(_utReg, expectStr) != 0) return false;
+    for (size = 1u; size <= n; size++)
+    {
+        memset(_utReg, 'x', sizeof(_utReg));
+        outLen = 1u;
+        if (SSFAWSProvBuildRegisterRequest(tokenStr, strlen(tokenStr), paramsOpt, paramCount,
+                                           _utReg, size, &outLen)) return false;
+        if ((outLen != 0u) || (_SSFAWSProvUTIsZero(_utReg, size) == false) ||
+            (_utReg[size] != 'x')) return false;
+    }
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if building a request for tokenStr and params is refused with "" out.            */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFAWSProvUTRegRefused(const char *tokenStr, size_t tokenLen,
+                                    const SSFAWSProvParam_t *paramsOpt, size_t paramCount)
+{
+    size_t outLen = 1u;
+
+    SSF_REQUIRE(tokenStr != NULL);
+
+    memset(_utReg, 'x', sizeof(_utReg));
+    if (SSFAWSProvBuildRegisterRequest(tokenStr, tokenLen, paramsOpt, paramCount, _utReg,
+                                       sizeof(_utReg), &outLen)) return false;
+    return ((outLen == 0u) && _SSFAWSProvUTIsZero(_utReg, sizeof(_utReg)));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Checks the RegisterThing request builder.                                                     */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTRegRequest(void)
+{
+    SSFAWSProvParam_t params[3];
+    size_t overhead;
+    size_t outLen;
+    size_t n;
+
+    /* No parameters, one, three that need escaping */
+    SSF_ASSERT(_SSFAWSProvUTRegIs("abc", NULL, 0u, "{\"certificateOwnershipToken\":\"abc\"}"));
+    params[0].keyStr = "SerialNumber";
+    params[0].valueStr = "123";
+    SSF_ASSERT(_SSFAWSProvUTRegIs("abc", params, 1u,
+        "{\"certificateOwnershipToken\":\"abc\",\"parameters\":{\"SerialNumber\":\"123\"}}"));
+    params[0].keyStr = "a\"b";
+    params[0].valueStr = "c\\d\n";
+    params[1].keyStr = "k2";
+    params[1].valueStr = "\x01x\x7f";
+    params[2].keyStr = "";
+    params[2].valueStr = "";
+    SSF_ASSERT(_SSFAWSProvUTRegIs("abc", params, 3u,
+        "{\"certificateOwnershipToken\":\"abc\",\"parameters\":{\"a\\\"b\":\"c\\\\d\\n\","
+        "\"k2\":\"\\u0001x\\u007F\",\"\":\"\"}}"));
+
+    /* The M04 token, escapes included, goes back unchanged */
+    memcpy(_utRegTok, "{\"certificateOwnershipToken\":\"", 31u);
+    memcpy(&_utRegTok[30], _utAWSProvToken, sizeof(_utAWSProvToken));
+    memcpy(&_utRegTok[30u + strlen(_utAWSProvToken)], "\"}", 3u);
+    SSF_ASSERT(_SSFAWSProvUTRegIs(_utAWSProvToken, NULL, 0u, _utRegTok));
+    SSF_ASSERT(_SSFAWSProvUTRegIs("a\\u0041\\/b", NULL, 0u,
+                                  "{\"certificateOwnershipToken\":\"a\\u0041\\/b\"}"));
+
+    /* Non-ASCII parameter bytes are refused */
+    params[0].keyStr = "k";
+    params[0].valueStr = "\xC3\xA9";
+    SSF_ASSERT(_SSFAWSProvUTRegRefused("abc", 3u, params, 1u));
+    params[0].keyStr = "\x80";
+    params[0].valueStr = "v";
+    SSF_ASSERT(_SSFAWSProvUTRegRefused("abc", 3u, params, 1u));
+
+    /* Tokens that are not a clean JSON string body are refused */
+    SSF_ASSERT(_SSFAWSProvUTRegRefused("a\"b", 3u, NULL, 0u));
+    SSF_ASSERT(_SSFAWSProvUTRegRefused("ab\\", 3u, NULL, 0u));
+    SSF_ASSERT(_SSFAWSProvUTRegRefused("a\\xb", 4u, NULL, 0u));
+    SSF_ASSERT(_SSFAWSProvUTRegRefused("a\x01" "b", 3u, NULL, 0u));
+    SSF_ASSERT(_SSFAWSProvUTRegRefused("x\",\"parameters\":{\"a\":\"b\"},\"z\":\"",
+                                       strlen("x\",\"parameters\":{\"a\":\"b\"},\"z\":\""), NULL,
+                                       0u));
+    SSF_ASSERT(_SSFAWSProvUTRegRefused("a\0b", 3u, NULL, 0u));
+
+    /* A request of exactly SSF_JSON_CONFIG_MAX_IN_LEN passes, one byte more is refused */
+    overhead = strlen("{\"certificateOwnershipToken\":\"\"}");
+    n = SSF_JSON_CONFIG_MAX_IN_LEN - overhead;
+    memset(_utRegTok, 'T', n + 1u);
+    _utRegTok[n] = 0;
+    SSF_ASSERT(SSFAWSProvBuildRegisterRequest(_utRegTok, n, NULL, 0u, _utReg, sizeof(_utReg),
+                                              &outLen));
+    SSF_ASSERT(outLen == SSF_JSON_CONFIG_MAX_IN_LEN);
+    _utRegTok[n] = 'T';
+    _utRegTok[n + 1u] = 0;
+    SSF_ASSERT(_SSFAWSProvUTRegRefused(_utRegTok, (n + 1u), NULL, 0u));
+
+    /* DBC */
+    SSF_ASSERT_TEST((void)SSFAWSProvBuildRegisterRequest(NULL, 1u, NULL, 0u, _utReg,
+                                                         sizeof(_utReg), &outLen));
+    SSF_ASSERT_TEST((void)SSFAWSProvBuildRegisterRequest("a", 0u, NULL, 0u, _utReg,
+                                                         sizeof(_utReg), &outLen));
+    SSF_ASSERT_TEST((void)SSFAWSProvBuildRegisterRequest("a", 1u, NULL, 1u, _utReg,
+                                                         sizeof(_utReg), &outLen));
+    SSF_ASSERT_TEST((void)SSFAWSProvBuildRegisterRequest("a", 1u, NULL, 0u, NULL,
+                                                         sizeof(_utReg), &outLen));
+    SSF_ASSERT_TEST((void)SSFAWSProvBuildRegisterRequest("a", 1u, NULL, 0u, _utReg, 0u,
+                                                         &outLen));
+    SSF_ASSERT_TEST((void)SSFAWSProvBuildRegisterRequest("a", 1u, NULL, 0u, _utReg,
+                                                         sizeof(_utReg), NULL));
+    SSF_ASSERT_TEST((void)SSFAWSProvBuildRegisterRequest(&_utReg[4], 1u, NULL, 0u, _utReg,
+                                                         sizeof(_utReg), &outLen));
+    params[0].keyStr = NULL;
+    params[0].valueStr = "v";
+    SSF_ASSERT_TEST((void)SSFAWSProvBuildRegisterRequest("a", 1u, params, 1u, _utReg,
+                                                         sizeof(_utReg), &outLen));
+    params[0].keyStr = "k";
+    params[0].valueStr = NULL;
+    SSF_ASSERT_TEST((void)SSFAWSProvBuildRegisterRequest("a", 1u, params, 1u, _utReg,
+                                                         sizeof(_utReg), &outLen));
+    memcpy(&_utReg[8], "v", 2u);
+    params[0].valueStr = &_utReg[8];
+    SSF_ASSERT_TEST((void)SSFAWSProvBuildRegisterRequest("a", 1u, params, 1u, _utReg,
+                                                         sizeof(_utReg), &outLen));
+    params[0].keyStr = &_utReg[8];
+    params[0].valueStr = "v";
+    SSF_ASSERT_TEST((void)SSFAWSProvBuildRegisterRequest("a", 1u, params, 1u, _utReg,
+                                                         sizeof(_utReg), &outLen));
+    memcpy(_utRegTok, "abcdef", 7u);
+    params[0].keyStr = _utRegTok;
+    SSF_ASSERT_TEST((void)SSFAWSProvBuildRegisterRequest("a", 1u, params, 1u, &_utRegTok[3],
+                                                         64u, &outLen));
+    params[0].keyStr = "k";
+    memcpy(_utReg, params, sizeof(params[0]));
+    SSF_ASSERT_TEST((void)SSFAWSProvBuildRegisterRequest("a", 1u, (SSFAWSProvParam_t *)
+                                                         (void *)_utRxAligned, 1u,
+                                                         (char *)_utRxAligned,
+                                                         sizeof(_utRxAligned), &outLen));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the response parses to thingStr and cfgStr, with the rx copy zeroed.          */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFAWSProvUTRegAcc(const char *payload, size_t thingSize, size_t cfgSize,
+                                const char *thingStr, const char *cfgStr)
+{
+    size_t cfgLen = 1u;
+    size_t n;
+
+    SSF_REQUIRE(payload != NULL);
+    SSF_REQUIRE(thingSize <= sizeof(_utThing));
+    SSF_REQUIRE(cfgSize <= sizeof(_utCfg));
+
+    n = strlen(payload);
+    memset(_utThing, 'x', sizeof(_utThing));
+    memset(_utCfg, 'x', sizeof(_utCfg));
+    memset(_utRx, 0x5A, sizeof(_utRx));
+    /* Is the response expected to be refused? */
+    if (thingStr == NULL)
+    {
+        /* Yes, every output zeroed */
+        if (SSFAWSProvParseRegisterAccepted((const uint8_t *)payload, n, _utRx, sizeof(_utRx),
+                                            _utThing, thingSize, _utCfg, cfgSize, &cfgLen))
+            return false;
+        return ((cfgLen == 0u) && _SSFAWSProvUTIsZero(_utThing, thingSize) &&
+                _SSFAWSProvUTIsZero(_utCfg, cfgSize) && _SSFAWSProvUTIsZero(_utRx, sizeof(_utRx)));
+    }
+    /* No, the outputs as given */
+    if (SSFAWSProvParseRegisterAccepted((const uint8_t *)payload, n, _utRx, sizeof(_utRx),
+                                        _utThing, thingSize, _utCfg, cfgSize, &cfgLen) == false)
+        return false;
+    return ((strcmp(_utThing, thingStr) == 0) && (strcmp(_utCfg, cfgStr) == 0) &&
+            (cfgLen == strlen(cfgStr)) && _SSFAWSProvUTIsZero(_utRx, sizeof(_utRx)));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Checks the RegisterThing accepted-response parser.                                            */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTRegAccepted(void)
+{
+    static const char *bad[] = { " ", "/", ".", "+", "#", "$", "\\u0041", "\\\"", "\\\\",
+                                 "\\u00e9", "{", "`", "@", "[", ";", "\\u4142\\u3a3a",
+                                 "\\u0041" };
+    static char name[SSF_AWSPROV_CONFIG_THING_NAME_SIZE + 4u];
+    static char js[512];
+    size_t thingSize = sizeof(_utThing);
+    size_t i;
+    size_t len;
+    char thing[2];
+    char cfg[4];
+    size_t cfgLen;
+
+    SSF_ASSERT(_SSFAWSProvUTRegAcc(
+        "{\"deviceConfiguration\":{\"Fallback\":\"5\",\"Port\":\"8883\",\"Mode\":\"a\"},"
+        "\"thingName\":\"dev_1:A-z9\"}", thingSize, sizeof(_utCfg), "dev_1:A-z9",
+        "{\"Fallback\":\"5\",\"Port\":\"8883\",\"Mode\":\"a\"}"));
+    SSF_ASSERT(_SSFAWSProvUTRegAcc("{\"thingName\":\"t\",\"deviceConfiguration\":{}}", thingSize,
+                                   sizeof(_utCfg), "t", "{}"));
+    SSF_ASSERT(_SSFAWSProvUTRegAcc("{\"thingName\":\"t\"}", thingSize, sizeof(_utCfg), "t",
+                                   "{}"));
+    SSF_ASSERT(_SSFAWSProvUTRegAcc("{\"thingName\":\"t\",\"deviceConfiguration\":{\"a\":\"b\"}}",
+                                   thingSize, 10u, "t", "{\"a\":\"b\"}"));
+    SSF_ASSERT(_SSFAWSProvUTRegAcc("{\"thingName\":\"t\",\"deviceConfiguration\":{\"a\":\"b\"}}",
+                                   thingSize, 9u, NULL, NULL));
+    SSF_ASSERT(_SSFAWSProvUTRegAcc("{\"thingName\":\"t\"}", thingSize, 3u, "t", "{}"));
+    SSF_ASSERT(_SSFAWSProvUTRegAcc(
+        "{\"thingName\":\"t\",\"deviceConfiguration\":{\"a\":[\"x\",{\"b\":\"c\"}],\"d\":\"e\"}}",
+        thingSize, sizeof(_utCfg), "t", "{\"a\":[\"x\",{\"b\":\"c\"}],\"d\":\"e\"}"));
+    SSF_ASSERT(_SSFAWSProvUTRegAcc("{\"thingName\":\"t\"}", thingSize, 2u, NULL, NULL));
+
+    /* deviceConfiguration of the wrong type */
+    SSF_ASSERT(_SSFAWSProvUTRegAcc("{\"thingName\":\"t\",\"deviceConfiguration\":\"x\"}",
+                                   thingSize, sizeof(_utCfg), NULL, NULL));
+    SSF_ASSERT(_SSFAWSProvUTRegAcc("{\"thingName\":\"t\",\"deviceConfiguration\":[]}", thingSize,
+                                   sizeof(_utCfg), NULL, NULL));
+    SSF_ASSERT(_SSFAWSProvUTRegAcc("{\"thingName\":\"t\",\"deviceConfiguration\":null}",
+                                   thingSize, sizeof(_utCfg), NULL, NULL));
+
+    /* thingName missing, mistyped, empty, nested only, duplicate (first wins) */
+    SSF_ASSERT(_SSFAWSProvUTRegAcc("{\"deviceConfiguration\":{}}", thingSize, sizeof(_utCfg),
+                                   NULL, NULL));
+    SSF_ASSERT(_SSFAWSProvUTRegAcc("{\"thingName\":5}", thingSize, sizeof(_utCfg), NULL, NULL));
+    SSF_ASSERT(_SSFAWSProvUTRegAcc("{\"thingName\":\"\"}", thingSize, sizeof(_utCfg), NULL,
+                                   NULL));
+    SSF_ASSERT(_SSFAWSProvUTRegAcc("{\"x\":{\"thingName\":\"t\"}}", thingSize, sizeof(_utCfg),
+                                   NULL, NULL));
+    SSF_ASSERT(_SSFAWSProvUTRegAcc("{\"thingName\":\"t\",\"thingName\":\"u\"}", thingSize,
+                                   sizeof(_utCfg), "t", "{}"));
+
+    /* thingName characters outside [a-zA-Z0-9:_-] */
+    for (i = 0; i < (sizeof(bad) / sizeof(bad[0])); i++)
+    {
+        len = 0;
+        _SSFAWSProvUTCat(js, sizeof(js), &len, "{\"thingName\":\"a");
+        _SSFAWSProvUTCat(js, sizeof(js), &len, bad[i]);
+        _SSFAWSProvUTCat(js, sizeof(js), &len, "b\"}");
+        SSF_ASSERT(_SSFAWSProvUTRegAcc(js, thingSize, sizeof(_utCfg), NULL, NULL));
+    }
+    memcpy(js, "{\"thingName\":\"a\x80" "b\"}", 20u);
+    SSF_ASSERT(_SSFAWSProvUTRegAcc(js, thingSize, sizeof(_utCfg), NULL, NULL));
+
+    /* Longest thingName the build allows passes, one more is refused, and a small buffer */
+    for (len = (SSF_AWSPROV_CONFIG_THING_NAME_SIZE - 2u);
+         len <= (SSF_AWSPROV_CONFIG_THING_NAME_SIZE - 1u); len++)
+    {
+        memset(name, 'n', len);
+        name[len] = 0;
+        i = 0;
+        _SSFAWSProvUTCat(js, sizeof(js), &i, "{\"thingName\":\"");
+        _SSFAWSProvUTCat(js, sizeof(js), &i, name);
+        _SSFAWSProvUTCat(js, sizeof(js), &i, "\"}");
+        SSF_ASSERT(_SSFAWSProvUTRegAcc(js, thingSize, sizeof(_utCfg), name, "{}"));
+        name[len] = 'n';
+        name[len + 1u] = 0;
+        i = 0;
+        _SSFAWSProvUTCat(js, sizeof(js), &i, "{\"thingName\":\"");
+        _SSFAWSProvUTCat(js, sizeof(js), &i, name);
+        _SSFAWSProvUTCat(js, sizeof(js), &i, "\"}");
+        if (len == (SSF_AWSPROV_CONFIG_THING_NAME_SIZE - 1u))
+        {
+            SSF_ASSERT(_SSFAWSProvUTRegAcc(js, thingSize, sizeof(_utCfg), NULL, NULL));
+        }
+    }
+    SSF_ASSERT(_SSFAWSProvUTRegAcc("{\"thingName\":\"abc\"}", 4u, sizeof(_utCfg), "abc", "{}"));
+    SSF_ASSERT(_SSFAWSProvUTRegAcc("{\"thingName\":\"abcd\"}", 4u, sizeof(_utCfg), NULL, NULL));
+
+    /* No configuration buffer; non-JSON, empty, embedded NUL */
+    memset(_utThing, 0, sizeof(_utThing));
+    SSF_ASSERT(SSFAWSProvParseRegisterAccepted((const uint8_t *)"{\"thingName\":\"t\"}", 17u,
+                                               _utRx, sizeof(_utRx), _utThing, sizeof(_utThing),
+                                               NULL, 0u, NULL));
+    SSF_ASSERT(strcmp(_utThing, "t") == 0);
+    SSF_ASSERT(_SSFAWSProvUTRegAcc("hello", thingSize, sizeof(_utCfg), NULL, NULL));
+    SSF_ASSERT(_SSFAWSProvUTRegAcc("", thingSize, sizeof(_utCfg), NULL, NULL));
+    SSF_ASSERT(SSFAWSProvParseRegisterAccepted((const uint8_t *)"{\"thingName\":\"t\"}\0x", 19u,
+                                               _utRx, sizeof(_utRx), _utThing, sizeof(_utThing),
+                                               NULL, 0u, NULL) == false);
+
+    /* Rejected responses share the M04 format */
+    SSF_ASSERT(_SSFAWSProvUTRej(
+        "{\"statusCode\":400,\"errorCode\":\"InvalidRequestException\","
+        "\"errorMessage\":\"Invalid token\"}", 64u, 64u, 400u, "InvalidRequestException",
+        "Invalid token"));
+
+    /* DBC */
+    SSF_ASSERT_TEST((void)SSFAWSProvParseRegisterAccepted(NULL, 1u, _utRx, sizeof(_utRx), thing,
+                                                          sizeof(thing), cfg, sizeof(cfg),
+                                                          &cfgLen));
+    SSF_ASSERT_TEST((void)SSFAWSProvParseRegisterAccepted((const uint8_t *)"{}", 2u, NULL, 1u,
+                                                          thing, sizeof(thing), cfg, sizeof(cfg),
+                                                          &cfgLen));
+    SSF_ASSERT_TEST((void)SSFAWSProvParseRegisterAccepted((const uint8_t *)"{}", 2u, _utRx, 0u,
+                                                          thing, sizeof(thing), cfg, sizeof(cfg),
+                                                          &cfgLen));
+    SSF_ASSERT_TEST((void)SSFAWSProvParseRegisterAccepted((const uint8_t *)"{}", 2u, _utRx,
+                                                          sizeof(_utRx), NULL, sizeof(thing),
+                                                          cfg, sizeof(cfg), &cfgLen));
+    SSF_ASSERT_TEST((void)SSFAWSProvParseRegisterAccepted((const uint8_t *)"{}", 2u, _utRx,
+                                                          sizeof(_utRx), thing, 1u, cfg,
+                                                          sizeof(cfg), &cfgLen));
+    SSF_ASSERT_TEST((void)SSFAWSProvParseRegisterAccepted((const uint8_t *)"{}", 2u, _utRx,
+                                                          sizeof(_utRx), thing, sizeof(thing),
+                                                          cfg, 0u, &cfgLen));
+    SSF_ASSERT_TEST((void)SSFAWSProvParseRegisterAccepted((const uint8_t *)&_utRx[2], 2u, _utRx,
+                                                          sizeof(_utRx), thing, sizeof(thing),
+                                                          cfg, sizeof(cfg), &cfgLen));
+    SSF_ASSERT_TEST((void)SSFAWSProvParseRegisterAccepted((const uint8_t *)"{}", 2u, _utRx,
+                                                          sizeof(_utRx), &_utRx[4],
+                                                          sizeof(thing), cfg, sizeof(cfg),
+                                                          &cfgLen));
+    SSF_ASSERT_TEST((void)SSFAWSProvParseRegisterAccepted((const uint8_t *)"{}", 2u, _utRx,
+                                                          sizeof(_utRx), thing, sizeof(thing),
+                                                          &_utRx[4], sizeof(cfg), &cfgLen));
+    SSF_ASSERT_TEST((void)SSFAWSProvParseRegisterAccepted((const uint8_t *)"{}", 2u, _utRx,
+                                                          sizeof(_utRx), _utCfg, 8u, &_utCfg[4],
+                                                          8u, &cfgLen));
+    SSF_ASSERT_TEST((void)SSFAWSProvParseRegisterAccepted((const uint8_t *)"{}", 2u, _utRx,
+                                                          sizeof(_utRx), thing, sizeof(thing),
+                                                          NULL, 0u, &cfgLen));
+    SSF_ASSERT_TEST((void)SSFAWSProvParseRegisterAccepted((const uint8_t *)"{}", 2u,
+                                                          (char *)_utRxAligned,
+                                                          sizeof(_utRxAligned), thing,
+                                                          sizeof(thing), cfg, sizeof(cfg),
+                                                          &_utRxAligned[1]));
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Runs the ssfawsprov unit test.                                                                */
 /* --------------------------------------------------------------------------------------------- */
 void SSFAWSProvUnitTest(void)
@@ -1328,6 +1683,8 @@ void SSFAWSProvUnitTest(void)
 #endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN */
     _SSFAWSProvUTCsrAccepted();
     _SSFAWSProvUTRejected();
+    _SSFAWSProvUTRegRequest();
+    _SSFAWSProvUTRegAccepted();
 }
 
 #endif /* SSF_CONFIG_AWSPROV_UNIT_TEST */

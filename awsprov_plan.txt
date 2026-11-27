@@ -22,7 +22,7 @@ Status     : G01 done (commit 9041eba, 2026-11-26). G02 done (commit d510ab3, 20
              G08 done (commit 5030e65, 2026-11-27). G09 done (commit f16516a, 2026-11-27).
              G13 done (commit 7697f67, 2026-11-27). M01 done (commit bbd7bfa, 2026-11-27).
              M02 done (commit 43537e7, 2026-11-27). M03 done (commit 178f16f, 2026-11-27).
-             M04 done (2026-11-27).
+             M04 done (commit e1a6af3, 2026-11-27). M05 done (2026-11-27).
              Everything else is plan only.
 
 Layout
@@ -1311,16 +1311,120 @@ AWSPROV-M04  CreateCertificateFromCsr response parsing
       ssfmqttc to handle.
 
 AWSPROV-M05  RegisterThing request and response
-  Change : SSFAWSProvBuildRegisterRequest(token, params[], paramCount, out, outSize, outLen)
-           where params is an array of {key, value} strings (parameters omitted when count is
-           0). The token is M04's raw escaped JSON text and is inserted between quotes
-           as is, not through SSFJsonPrintString (which would escape its backslashes again). SSFAWSProvParseRegisterAccepted(payload, len, thingName, thingNameSize,
-           &cfgStart, &cfgEnd) returns thingName (<= 128 bytes) and the byte span of
-           deviceConfiguration so the app can read it with ssfjson.
-  Test   : Byte-exact request fixtures with 0, 1 and several parameters; keys and values that
-           need JSON escaping; buffer one byte short fails. Response: happy path, thingName of
-           128 and 129 bytes, missing or empty deviceConfiguration, wrong types.
-  Done   : ./ssf passes.
+  Found in the code and docs (2026-11-27)
+    - The M04 token is raw escaped JSON text and goes back between quotes unchanged. The
+      builder is public, though, so a token argument holding '"' or a bad escape could inject
+      members (e.g. x","parameters":{...). The builder checks its own output with ssfjson:
+      the result must be valid JSON whose certificateOwnershipToken span equals the token
+      exactly. That rules out injection with no ad hoc parser.
+    - Parameters (template parameter names and values) are arbitrary strings, so they go
+      through SSFJsonPrintLabel/SSFJsonPrintString, which escape them.
+    - SSFJsonIsValid bounds the check at SSF_JSON_CONFIG_MAX_IN_LEN, so a request longer
+      than that is refused. That is documented, and tested at 4095/4096 bytes.
+    - thingName: AWS allows 1..128 of [a-zA-Z0-9:_-] (CreateThing pattern). It becomes the
+      operational MQTT clientId (M08), so it is checked against that set, and against
+      SSF_AWSPROV_CONFIG_THING_NAME_SIZE (M01). An escaped or \u-decoded byte fails the set.
+    - deviceConfiguration is an object of template-defined values, possibly {} or absent. The
+      rx copy is wiped on return, so a span into it would dangle. The object text is copied
+      into an optional caller buffer instead, NUL terminated, ready for ssfjson.
+    - The rejected response has the M04 format: SSFAWSProvParseRejected serves all four
+      rejected topics.
+
+  Change (_net/ssfawsprov.h/.c)
+    - typedef struct { SSFCStrIn_t keyStr; SSFCStrIn_t valueStr; } SSFAWSProvParam_t;
+    - bool SSFAWSProvBuildRegisterRequest(const char *tokenStr, size_t tokenLen,
+                                          const SSFAWSProvParam_t *paramsOpt,
+                                          size_t paramCount, char *outStr, size_t outSize,
+                                          size_t *outLen)
+      - Writes {"certificateOwnershipToken":"<token as is>"}, or with parameters
+        {"certificateOwnershipToken":"...","parameters":{"k":"v",...}}.
+      - Then verifies: SSFJsonIsValid, and the token member span == tokenStr[0..tokenLen).
+      - Returns false on no fit, a token that isn't a clean JSON string body, or an
+        over-limit result. On false, outStr is "" and *outLen is 0.
+      - REQUIRE: non-NULL arguments; paramsOpt != NULL when paramCount > 0; each key and
+        value non-NULL; tokenLen > 0; no overlap of token or param strings with outStr.
+    - bool SSFAWSProvParseRegisterAccepted(const uint8_t *payload, size_t payloadLen,
+                                           char *rxBuf, size_t rxSize, char *thingNameOut,
+                                           size_t thingNameSize, char *cfgOutOpt,
+                                           size_t cfgSize, size_t *cfgLenOutOpt)
+      - thingName: required, a string of 1..min(thingNameSize, THING_NAME_SIZE) - 1
+        characters, all of [a-zA-Z0-9:_-].
+      - deviceConfiguration:
+          absent  -> "{}"
+          present -> must be an object, copied whole (braces included) when cfgOutOpt is
+                     given; too long for cfgSize is refused, not truncated.
+      - rxBuf is zeroed on return. On false, thingNameOut and cfgOutOpt are zeroed.
+      - REQUIRE: the overlap rules of M04.
+  Test (TDD)
+    - Request:
+      - byte-exact fixtures with 0, 1 and 3 parameters;
+      - keys/values with '"', '\\', '\n', control and UTF-8 bytes (escaped as ssfjson does);
+      - the M04 fixture token round-trips exactly (its \/ and \" escapes kept);
+      - injection attempts refused: a token with a bare '"', a trailing '\\', a bad \x
+        escape, a raw control byte, and "x\",\"parameters\":{\"a\":\"b\"}";
+      - exact fit and one byte short;
+      - a request of exactly MAX_IN_LEN and one over;
+      - DBC.
+    - Accepted:
+      - happy path with a 3-member deviceConfiguration (span text exact);
+      - thingName of 1, 128 (passes) and 129 (refused) bytes, and thingNameSize smaller
+        than the name;
+      - each bad character (' ', '/', '.', '+', '#', '$', 0x80, \u0041);
+      - thingName missing or a number;
+      - deviceConfiguration absent (-> "{}"), {}, a string or array (refused), larger than
+        cfgSize (refused), and cfgOutOpt NULL;
+      - nested and duplicate members;
+      - rx boundary;
+      - zeroing on failure; DBC.
+    - Rejected: one RegisterThing-shaped fixture through SSFAWSProvParseRejected.
+  Audit
+    - Mutants, gcov, size and stack, ASan, features.sh, ARM, XC32, XC16.
+    - Independent review (fresh agent, code only).
+  Approved: as planned, 2026-11-27.
+  Done
+    - ./ssf passes. One commit.
+
+  Result (2026-11-27)
+    - TDD red: the tests linked against missing functions. Green after two fixes found by
+      the tests:
+        SSFJsonMessage returns true with jt == SSF_JSON_TYPE_ERROR for a missing member,
+          not false, so "absent" is tested on jt;
+        SSFJsonIsValid accepts raw control bytes inside strings, so the builder also refuses
+          token bytes < 0x20.
+    - Departure from the plan: parameter keys and values with bytes >= 0x80 are refused.
+      SSFJsonPrintCString escapes each such byte as \u00XX, so UTF-8 "e-acute" (C3 A9) would
+      reach AWS as "A-tilde, copyright". Supporting UTF-8 parameters needs an ssfjson gap
+      (emit valid UTF-8 as is, or \u code points). Not needed for typical template
+      parameters (serial numbers, IDs).
+    - Mutants 30/42 killed. Of the others:
+        8 target replaced code; their replacements have their own mutants, all killed;
+        4 are equivalent:
+          the memcmp after a matching span length (the span start is fixed);
+          an unchecked span lookup (the inputs reaching it then fail the length compare);
+          ':' at the digit edge (':' is allowed);
+          the SSFJsonMessage result after validation.
+      Earlier survivors removed the builder's redundant SSFJsonIsValid (the span lookup
+      validates) and a redundant comma flag. They also exposed a one-byte overflow in the
+      raw token bound that no test caught (now a test tries every outSize 1..n, checks that
+      outStr[outSize] is never written, and that [0, outSize) is all zero).
+    - gcov: every M05 line runs (module 99.5% of 437; the 2 uncovered lines are from M03).
+    - Size: M4 1348 B, M0+ 1508 B, XC32 2356 B. Stack 128 B (M4).
+    - ASan clean. ARM, XC32 and XC16 0 warnings.
+    - Independent review (fresh agent, code only) found no memory-safety bug. Fixed from it:
+        a failed build left the token in outStr[1..], so outStr is now zeroed on failure;
+        thingName "\u4142\u3a3a" decoded to "AB::" and passed, so thingName is now checked
+          on its raw span (no escapes) and copied;
+        parameter strings and the params array are overlap-checked over their full length;
+        cfgLenOutOpt without cfgOutOpt is a REQUIRE, and so is cfgLenOutOpt in rxBuf;
+        #error unless SSF_JSON_CONFIG_MAX_IN_DEPTH >= 2 (the parameters object);
+        the token bound no longer wraps on a 16-bit size_t;
+        new tests: escaped names, nested deviceConfiguration copied whole, a token with
+          \u0041 and \/ round-tripping.
+      Not changed: duplicate parameter keys (AWS decides), and token bytes >= 0x7F
+      (passed as received).
+    - Found in ssfjson (pre-existing, not changed): SSFJsonIsValid accepts raw control
+      bytes in strings, and SSFJsonPrintCString escapes UTF-8 bytes one by one. Both are
+      candidates for a future ssfjson gap; neither is needed for AWS's own data.
 
 AWSPROV-M06  Error classification
   Change : SSFAWSProvIsRetryable(statusCode): 429 and 5xx retry; 4xx (other) fatal. AWS lists

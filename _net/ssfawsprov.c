@@ -354,6 +354,302 @@ bool SSFAWSProvParseCsrAccepted(const uint8_t *payload, size_t payloadLen, char 
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* RegisterThing request and response: defines and types                                         */
+/* --------------------------------------------------------------------------------------------- */
+#define SSF_AWSPROV_TOKEN_KEY  "certificateOwnershipToken"
+#define SSF_AWSPROV_EMPTY_CFG  "{}"
+
+typedef struct
+{
+    const char *tokenStr;
+    size_t tokenLen;
+    const SSFAWSProvParam_t *params;
+    size_t count;
+} _SSFAWSProvRegReq_t;
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if no byte of str is 0x80 or above.                                              */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFAWSProvIsAscii(const char *str)
+{
+    SSF_REQUIRE(str != NULL);
+
+    while (*str != 0)
+    {
+        if ((uint8_t)*str >= 0x80u) return false;
+        str++;
+    }
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the parameters object members fit in js, else false.                          */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFAWSProvRegParamsFn(char *js, size_t jsSize, size_t start, size_t *end, void *in)
+{
+    const _SSFAWSProvRegReq_t *r = (const _SSFAWSProvRegReq_t *)in;
+    bool comma = false;
+    size_t i;
+
+    SSF_REQUIRE(js != NULL);
+    SSF_REQUIRE(end != NULL);
+    SSF_REQUIRE(r != NULL);
+
+    for (i = 0; i < r->count; i++)
+    {
+        if (SSFJsonPrintLabel(js, jsSize, start, &start, r->params[i].keyStr, &comma) == false)
+        {
+            return false;
+        }
+        if (SSFJsonPrintString(js, jsSize, start, &start, r->params[i].valueStr, NULL) == false)
+        {
+            return false;
+        }
+    }
+    *end = start;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the request members, the token written as is, fit in js, else false.          */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFAWSProvRegFn(char *js, size_t jsSize, size_t start, size_t *end, void *in)
+{
+    const _SSFAWSProvRegReq_t *r = (const _SSFAWSProvRegReq_t *)in;
+    bool comma = true;
+
+    SSF_REQUIRE(js != NULL);
+    SSF_REQUIRE(end != NULL);
+    SSF_REQUIRE(r != NULL);
+
+    if (SSFJsonPrintLabel(js, jsSize, start, &start, SSF_AWSPROV_TOKEN_KEY, NULL) == false)
+    {
+        return false;
+    }
+    if (((jsSize - start) < 2u) || (r->tokenLen > ((jsSize - start) - 2u))) return false;
+    js[start] = '"';
+    memcpy(&js[start + 1u], r->tokenStr, r->tokenLen);
+    start += r->tokenLen + 1u;
+    js[start] = '"';
+    start++;
+    /* Are there template parameters? */
+    if (r->count > 0u)
+    {
+        /* Yes, add the parameters object */
+        if (SSFJsonPrintLabel(js, jsSize, start, &start, "parameters", &comma) == false)
+        {
+            return false;
+        }
+        if (SSFJsonPrintObject(js, jsSize, start, &start, _SSFAWSProvRegParamsFn, (void *)r,
+                               NULL) == false) return false;
+    }
+    *end = start;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if no parameter string starts inside [buf, buf + bufSize).                       */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFAWSProvParamsOutside(const SSFAWSProvParam_t *paramsOpt, size_t paramCount,
+                                     const void *buf, size_t bufSize)
+{
+    size_t i;
+
+    for (i = 0; i < paramCount; i++)
+    {
+        if ((_SSFAWSProvIsDisjoint(paramsOpt[i].keyStr, (strlen(paramsOpt[i].keyStr) + 1u), buf,
+                                   bufSize) == false) ||
+            (_SSFAWSProvIsDisjoint(paramsOpt[i].valueStr, (strlen(paramsOpt[i].valueStr) + 1u),
+                                   buf, bufSize) == false))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the RegisterThing request JSON is built in outStr, else false.                */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFAWSProvBuildRegisterRequest(const char *tokenStr, size_t tokenLen,
+                                    const SSFAWSProvParam_t *paramsOpt, size_t paramCount,
+                                    char *outStr, size_t outSize, size_t *outLen)
+{
+    _SSFAWSProvRegReq_t r;
+    size_t end;
+    size_t start;
+    size_t len;
+    size_t i;
+    bool ok = false;
+
+    SSF_REQUIRE(tokenStr != NULL);
+    SSF_REQUIRE(tokenLen > 0u);
+    SSF_REQUIRE((paramsOpt != NULL) || (paramCount == 0u));
+    SSF_REQUIRE(outStr != NULL);
+    SSF_REQUIRE(outSize > 0u);
+    SSF_REQUIRE(outLen != NULL);
+    SSF_REQUIRE(_SSFAWSProvIsDisjoint(tokenStr, tokenLen, outStr, outSize));
+    SSF_REQUIRE((paramCount == 0u) ||
+                _SSFAWSProvIsDisjoint(paramsOpt, (paramCount * sizeof(*paramsOpt)), outStr,
+                                      outSize));
+    for (i = 0; i < paramCount; i++)
+    {
+        SSF_REQUIRE(paramsOpt[i].keyStr != NULL);
+        SSF_REQUIRE(paramsOpt[i].valueStr != NULL);
+    }
+    SSF_REQUIRE(_SSFAWSProvParamsOutside(paramsOpt, paramCount, outStr, outSize));
+
+    *outLen = 0;
+    outStr[0] = 0;
+    for (i = 0; i < tokenLen; i++)
+    {
+        if ((uint8_t)tokenStr[i] < 0x20u) goto done;
+    }
+    for (i = 0; i < paramCount; i++)
+    {
+        if ((_SSFAWSProvIsAscii(paramsOpt[i].keyStr) == false) ||
+            (_SSFAWSProvIsAscii(paramsOpt[i].valueStr) == false)) goto done;
+    }
+    r.tokenStr = tokenStr;
+    r.tokenLen = tokenLen;
+    r.params = paramsOpt;
+    r.count = paramCount;
+    if (SSFJsonPrintObject(outStr, outSize, 0, &end, _SSFAWSProvRegFn, &r, NULL) == false)
+    {
+        goto done;
+    }
+
+    /* The result must be valid JSON whose token member is exactly tokenStr */
+    if (_SSFAWSProvStrSpan(outStr, SSF_AWSPROV_TOKEN_KEY, &start, &len) == false) goto done;
+    if ((len != tokenLen) || (memcmp(&outStr[start], tokenStr, tokenLen) != 0)) goto done;
+    *outLen = end;
+    ok = true;
+
+done:
+    /* Did any step fail? */
+    if (ok == false)
+    {
+        /* Yes, leave nothing of the token behind */
+        memset(outStr, 0, outSize);
+    }
+    return ok;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if every character of str[0..len) is one of [a-zA-Z0-9:_-].                      */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFAWSProvIsThingName(const char *str, size_t len)
+{
+    size_t i;
+    char c;
+
+    SSF_REQUIRE(str != NULL);
+
+    for (i = 0; i < len; i++)
+    {
+        c = str[i];
+        if (((c < 'a') || (c > 'z')) && ((c < 'A') || (c > 'Z')) && ((c < '0') || (c > '9')) &&
+            (c != ':') && (c != '_') && (c != '-')) return false;
+    }
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the RegisterThing accepted fields are taken from rxBuf, else false.           */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFAWSProvRegAcceptedFields(const char *rxBuf, char *thingNameOut,
+                                         size_t thingNameSize, char *cfgOutOpt, size_t cfgSize,
+                                         size_t *cfgLenOutOpt)
+{
+    SSFGPath_t path[SSF_JSON_CONFIG_MAX_IN_DEPTH + 1];
+    SSFJsonType_t jt;
+    size_t index;
+    size_t start;
+    size_t end;
+    size_t len;
+
+    SSF_REQUIRE(rxBuf != NULL);
+    SSF_REQUIRE(thingNameOut != NULL);
+
+    /* thingName: 1..THING_NAME_SIZE - 1 raw characters of [a-zA-Z0-9:_-], so no escapes */
+    if (_SSFAWSProvStrSpan(rxBuf, "thingName", &start, &len) == false) return false;
+    if ((len == 0u) || (len >= SSF_AWSPROV_CONFIG_THING_NAME_SIZE) || (len >= thingNameSize))
+    {
+        return false;
+    }
+    if (_SSFAWSProvIsThingName(&rxBuf[start], len) == false) return false;
+    memcpy(thingNameOut, &rxBuf[start], len);
+    thingNameOut[len] = 0;
+
+    /* deviceConfiguration: an object, or "{}" when absent */
+    _SSFAWSProvPath(path, sizeof(path), "deviceConfiguration");
+    if (SSFJsonMessage(rxBuf, &index, &start, &end, path, 0, &jt) == false) return false;
+    /* Is deviceConfiguration present? */
+    if (jt != SSF_JSON_TYPE_ERROR)
+    {
+        /* Yes, it must be an object */
+        if (jt != SSF_JSON_TYPE_OBJECT) return false;
+        len = (end - start) + 1u;
+    }
+    else
+    {
+        /* No, an empty object */
+        rxBuf = SSF_AWSPROV_EMPTY_CFG;
+        start = 0;
+        len = sizeof(SSF_AWSPROV_EMPTY_CFG) - 1u;
+    }
+    if (cfgOutOpt == NULL) return true;
+    if (len >= cfgSize) return false;
+    memcpy(cfgOutOpt, &rxBuf[start], len);
+    cfgOutOpt[len] = 0;
+    if (cfgLenOutOpt != NULL) *cfgLenOutOpt = len;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if a RegisterThing accepted response gives thingName and the configuration.      */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFAWSProvParseRegisterAccepted(const uint8_t *payload, size_t payloadLen, char *rxBuf,
+                                     size_t rxSize, char *thingNameOut, size_t thingNameSize,
+                                     char *cfgOutOpt, size_t cfgSize, size_t *cfgLenOutOpt)
+{
+    bool ok;
+
+    SSF_REQUIRE(payload != NULL);
+    SSF_REQUIRE(rxBuf != NULL);
+    SSF_REQUIRE(rxSize > 0u);
+    SSF_REQUIRE(thingNameOut != NULL);
+    SSF_REQUIRE(thingNameSize >= 2u);
+    SSF_REQUIRE((cfgOutOpt == NULL) || (cfgSize > 0u));
+    SSF_REQUIRE((cfgOutOpt != NULL) || (cfgLenOutOpt == NULL));
+    SSF_REQUIRE((cfgLenOutOpt == NULL) ||
+                _SSFAWSProvIsDisjoint(cfgLenOutOpt, sizeof(*cfgLenOutOpt), rxBuf, rxSize));
+    SSF_REQUIRE(_SSFAWSProvIsDisjoint(payload, payloadLen, rxBuf, rxSize));
+    SSF_REQUIRE(_SSFAWSProvIsDisjoint(thingNameOut, thingNameSize, rxBuf, rxSize));
+    SSF_REQUIRE(_SSFAWSProvIsDisjoint(thingNameOut, thingNameSize, payload, payloadLen));
+    SSF_REQUIRE((cfgOutOpt == NULL) || _SSFAWSProvIsDisjoint(cfgOutOpt, cfgSize, rxBuf, rxSize));
+    SSF_REQUIRE((cfgOutOpt == NULL) ||
+                _SSFAWSProvIsDisjoint(cfgOutOpt, cfgSize, payload, payloadLen));
+    SSF_REQUIRE((cfgOutOpt == NULL) ||
+                _SSFAWSProvIsDisjoint(cfgOutOpt, cfgSize, thingNameOut, thingNameSize));
+
+    if (cfgLenOutOpt != NULL) *cfgLenOutOpt = 0;
+    ok = (_SSFAWSProvRxCopy(payload, payloadLen, rxBuf, rxSize) &&
+          _SSFAWSProvRegAcceptedFields(rxBuf, thingNameOut, thingNameSize, cfgOutOpt, cfgSize,
+                                       cfgLenOutOpt));
+    memset(rxBuf, 0, rxSize);
+    /* Did any step fail? */
+    if (ok == false)
+    {
+        /* Yes, every output zeroed */
+        memset(thingNameOut, 0, thingNameSize);
+        if (cfgOutOpt != NULL) memset(cfgOutOpt, 0, cfgSize);
+        if (cfgLenOutOpt != NULL) *cfgLenOutOpt = 0;
+    }
+    return ok;
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Replaces every byte of str[0..len) outside 0x20..0x7E with a question mark.                   */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFAWSProvSanitize(char *str, size_t len)

@@ -78,6 +78,9 @@ extern "C" {
 #if SSF_AWSPROV_CONFIG_CERT_DER_SIZE > SSF_X509_CONFIG_MAX_CERT_SIZE
 #error SSF_AWSPROV_CONFIG_CERT_DER_SIZE must be at most SSF_X509_CONFIG_MAX_CERT_SIZE.
 #endif
+#if SSF_JSON_CONFIG_MAX_IN_DEPTH < 2u
+#error SSF_JSON_CONFIG_MAX_IN_DEPTH must be at least 2 for the RegisterThing parameters object.
+#endif
 #if SSF_MQTTC_CONFIG_MAX_SUBSCRIPTIONS < SSF_AWSPROV_SUB_COUNT
 #error SSF_MQTTC_CONFIG_MAX_SUBSCRIPTIONS must be at least SSF_AWSPROV_SUB_COUNT.
 #endif
@@ -105,6 +108,13 @@ typedef struct
     SSFX509Cert_t cert;
 } SSFAWSProvCsrAccepted_t;
 
+/* RegisterThing template parameter; key and value are printable ASCII or control bytes */
+typedef struct
+{
+    SSFCStrIn_t keyStr;
+    SSFCStrIn_t valueStr;
+} SSFAWSProvParam_t;
+
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
@@ -115,6 +125,13 @@ bool SSFAWSProvTopicsInit(SSFAWSProvTopics_t *topicsOut, SSFCStrIn_t templateNam
 bool SSFAWSProvParseCsrAccepted(const uint8_t *payload, size_t payloadLen, char *rxBuf,
                                 size_t rxSize, SSFECCurve_t curve, const uint8_t *pubKey,
                                 size_t pubKeyLen, SSFAWSProvCsrAccepted_t *out);
+/* tokenStr: raw text from SSFAWSProvParseCsrAccepted; result <= SSF_JSON_CONFIG_MAX_IN_LEN */
+bool SSFAWSProvBuildRegisterRequest(const char *tokenStr, size_t tokenLen,
+                                    const SSFAWSProvParam_t *paramsOpt, size_t paramCount,
+                                    char *outStr, size_t outSize, size_t *outLen);
+bool SSFAWSProvParseRegisterAccepted(const uint8_t *payload, size_t payloadLen, char *rxBuf,
+                                     size_t rxSize, char *thingNameOut, size_t thingNameSize,
+                                     char *cfgOutOpt, size_t cfgSize, size_t *cfgLenOutOpt);
 bool SSFAWSProvParseRejected(const uint8_t *payload, size_t payloadLen, char *rxBuf,
                              size_t rxSize, uint16_t *statusCodeOut, char *errorCodeOut,
                              size_t errorCodeSize, char *errorMessageOut,

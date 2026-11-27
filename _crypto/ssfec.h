@@ -166,6 +166,11 @@ void _SSFECPointAddMixedNoDoubleForTest(SSFECPoint_t *r, const SSFECPoint_t *p,
 /* Test wrapper for the variable-time wNAF scalar mul (PUBLIC-INPUT ONLY). */
 void _SSFECScalarMulVTwNAFForTest(SSFECPoint_t *r, const SSFBN_t *k, const SSFECPoint_t *p,
                                   SSFECCurve_t curve);
+
+/* Test-only exit hook fired AFTER zeroization, BEFORE return; NULL in production. */
+extern void (*_SSFECToAffineTestExitHook)(void *ctx, const SSFBN_t *zInv, const SSFBN_t *zInv2,
+                                          const SSFBN_t *zInv3);
+extern void *_SSFECToAffineTestExitHookCtx;
 #endif /* SSF_CONFIG_EC_UNIT_TEST */
 
 #ifdef __cplusplus

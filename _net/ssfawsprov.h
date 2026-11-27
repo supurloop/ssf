@@ -136,6 +136,8 @@ bool SSFAWSProvParseRejected(const uint8_t *payload, size_t payloadLen, char *rx
                              size_t rxSize, uint16_t *statusCodeOut, char *errorCodeOut,
                              size_t errorCodeSize, char *errorMessageOut,
                              size_t errorMessageSize);
+/* true for 429 (throttled) and 5xx (AWS fault); any other statusCode is fatal */
+bool SSFAWSProvIsRetryable(uint16_t statusCode);
 #if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
 /* privKey and the subject strings must not overlap scratch or outStr */
 bool SSFAWSProvCsrRequestSizes(SSFECCurve_t curve, const SSFX509GenName_t *subjectOpt,

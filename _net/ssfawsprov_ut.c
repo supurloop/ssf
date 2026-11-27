@@ -1237,6 +1237,48 @@ static void _SSFAWSProvUTRejected(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Checks the status code classification.                                                        */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTRetryable(void)
+{
+    static const uint16_t retry[] = { 429u, 500u, 503u, 504u, 599u };
+    static const uint16_t fatal[] = { 0u, 99u, 100u, 200u, 399u, 400u, 401u, 403u, 404u, 408u,
+                                      409u, 428u, 430u, 499u, 600u, 0xFFFFu };
+    static const char throttled[] = "{\"statusCode\":429,\"errorCode\":\"Throttled\"}";
+    static const char badCsr[] = "{\"statusCode\":400,\"errorCode\":\"InvalidCSR\"}";
+    char code[16];
+    char msg[16];
+    uint16_t sc;
+    uint32_t v;
+    size_t i;
+
+    for (i = 0; i < (sizeof(retry) / sizeof(retry[0])); i++)
+    {
+        SSF_ASSERT(SSFAWSProvIsRetryable(retry[i]));
+    }
+    for (i = 0; i < (sizeof(fatal) / sizeof(fatal[0])); i++)
+    {
+        SSF_ASSERT(SSFAWSProvIsRetryable(fatal[i]) == false);
+    }
+
+    /* Every value against the rule */
+    for (v = 0; v <= 0xFFFFu; v++)
+    {
+        SSF_ASSERT(SSFAWSProvIsRetryable((uint16_t)v) ==
+                   ((v == 429u) || ((v >= 500u) && (v <= 599u))));
+    }
+
+    /* End to end through the rejected-response parser */
+    SSF_ASSERT(SSFAWSProvParseRejected((const uint8_t *)throttled, strlen(throttled), _utRx,
+                                       sizeof(_utRx), &sc, code, sizeof(code), msg,
+                                       sizeof(msg)));
+    SSF_ASSERT(SSFAWSProvIsRetryable(sc));
+    SSF_ASSERT(SSFAWSProvParseRejected((const uint8_t *)badCsr, strlen(badCsr), _utRx,
+                                       sizeof(_utRx), &sc, code, sizeof(code), msg, sizeof(msg)));
+    SSF_ASSERT(SSFAWSProvIsRetryable(sc) == false);
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Checks the accepted-response parser on each built curve.                                      */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFAWSProvUTCsrAccepted(void)
@@ -1683,6 +1725,7 @@ void SSFAWSProvUnitTest(void)
 #endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN */
     _SSFAWSProvUTCsrAccepted();
     _SSFAWSProvUTRejected();
+    _SSFAWSProvUTRetryable();
     _SSFAWSProvUTRegRequest();
     _SSFAWSProvUTRegAccepted();
 }

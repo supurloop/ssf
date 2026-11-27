@@ -761,6 +761,14 @@ bool SSFAWSProvParseRejected(const uint8_t *payload, size_t payloadLen, char *rx
     return ok;
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if a rejected statusCode may clear on retry (429, 500..599), else false.         */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFAWSProvIsRetryable(uint16_t statusCode)
+{
+    return ((statusCode == 429u) || ((statusCode >= 500u) && (statusCode <= 599u)));
+}
+
 #if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
 /* --------------------------------------------------------------------------------------------- */
 /* CreateCertificateFromCsr request: defines and data                                            */

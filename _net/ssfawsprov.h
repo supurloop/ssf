@@ -72,6 +72,12 @@ extern "C" {
 #define SSF_AWSPROV_SUB_PROV_REJECTED (3u)
 #define SSF_AWSPROV_SUB_COUNT         (4u)
 
+/* certificateId size with NUL: 64 lowercase hex characters */
+#define SSF_AWSPROV_CERT_ID_SIZE (65u)
+
+#if SSF_AWSPROV_CONFIG_CERT_DER_SIZE > SSF_X509_CONFIG_MAX_CERT_SIZE
+#error SSF_AWSPROV_CONFIG_CERT_DER_SIZE must be at most SSF_X509_CONFIG_MAX_CERT_SIZE.
+#endif
 #if SSF_MQTTC_CONFIG_MAX_SUBSCRIPTIONS < SSF_AWSPROV_SUB_COUNT
 #error SSF_MQTTC_CONFIG_MAX_SUBSCRIPTIONS must be at least SSF_AWSPROV_SUB_COUNT.
 #endif
@@ -88,12 +94,31 @@ typedef struct
     SSFMQTTCSub_t subs[SSF_AWSPROV_SUB_COUNT];
 } SSFAWSProvTopics_t;
 
+/* CreateCertificateFromCsr accepted response; cert points into certDer, no copies */
+typedef struct
+{
+    char certificateId[SSF_AWSPROV_CERT_ID_SIZE];
+    char token[SSF_AWSPROV_CONFIG_TOKEN_SIZE];
+    size_t tokenLen;
+    uint8_t certDer[SSF_AWSPROV_CONFIG_CERT_DER_SIZE];
+    size_t certDerLen;
+    SSFX509Cert_t cert;
+} SSFAWSProvCsrAccepted_t;
+
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFAWSProvTemplateNameIsValid(SSFCStrIn_t nameStr, size_t nameSize);
 bool SSFAWSProvTopicsInit(SSFAWSProvTopics_t *topicsOut, SSFCStrIn_t templateNameStr,
                           size_t templateNameSize);
+/* rxSize must hold the payload, a NUL, the unescaped certificate PEM and a NUL */
+bool SSFAWSProvParseCsrAccepted(const uint8_t *payload, size_t payloadLen, char *rxBuf,
+                                size_t rxSize, SSFECCurve_t curve, const uint8_t *pubKey,
+                                size_t pubKeyLen, SSFAWSProvCsrAccepted_t *out);
+bool SSFAWSProvParseRejected(const uint8_t *payload, size_t payloadLen, char *rxBuf,
+                             size_t rxSize, uint16_t *statusCodeOut, char *errorCodeOut,
+                             size_t errorCodeSize, char *errorMessageOut,
+                             size_t errorMessageSize);
 #if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
 /* privKey and the subject strings must not overlap scratch or outStr */
 bool SSFAWSProvCsrRequestSizes(SSFECCurve_t curve, const SSFX509GenName_t *subjectOpt,

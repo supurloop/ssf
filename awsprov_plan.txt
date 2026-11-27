@@ -21,7 +21,8 @@ Status     : G01 done (commit 9041eba, 2026-11-26). G02 done (commit d510ab3, 20
              G05 done (commit d4bcd2d, 2026-11-26). G06 skipped (2026-11-26).
              G08 done (commit 5030e65, 2026-11-27). G09 done (commit f16516a, 2026-11-27).
              G13 done (commit 7697f67, 2026-11-27). M01 done (commit bbd7bfa, 2026-11-27).
-             M02 done (commit 43537e7, 2026-11-27). M03 done (2026-11-27).
+             M02 done (commit 43537e7, 2026-11-27). M03 done (commit 178f16f, 2026-11-27).
+             M04 done (2026-11-27).
              Everything else is plan only.
 
 Layout
@@ -1155,25 +1156,165 @@ AWSPROV-M03  CreateCertificateFromCsr request
       (M09) recommends both for field devices.
 
 AWSPROV-M04  CreateCertificateFromCsr response parsing
-  Change : SSFAWSProvParseCsrAccepted(payload, len, ...) copies the payload into a
-           NUL-terminated buffer (rxPublish data is only valid during the callback and is not
-           NUL terminated), extracts certificateId, certificatePem -> DER (SSFPEMDecodeNext,
-           label CERTIFICATE) and certificateOwnershipToken. Checks that the certificate parses
-           (SSFX509Parse) and that its public key equals the device key; else fail.
-           The token is kept as the raw escaped JSON slice (SSFJsonMessage span), never
-           unescaped, because SSFJsonGetString decodes \uXXXX to two raw bytes (G04 risk).
-           SSFAWSProvParseRejected(payload, len, &statusCode, errorCode, errorMessage) for all
-           three error topics.
-  Test   : Fixtures shaped exactly as [FPA] (replace with V02 captures when available):
-           happy path; missing each field; field of the wrong type; certificate for a
-           different key; PEM with two blocks; token longer than its buffer; payload at the JSON
-           limit and one over; non-JSON; embedded NUL; rejected with and without errorMessage.
-  Done   : ./ssf passes; fuzz target added (M10).
+  Found in the code (2026-11-27)
+    - SSFX509Cert_t is 888 B on Cortex-M4 (extension, SAN and name-constraint arrays), too
+      much to put on the stack. Its pointers point into the DER it parsed, so DER and struct
+      must live together. The app also wants it afterwards (notAfter, for rotation).
+    - SSFJsonMessage(js, &index, &start, &end, path, 0, &jt) gives a string's span with its
+      quotes, inclusive. That is how the token is taken raw, still escaped.
+    - SSFJsonGetString decodes \n, \/, \" and \\ normally but turns \u00XX into two raw
+      bytes (G04 risk). For certificatePem, a \u escape then makes SSFPEMDecodeNext fail,
+      which fails closed. For errorMessage, a \u0000 would cut the text short: those bytes
+      are only for logging, so they are sanitized.
+    - SSFX509Parse checks the certificate structure, SSFX509IsKeyP256/P384 the curve, and
+      cert.pubKey/pubKeyLen (unused bits 0) the point to compare with the device key.
+    - The device public key comes from the caller (M07 keeps it from M03; it is public). That
+      avoids a second scalar multiplication.
+    - certificateId is 64 lowercase hex characters (AWS API CertificateDescription pattern).
+    - Response topics are $aws reserved, so only AWS publishes to them, and the TLS session
+      authenticates AWS. The parser is still treated as facing hostile input (fuzzed in M10).
+    - Token length is unknown until V02. The 1.8 estimate is a few hundred bytes to ~1 KB.
+
+  Decisions (proposed)
+    - Results go into a caller-owned struct, not a long argument list:
+        typedef struct {
+            char certificateId[SSF_AWSPROV_CERT_ID_SIZE];        65
+            char token[SSF_AWSPROV_CONFIG_TOKEN_SIZE];           raw escaped JSON text + NUL
+            size_t tokenLen;
+            uint8_t certDer[SSF_AWSPROV_CONFIG_CERT_DER_SIZE];
+            size_t certDerLen;
+            SSFX509Cert_t cert;                                  points into certDer
+        } SSFAWSProvCsrAccepted_t;
+      It's not copyable (cert points into certDer), like SSFAWSProvTopics_t.
+    - New options (_opt/ssfawsprov_opt.h, #ifndef plus #error ranges):
+        SSF_AWSPROV_CONFIG_TOKEN_SIZE     2048 (2..RX_SIZE); generous until V02 measures it
+        SSF_AWSPROV_CONFIG_CERT_DER_SIZE  1536 (256..SSF_X509_CONFIG_MAX_CERT_SIZE); AWS
+                                          device certificates are ~0.9 KB DER (RSA-2048 CA
+                                          signature)
+      The default struct is about 2.5 KB on M4, held by M07 only between CSR_SENT and DONE.
+    - The token is a credential for RegisterThing on this certificate. Its copies are wiped:
+      rxBuf on every return, the struct on any failure, and the caller wipes the struct when
+      done (M07 does that on DONE, FAILED and Stop).
+
+  Change (_net/ssfawsprov.h/.c)
+    - bool SSFAWSProvParseCsrAccepted(const uint8_t *payload, size_t payloadLen, char *rxBuf,
+                                      size_t rxSize, SSFECCurve_t curve,
+                                      const uint8_t *pubKey, size_t pubKeyLen,
+                                      SSFAWSProvCsrAccepted_t *out)
+      1. Refuse payloadLen >= rxSize, a NUL inside the payload, or invalid JSON (the copy is
+         NUL terminated, then SSFJsonIsValid).
+      2. certificateId: a string of exactly 64 [0-9a-f].
+      3. certificateOwnershipToken: a string, non-empty, raw escaped span < TOKEN_SIZE.
+      4. certificatePem: a string decoded with GetString into rxBuf's free tail if it fits,
+         else refuse. Exactly one PEM block labelled CERTIFICATE (a second BEGIN refuses),
+         decoded into certDer.
+      5. SSFX509Parse(certDer). The key must be on curve, with unused bits 0, and
+         pubKeyLen/pubKey must equal the device key.
+      On false, out is zeroed. rxBuf is zeroed on every return.
+      REQUIREs: non-NULL pointers, pubKeyLen matching the curve, payload not overlapping
+      rxBuf or out.
+    - bool SSFAWSProvParseRejected(const uint8_t *payload, size_t payloadLen, char *rxBuf,
+                                   size_t rxSize, uint16_t *statusCodeOut,
+                                   char *errorCodeOut, size_t errorCodeSize,
+                                   char *errorMessageOut, size_t errorMessageSize)
+      - statusCode: an integer 100..599, required.
+      - errorCode: a string, required, must fit.
+      - errorMessage: optional. It's truncated to fit, and "" when absent. Both strings have
+        every byte outside 0x20..0x7E replaced by '?', so they're safe to log.
+      - Used for both rejected topics. M06 classifies statusCode.
+  Test (TDD; tests first)
+    - Fixtures made offline with OpenSSL:
+      - a test CA;
+      - a device certificate for the M03 P-256 test key, and one for the P-384 key;
+      - a certificate for a different P-256 key.
+      JSON shaped as [FPA] with a 64-hex id and a ~700-byte token that contains \/ and \"
+      escapes. V02 captures replace these later.
+    - Happy path on P-256 and P-384:
+      - certDer equals the fixture DER;
+      - the token is byte-exact including its escapes;
+      - the id is exact;
+      - cert.notAfter is as issued;
+      - rxBuf is all zero afterwards.
+    - Refusals (each leaves out zeroed and rxBuf zeroed):
+      - each field missing, and each field of the wrong type (number, object, null);
+      - id of 63 or 65 characters, or uppercase or non-hex;
+      - empty token, and token of TOKEN_SIZE - 1 (passes) vs TOKEN_SIZE (fails);
+      - PEM with two blocks; label "PRIVATE KEY"; Base64 damaged; \u0041 inside the PEM;
+      - a certificate for a different key, or on the other curve;
+      - a truncated DER;
+      - payload of rxSize - 1 (fits) vs rxSize; an embedded NUL; non-JSON; an empty payload;
+      - a duplicate key (first occurrence wins, documented).
+    - Rejected:
+      - with and without errorMessage;
+      - statusCode 99, 600 and non-integer refused;
+      - errorCode too long refused, errorMessage too long truncated;
+      - control and high bytes sanitized.
+    - DBC: NULLs, pubKeyLen mismatch, payload overlapping rxBuf.
+  Audit
+    - Mutants on each field check, the hex check, the length bounds, the key compare and the
+      zeroing.
+    - gcov 100% reachable.
+    - Size and stack (expected ~1 KB code, small frame).
+    - ASan, features.sh with the new options in a row (TOKEN_SIZE minimum, CERT_DER_SIZE
+      minimum), ARM, XC32, XC16. The fuzz target is M10.
+  Approved: decisions as proposed, 2026-11-27.
+  Done
+    - ./ssf passes. One commit.
+
+  Result (2026-11-27)
+    - TDD red: the tests linked against missing functions. Fixtures were made with OpenSSL: an
+      RSA-2048 test CA and device certificates of 603 and 632 B DER for the M03 keys, plus one
+      for another key. The token is 692 bytes of JSON text with \/ and \" escapes.
+    - The rx rule is in the header: rxSize must hold the payload, a NUL, the unescaped PEM
+      and a NUL (the PEM is unescaped into the rx tail by ssfjson, so there is no ad hoc
+      unescaping). This is tested at the exact fit and one byte short.
+    - Correction to the plan's estimate: SSFAWSProvCsrAccepted_t is 4552 B on M4 with the
+      defaults, not ~2.5 KB. That is 65 + 2048 + 1536 + 888 (parsed certificate) + lengths.
+      It shrinks when V02 lets TOKEN_SIZE come down.
+    - Mutants 34/51 killed. Of the 17 others:
+        5 target code removed during the work (redundant checks found by earlier survivors);
+        12 are equivalent:
+          SSFJsonIsValid (the lookups refuse trailing data themselves);
+          the PEM result check and SSFX509Parse's result (later checks refuse the same
+            inputs; a truncated certificate fails the outer length first);
+          unused bits (SSFX509Parse refuses them);
+          the statusCode type check and digit bounds (a 3-character JSON number can only
+            hold digits, '-', '.' or 'e', and ssfjson refuses 099).
+      Earlier survivors added tests for:
+        a NUL then trailing bytes, and trailing garbage;
+        ':' and '`' in the id;
+        another curve OID with the device key bytes (P-256 and P-384);
+        sanitizer edges 0x1F/0x20/0x7E/0x7F;
+        a \u escape cut at the end of errorMessage. Its last byte used to be stale caller
+          data; the buffer is now zeroed first.
+    - gcov: every M04 line runs. The module is at 99.3% of 300 lines; the 2 uncovered lines
+      are the M03 unreachable ones.
+    - Size: M4 1280 B, M0+ 1364 B, XC32 2056 B. Stack: ParseCsrAccepted 176 B,
+      ParseRejected 104 B (M4).
+    - ASan clean. ARM, XC32 and XC16 (PIC24) 0 warnings after fixing a cast-align and an
+      unused helper in the test file.
+    - features.sh: new row awsprovmin (TOKEN_SIZE 2, CERT_DER_SIZE 256). The tests check
+      that the happy path is accepted exactly when the build's limits can hold it.
+    - Independent review (fresh agent, code only) found no memory-safety bug and no way to
+      accept a certificate for a different key. Fixed from it:
+        the certificate key algorithm must be id-ecPublicKey, not only the curve OID;
+        statusCode must be exactly three digits 100..599. 400.9, 4e2 and 1e300 were
+          accepted through SSFJsonGetInt, whose float path converts with an undefined
+          cast for 1e300;
+        overlap REQUIREs for payload vs. error outputs, statusCode vs. rxBuf, pubKey vs. out;
+        an undefined curve is a REQUIRE (only a curve that isn't built returns false);
+        errorCode is fully zeroed on failure;
+        new tests: nested-object members ignored, duplicate token/PEM (the first wins),
+          a PEM with \/ escapes accepted, and the new DBC cases.
+      Not changed: text before -----BEGIN is accepted by ssfpem (harmless). The MQTT
+      client's own rx buffer still holds the token after the callback; that's for M07 and
+      ssfmqttc to handle.
 
 AWSPROV-M05  RegisterThing request and response
   Change : SSFAWSProvBuildRegisterRequest(token, params[], paramCount, out, outSize, outLen)
            where params is an array of {key, value} strings (parameters omitted when count is
-           0). SSFAWSProvParseRegisterAccepted(payload, len, thingName, thingNameSize,
+           0). The token is M04's raw escaped JSON text and is inserted between quotes
+           as is, not through SSFJsonPrintString (which would escape its backslashes again). SSFAWSProvParseRegisterAccepted(payload, len, thingName, thingNameSize,
            &cfgStart, &cfgEnd) returns thingName (<= 128 bytes) and the byte span of
            deviceConfiguration so the app can read it with ssfjson.
   Test   : Byte-exact request fixtures with 0, 1 and several parameters; keys and values that

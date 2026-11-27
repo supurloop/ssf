@@ -630,6 +630,691 @@ static void _SSFAWSProvUTCsrRequest(void)
 #endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN */
 
 /* --------------------------------------------------------------------------------------------- */
+/* CSR accepted and rejected response test data                                                  */
+/* --------------------------------------------------------------------------------------------- */
+#define SSF_AWSPROV_UT_RX_SIZE (2u * SSF_AWSPROV_CONFIG_RX_SIZE)
+#if (SSF_AWSPROV_CONFIG_TOKEN_SIZE >= 1024u) && (SSF_AWSPROV_CONFIG_CERT_DER_SIZE >= 1024u) && \
+    (SSF_JSON_CONFIG_MAX_IN_LEN >= 4095u)
+#define SSF_AWSPROV_UT_ACC_FULL (1u)
+#else
+#define SSF_AWSPROV_UT_ACC_FULL (0u)
+#endif
+
+static char _utRx[SSF_AWSPROV_UT_RX_SIZE];
+static char _utJson[SSF_AWSPROV_UT_RX_SIZE];
+static char _utVal[SSF_AWSPROV_UT_RX_SIZE];
+static char _utPemText[SSF_AWSPROV_UT_RX_SIZE];
+static char _utPemTmp[SSF_AWSPROV_UT_RX_SIZE];
+static uint8_t _utDerTmp[2048];
+static SSFAWSProvCsrAccepted_t _utAcc;
+static SSFAWSProvCsrAccepted_t _utAccZero;
+static uint8_t _utPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+static size_t _utPubLen;
+
+/* --------------------------------------------------------------------------------------------- */
+/* Appends str to buf at *len; asserts it fits with its NUL.                                     */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTCat(char *buf, size_t size, size_t *len, const char *str)
+{
+    size_t n;
+
+    SSF_REQUIRE(buf != NULL);
+    SSF_REQUIRE(len != NULL);
+    SSF_REQUIRE(str != NULL);
+
+    n = strlen(str);
+    SSF_ASSERT((*len + n) < size);
+    memcpy(&buf[*len], str, (n + 1u));
+    *len += n;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Writes pemStr into _utVal as a quoted JSON string with each newline escaped.                  */
+/* --------------------------------------------------------------------------------------------- */
+static bool _utEscSlash;
+
+static void _SSFAWSProvUTQuotePem(const char *pemStr)
+{
+    size_t o = 0;
+    size_t i;
+
+    SSF_REQUIRE(pemStr != NULL);
+
+    _utVal[o++] = '"';
+    for (i = 0; pemStr[i] != 0; i++)
+    {
+        SSF_ASSERT((o + 3u) < sizeof(_utVal));
+        if (pemStr[i] == '\n')
+        {
+            _utVal[o++] = '\\';
+            _utVal[o++] = 'n';
+        }
+        else if ((pemStr[i] == '/') && _utEscSlash)
+        {
+            _utVal[o++] = '\\';
+            _utVal[o++] = '/';
+        }
+        else _utVal[o++] = pemStr[i];
+    }
+    _utVal[o++] = '"';
+    _utVal[o] = 0;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Builds an accepted response in _utJson from raw JSON values; NULL omits a member.             */
+/* --------------------------------------------------------------------------------------------- */
+static size_t _SSFAWSProvUTAccJson(const char *tokenValOpt, const char *idValOpt,
+                                   const char *pemValOpt)
+{
+    size_t len = 0;
+    bool comma = false;
+
+    _SSFAWSProvUTCat(_utJson, sizeof(_utJson), &len, "{");
+    if (tokenValOpt != NULL)
+    {
+        _SSFAWSProvUTCat(_utJson, sizeof(_utJson), &len, "\"certificateOwnershipToken\":");
+        _SSFAWSProvUTCat(_utJson, sizeof(_utJson), &len, tokenValOpt);
+        comma = true;
+    }
+    if (idValOpt != NULL)
+    {
+        if (comma) _SSFAWSProvUTCat(_utJson, sizeof(_utJson), &len, ",");
+        _SSFAWSProvUTCat(_utJson, sizeof(_utJson), &len, "\"certificateId\":");
+        _SSFAWSProvUTCat(_utJson, sizeof(_utJson), &len, idValOpt);
+        comma = true;
+    }
+    if (pemValOpt != NULL)
+    {
+        if (comma) _SSFAWSProvUTCat(_utJson, sizeof(_utJson), &len, ",");
+        _SSFAWSProvUTCat(_utJson, sizeof(_utJson), &len, "\"certificatePem\":");
+        _SSFAWSProvUTCat(_utJson, sizeof(_utJson), &len, pemValOpt);
+    }
+    _SSFAWSProvUTCat(_utJson, sizeof(_utJson), &len, "}");
+    return len;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns the first occurrence of key[0..keyLen) in buf[0..bufSize), or NULL.                   */
+/* --------------------------------------------------------------------------------------------- */
+static uint8_t *_SSFAWSProvUTFind(uint8_t *buf, size_t bufSize, const uint8_t *key, size_t keyLen)
+{
+    size_t i;
+
+    SSF_REQUIRE(buf != NULL);
+    SSF_REQUIRE(key != NULL);
+
+    for (i = 0; (i + keyLen) <= bufSize; i++)
+    {
+        if (memcmp(&buf[i], key, keyLen) == 0) return &buf[i];
+    }
+    return NULL;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if every byte of buf[0..size) is zero.                                           */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFAWSProvUTIsZero(const void *buf, size_t size)
+{
+    const uint8_t *b = (const uint8_t *)buf;
+    size_t i;
+
+    SSF_REQUIRE(buf != NULL);
+
+    for (i = 0; i < size; i++)
+    {
+        if (b[i] != 0u) return false;
+    }
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if parsing payload fails and leaves out and the rx copy zeroed.                  */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFAWSProvUTAccRefused(const char *payload, size_t payloadLen, size_t rxSize,
+                                    SSFECCurve_t curve)
+{
+    SSF_REQUIRE(payload != NULL);
+    SSF_REQUIRE(rxSize <= sizeof(_utRx));
+
+    memset(&_utAcc, 0x5A, sizeof(_utAcc));
+    memset(_utRx, 0x5A, sizeof(_utRx));
+    if (SSFAWSProvParseCsrAccepted((const uint8_t *)payload, payloadLen, _utRx, rxSize, curve,
+                                   _utPub, _utPubLen, &_utAcc)) return false;
+    if (memcmp(&_utAcc, &_utAccZero, sizeof(_utAcc)) != 0) return false;
+    return _SSFAWSProvUTIsZero(_utRx, rxSize);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Parses an accepted response that must succeed and checks every output.                        */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTAccOk(const char *payload, size_t payloadLen, size_t rxSize,
+                               SSFECCurve_t curve, const uint8_t *der, size_t derLen)
+{
+    SSF_REQUIRE(payload != NULL);
+    SSF_REQUIRE(der != NULL);
+    SSF_REQUIRE(rxSize <= sizeof(_utRx));
+
+    memset(&_utAcc, 0x5A, sizeof(_utAcc));
+    memset(_utRx, 0x5A, sizeof(_utRx));
+    SSF_ASSERT(SSFAWSProvParseCsrAccepted((const uint8_t *)payload, payloadLen, _utRx, rxSize,
+                                          curve, _utPub, _utPubLen, &_utAcc));
+    SSF_ASSERT(strcmp(_utAcc.certificateId, _utAWSProvCertId) == 0);
+    SSF_ASSERT(_utAcc.tokenLen == strlen(_utAWSProvToken));
+    SSF_ASSERT(strcmp(_utAcc.token, _utAWSProvToken) == 0);
+    SSF_ASSERT((_utAcc.certDerLen == derLen) && (memcmp(_utAcc.certDer, der, derLen) == 0));
+    SSF_ASSERT(_utAcc.cert.notAfter == SSF_AWSPROV_UT_CERT_NOT_AFTER);
+    SSF_ASSERT(_utAcc.cert.pubKeyLen == _utPubLen);
+    SSF_ASSERT(_SSFAWSProvUTIsZero(_utRx, rxSize));
+}
+
+#if SSF_AWSPROV_UT_ACC_FULL == 0
+/* --------------------------------------------------------------------------------------------- */
+/* Checks the happy path is accepted exactly when the configured buffers can hold it.            */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTAccSized(size_t len, SSFECCurve_t curve, const char *pemStr,
+                                  const uint8_t *der, size_t derLen)
+{
+    bool fits;
+
+    SSF_REQUIRE(pemStr != NULL);
+    SSF_REQUIRE(der != NULL);
+
+    fits = ((len <= SSF_JSON_CONFIG_MAX_IN_LEN) &&
+            (strlen(_utAWSProvToken) < SSF_AWSPROV_CONFIG_TOKEN_SIZE) &&
+            (derLen <= SSF_AWSPROV_CONFIG_CERT_DER_SIZE) &&
+            ((len + 1u + strlen(pemStr) + 1u) <= sizeof(_utRx)));
+    /* Does the response fit this build's limits? */
+    if (fits)
+    {
+        /* Yes, accepted */
+        _SSFAWSProvUTAccOk(_utJson, len, sizeof(_utRx), curve, der, derLen);
+    }
+    else
+    {
+        /* No, refused */
+        SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, sizeof(_utRx), curve));
+    }
+}
+#endif /* SSF_AWSPROV_UT_ACC_FULL */
+
+/* --------------------------------------------------------------------------------------------- */
+/* Builds the happy-path accepted response for pemStr in _utJson and returns its length.         */
+/* --------------------------------------------------------------------------------------------- */
+static size_t _SSFAWSProvUTAccGood(const char *pemStr)
+{
+    static char tok[sizeof(_utAWSProvToken) + 2u];
+    static char id[sizeof(_utAWSProvCertId) + 2u];
+
+    SSF_REQUIRE(pemStr != NULL);
+
+    tok[0] = '"';
+    memcpy(&tok[1], _utAWSProvToken, (sizeof(_utAWSProvToken) - 1u));
+    memcpy(&tok[sizeof(_utAWSProvToken)], "\"", 2u);
+    id[0] = '"';
+    memcpy(&id[1], _utAWSProvCertId, (sizeof(_utAWSProvCertId) - 1u));
+    memcpy(&id[sizeof(_utAWSProvCertId)], "\"", 2u);
+    _SSFAWSProvUTQuotePem(pemStr);
+    return _SSFAWSProvUTAccJson(tok, id, _utVal);
+}
+
+#if (SSF_EC_CONFIG_ENABLE_P256 == 1) && (SSF_AWSPROV_UT_ACC_FULL == 1)
+/* --------------------------------------------------------------------------------------------- */
+/* Checks accepted-response refusals on P-256: fields, id, token, PEM, key and payload.          */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTAccRefusals(void)
+{
+    static char tok[SSF_AWSPROV_CONFIG_TOKEN_SIZE + 4u];
+    static const char goodTok[] = "\"abc\"";
+    static const char goodId[] =
+        "\"cf380f5f152eddf37cc7892f83607c2f4cb3b450cb27bbd31cc12d759a8d6e48\"";
+    size_t len;
+    size_t i;
+    size_t need;
+    bool expect;
+    char *at;
+
+    SSF_ASSERT(strstr(goodId, _utAWSProvCertId) != NULL);
+    _SSFAWSProvUTQuotePem(_utAWSProvP256CertPem);
+    memcpy(_utPemText, _utVal, (strlen(_utVal) + 1u));
+
+    /* Each member missing, and each of the wrong type */
+    len = _SSFAWSProvUTAccJson(NULL, goodId, _utPemText);
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256));
+    len = _SSFAWSProvUTAccJson(goodTok, NULL, _utPemText);
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256));
+    len = _SSFAWSProvUTAccJson(goodTok, goodId, NULL);
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256));
+    len = _SSFAWSProvUTAccJson("{}", goodId, _utPemText);
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256));
+    len = _SSFAWSProvUTAccJson("12", goodId, _utPemText);
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256));
+    len = _SSFAWSProvUTAccJson(goodTok, "5", _utPemText);
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256));
+    len = _SSFAWSProvUTAccJson(goodTok, "[\"a\"]", _utPemText);
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256));
+    len = _SSFAWSProvUTAccJson(goodTok, goodId, "null");
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256));
+
+    /* certificateId: 63 and 65 characters, uppercase, non-hex */
+    len = _SSFAWSProvUTAccJson(goodTok,
+        "\"cf380f5f152eddf37cc7892f83607c2f4cb3b450cb27bbd31cc12d759a8d6e4\"", _utPemText);
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256));
+    len = _SSFAWSProvUTAccJson(goodTok,
+        "\"cf380f5f152eddf37cc7892f83607c2f4cb3b450cb27bbd31cc12d759a8d6e480\"", _utPemText);
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256));
+    len = _SSFAWSProvUTAccJson(goodTok,
+        "\"Cf380f5f152eddf37cc7892f83607c2f4cb3b450cb27bbd31cc12d759a8d6e48\"", _utPemText);
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256));
+    len = _SSFAWSProvUTAccJson(goodTok,
+        "\"cf380f5f152eddf37cc7892f83607c2f4cb3b450cb27bbd31cc12d759a8d6e4g\"", _utPemText);
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256));
+    len = _SSFAWSProvUTAccJson(goodTok,
+        "\"cf380f5f152eddf37cc7892f83607c2f4cb3b450cb27bbd31cc12d759a8d6e4/\"", _utPemText);
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256));
+    len = _SSFAWSProvUTAccJson(goodTok,
+        "\"cf380f5f152eddf37cc7892f83607c2f4cb3b450cb27bbd31cc12d759a8d6e4:\"", _utPemText);
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256));
+    len = _SSFAWSProvUTAccJson(goodTok,
+        "\"cf380f5f152eddf37cc7892f83607c2f4cb3b450cb27bbd31cc12d759a8d6e4`\"", _utPemText);
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256));
+
+    /* Token: empty refused; TOKEN_SIZE - 1 characters fit, TOKEN_SIZE do not */
+    len = _SSFAWSProvUTAccJson("\"\"", goodId, _utPemText);
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256));
+    tok[0] = '"';
+    memset(&tok[1], 'T', SSF_AWSPROV_CONFIG_TOKEN_SIZE);
+    tok[SSF_AWSPROV_CONFIG_TOKEN_SIZE] = '"';
+    tok[SSF_AWSPROV_CONFIG_TOKEN_SIZE + 1u] = 0;
+    len = _SSFAWSProvUTAccJson(tok, goodId, _utPemText);
+    need = len + 1u + strlen(_utAWSProvP256CertPem) + 1u;
+    expect = ((len <= SSF_JSON_CONFIG_MAX_IN_LEN) && (need <= sizeof(_utRx)));
+#if (SSF_AWSPROV_CONFIG_TOKEN_SIZE == 2048u) && (SSF_JSON_CONFIG_MAX_IN_LEN >= 4095u)
+    SSF_ASSERT(expect);
+#endif
+    memset(&_utAcc, 0, sizeof(_utAcc));
+    SSF_ASSERT(SSFAWSProvParseCsrAccepted((const uint8_t *)_utJson, len, _utRx,
+                                          ((need <= sizeof(_utRx)) ? need : sizeof(_utRx)),
+                                          SSF_EC_CURVE_P256, _utPub, _utPubLen, &_utAcc) ==
+               expect);
+    SSF_ASSERT((expect == false) || (_utAcc.tokenLen == (SSF_AWSPROV_CONFIG_TOKEN_SIZE - 1u)));
+    tok[SSF_AWSPROV_CONFIG_TOKEN_SIZE + 1u] = '"';
+    tok[SSF_AWSPROV_CONFIG_TOKEN_SIZE + 2u] = 0;
+    tok[SSF_AWSPROV_CONFIG_TOKEN_SIZE] = 'T';
+    len = _SSFAWSProvUTAccJson(tok, goodId, _utPemText);
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256));
+
+    /* PEM: two blocks, wrong label, damaged Base64, a \u escape, truncated DER */
+    memcpy(_utVal, _utPemText, (strlen(_utPemText) - 1u));
+    _utVal[strlen(_utPemText) - 1u] = 0;
+    i = strlen(_utVal);
+    memcpy(&_utVal[i], &_utPemText[1], (strlen(_utPemText)));
+    len = _SSFAWSProvUTAccJson(goodTok, goodId, _utVal);
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256));
+    memcpy(_utVal, _utPemText, (strlen(_utPemText) + 1u));
+    at = strstr(_utVal, "BEGIN CERTIFICATE");
+    SSF_ASSERT(at != NULL);
+    memcpy(&at[6], "CERTIFICATX", 11u);
+    at = strstr(_utVal, "END CERTIFICATE");
+    SSF_ASSERT(at != NULL);
+    memcpy(&at[4], "CERTIFICATX", 11u);
+    len = _SSFAWSProvUTAccJson(goodTok, goodId, _utVal);
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256));
+    memcpy(_utVal, _utPemText, (strlen(_utPemText) + 1u));
+    _utVal[80] = '*';
+    len = _SSFAWSProvUTAccJson(goodTok, goodId, _utVal);
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256));
+    memcpy(_utVal, _utPemText, (strlen(_utPemText) + 1u));
+    memcpy(&_utVal[80], "\\u0041", 6u);
+    len = _SSFAWSProvUTAccJson(goodTok, goodId, _utVal);
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256));
+    SSF_ASSERT(SSFPEMEncode("CERTIFICATE", _utAWSProvP256CertDer,
+                            (sizeof(_utAWSProvP256CertDer) - 16u), _utPemTmp,
+                            sizeof(_utPemTmp), &need));
+    _SSFAWSProvUTQuotePem(_utPemTmp);
+    len = _SSFAWSProvUTAccJson(goodTok, goodId, _utVal);
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256));
+
+    /* The device key under another key algorithm OID */
+    memcpy(_utDerTmp, _utAWSProvP256CertDer, sizeof(_utAWSProvP256CertDer));
+    at = (char *)_SSFAWSProvUTFind(_utDerTmp, sizeof(_utAWSProvP256CertDer),
+                                   (const uint8_t *)"\x2A\x86\x48\xCE\x3D\x02\x01", 7u);
+    SSF_ASSERT(at != NULL);
+    at[6] = 0x02;
+    SSF_ASSERT(SSFPEMEncode("CERTIFICATE", _utDerTmp, sizeof(_utAWSProvP256CertDer), _utPemTmp,
+                            sizeof(_utPemTmp), &need));
+    _SSFAWSProvUTQuotePem(_utPemTmp);
+    len = _SSFAWSProvUTAccJson(goodTok, goodId, _utVal);
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256));
+
+    /* The device key under another curve OID, and with unused bits 1 */
+    memcpy(_utDerTmp, _utAWSProvP256CertDer, sizeof(_utAWSProvP256CertDer));
+    at = (char *)_SSFAWSProvUTFind(_utDerTmp, sizeof(_utAWSProvP256CertDer),
+                                   (const uint8_t *)"\x2A\x86\x48\xCE\x3D\x03\x01\x07", 8u);
+    SSF_ASSERT(at != NULL);
+    at[7] = 0x08;
+    SSF_ASSERT(SSFPEMEncode("CERTIFICATE", _utDerTmp, sizeof(_utAWSProvP256CertDer), _utPemTmp,
+                            sizeof(_utPemTmp), &need));
+    _SSFAWSProvUTQuotePem(_utPemTmp);
+    len = _SSFAWSProvUTAccJson(goodTok, goodId, _utVal);
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256));
+    memcpy(_utDerTmp, _utAWSProvP256CertDer, sizeof(_utAWSProvP256CertDer));
+    at = (char *)_SSFAWSProvUTFind(_utDerTmp, sizeof(_utAWSProvP256CertDer), _utPub, _utPubLen);
+    SSF_ASSERT((at != NULL) && (at[-1] == 0) && (at[-3] == 0x03));
+    at[-1] = 0x01;
+    SSF_ASSERT(SSFPEMEncode("CERTIFICATE", _utDerTmp, sizeof(_utAWSProvP256CertDer), _utPemTmp,
+                            sizeof(_utPemTmp), &need));
+    _SSFAWSProvUTQuotePem(_utPemTmp);
+    len = _SSFAWSProvUTAccJson(goodTok, goodId, _utVal);
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256));
+
+    /* Certificate for another key, and for the other curve */
+    _SSFAWSProvUTQuotePem(_utAWSProvOtherCertPem);
+    len = _SSFAWSProvUTAccJson(goodTok, goodId, _utVal);
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256));
+#if SSF_EC_CONFIG_ENABLE_P384 == 1
+    _SSFAWSProvUTQuotePem(_utAWSProvP384CertPem);
+    len = _SSFAWSProvUTAccJson(goodTok, goodId, _utVal);
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256));
+#endif /* SSF_EC_CONFIG_ENABLE_P384 */
+
+    /* Payload: exact rx fit (payload, NUL, decoded PEM, NUL) passes, one byte less fails */
+    len = _SSFAWSProvUTAccGood(_utAWSProvP256CertPem);
+    need = len + 1u + strlen(_utAWSProvP256CertPem) + 1u;
+    _SSFAWSProvUTAccOk(_utJson, len, need, SSF_EC_CURVE_P256, _utAWSProvP256CertDer,
+                       sizeof(_utAWSProvP256CertDer));
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, (need - 1u), SSF_EC_CURVE_P256));
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, len, SSF_EC_CURVE_P256));
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, (len + 1u), SSF_EC_CURVE_P256));
+
+    /* Payload: embedded NUL, non-JSON, empty, truncated */
+    _utJson[len - 1u] = 0;
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256));
+    _utJson[len - 1u] = '}';
+    _utJson[1] = 0;
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256));
+    SSF_ASSERT(_SSFAWSProvUTAccRefused("hello", 5u, sizeof(_utRx), SSF_EC_CURVE_P256));
+    len = _SSFAWSProvUTAccGood(_utAWSProvP256CertPem);
+    memcpy(&_utJson[len], "\0x", 3u);
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, (len + 2u), sizeof(_utRx), SSF_EC_CURVE_P256));
+    memcpy(&_utJson[len], " }", 3u);
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, (len + 2u), sizeof(_utRx), SSF_EC_CURVE_P256));
+    SSF_ASSERT(_SSFAWSProvUTAccRefused("", 0u, sizeof(_utRx), SSF_EC_CURVE_P256));
+    len = _SSFAWSProvUTAccGood(_utAWSProvP256CertPem);
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, (len - 1u), sizeof(_utRx), SSF_EC_CURVE_P256));
+
+    /* A duplicate member: the first occurrence is used */
+    len = _SSFAWSProvUTAccGood(_utAWSProvP256CertPem);
+    _utJson[len - 1u] = 0;
+    len--;
+    _SSFAWSProvUTCat(_utJson, sizeof(_utJson), &len, ",\"certificateId\":\"0\"}");
+    _SSFAWSProvUTAccOk(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256, _utAWSProvP256CertDer,
+                       sizeof(_utAWSProvP256CertDer));
+
+    /* A member only inside a nested object is not found */
+    len = _SSFAWSProvUTAccJson(goodTok, "\"x\",\"n\":{\"certificateId\":\""
+        "cf380f5f152eddf37cc7892f83607c2f4cb3b450cb27bbd31cc12d759a8d6e48\"}", _utPemText);
+    at = strstr(_utJson, "\"certificateId\":\"x\"");
+    SSF_ASSERT(at != NULL);
+    at[13] = 'X';
+    SSF_ASSERT(strlen(_utJson) == len);
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256));
+    at[13] = 'd';
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256));
+
+    /* Duplicate token and PEM members: the first occurrences are used */
+    len = _SSFAWSProvUTAccGood(_utAWSProvP256CertPem);
+    _utJson[len - 1u] = 0;
+    len--;
+    _SSFAWSProvUTCat(_utJson, sizeof(_utJson), &len,
+                     ",\"certificateOwnershipToken\":\"x\",\"certificatePem\":\"y\"}");
+    _SSFAWSProvUTAccOk(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256, _utAWSProvP256CertDer,
+                       sizeof(_utAWSProvP256CertDer));
+
+    /* A PEM written with \/ escapes is accepted */
+    SSF_ASSERT(strchr(_utAWSProvP256CertPem, '/') != NULL);
+    _utEscSlash = true;
+    len = _SSFAWSProvUTAccGood(_utAWSProvP256CertPem);
+    _utEscSlash = false;
+    SSF_ASSERT(strstr(_utJson, "\\/") != NULL);
+    _SSFAWSProvUTAccOk(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256, _utAWSProvP256CertDer,
+                       sizeof(_utAWSProvP256CertDer));
+
+    /* An undefined curve is a contract violation */
+    len = _SSFAWSProvUTAccGood(_utAWSProvP256CertPem);
+    SSF_ASSERT_TEST((void)SSFAWSProvParseCsrAccepted((const uint8_t *)_utJson, len, _utRx,
+                                                     sizeof(_utRx), SSF_EC_CURVE_MAX, _utPub,
+                                                     _utPubLen, &_utAcc));
+}
+#endif /* SSF_EC_CONFIG_ENABLE_P256, SSF_AWSPROV_UT_ACC_FULL */
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if a rejected response parses to statusCode and the two strings.                 */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFAWSProvUTRej(const char *payload, size_t codeSize, size_t msgSize,
+                             uint16_t status, const char *codeStr, const char *msgStr)
+{
+    static char code[64];
+    static char msg[64];
+    uint16_t sc = 1u;
+
+    SSF_REQUIRE(payload != NULL);
+    SSF_REQUIRE((codeSize <= sizeof(code)) && (msgSize <= sizeof(msg)));
+
+    memset(code, 'x', sizeof(code));
+    memset(msg, 'x', sizeof(msg));
+    memset(_utRx, 0x5A, sizeof(_utRx));
+    /* Is the response expected to be refused? */
+    if (codeStr == NULL)
+    {
+        /* Yes, all outputs empty */
+        if (SSFAWSProvParseRejected((const uint8_t *)payload, strlen(payload), _utRx,
+                                    sizeof(_utRx), &sc, code, codeSize, msg, msgSize))
+            return false;
+        return ((sc == 0u) && _SSFAWSProvUTIsZero(code, codeSize) &&
+                _SSFAWSProvUTIsZero(msg, msgSize) && _SSFAWSProvUTIsZero(_utRx, sizeof(_utRx)));
+    }
+    /* No, the outputs as given */
+    if (SSFAWSProvParseRejected((const uint8_t *)payload, strlen(payload), _utRx, sizeof(_utRx),
+                                &sc, code, codeSize, msg, msgSize) == false) return false;
+    return ((sc == status) && (strcmp(code, codeStr) == 0) && (strcmp(msg, msgStr) == 0) &&
+            _SSFAWSProvUTIsZero(_utRx, sizeof(_utRx)));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Checks the rejected-response parser.                                                          */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTRejected(void)
+{
+    static uint16_t rx16[8];
+    uint16_t sc;
+    char code[8];
+    char msg[8];
+
+    SSF_ASSERT(_SSFAWSProvUTRej(
+        "{\"statusCode\":400,\"errorCode\":\"InvalidCSR\",\"errorMessage\":\"bad csr\"}",
+        64u, 64u, 400u, "InvalidCSR", "bad csr"));
+    SSF_ASSERT(_SSFAWSProvUTRej("{\"errorCode\":\"Throttled\",\"statusCode\":429}", 64u, 64u,
+                                429u, "Throttled", ""));
+    SSF_ASSERT(_SSFAWSProvUTRej("{\"statusCode\":100,\"errorCode\":\"a\"}", 64u, 64u, 100u, "a",
+                                ""));
+    SSF_ASSERT(_SSFAWSProvUTRej("{\"statusCode\":599,\"errorCode\":\"a\"}", 64u, 64u, 599u, "a",
+                                ""));
+
+    /* errorMessage truncated to fit, errorCode must fit */
+    SSF_ASSERT(_SSFAWSProvUTRej(
+        "{\"statusCode\":500,\"errorCode\":\"ab\",\"errorMessage\":\"0123456789\"}", 3u, 5u,
+        500u, "ab", "0123"));
+    SSF_ASSERT(_SSFAWSProvUTRej(
+        "{\"statusCode\":500,\"errorCode\":\"abc\",\"errorMessage\":\"x\"}", 3u, 5u, 0u, NULL,
+        NULL));
+
+    /* Bytes outside 0x20..0x7E become '?' */
+    SSF_ASSERT(_SSFAWSProvUTRej(
+        "{\"statusCode\":403,\"errorCode\":\"a\\tb\",\"errorMessage\":\"c\\u00e9d\\u0000e\"}",
+        64u, 64u, 403u, "a?b", "c??d??e"));
+
+    /* Sanitizer edges: 0x1F and 0x7F replaced, 0x20 and 0x7E kept; an escape cut at the end */
+    SSF_ASSERT(_SSFAWSProvUTRej(
+        "{\"statusCode\":403,\"errorCode\":\"a\",\"errorMessage\":\" ~\\u001f\\u007f\"}",
+        64u, 64u, 403u, "a", " ~????"));
+    SSF_ASSERT(_SSFAWSProvUTRej(
+        "{\"statusCode\":403,\"errorCode\":\"a\",\"errorMessage\":\"ab\\u00e9\"}", 64u, 4u,
+        403u, "a", "ab?"));
+
+    /* Refused: status out of range or not an integer, required members missing or mistyped */
+    SSF_ASSERT(_SSFAWSProvUTRej("{\"statusCode\":99,\"errorCode\":\"a\"}", 64u, 64u, 0u, NULL,
+                                NULL));
+    SSF_ASSERT(_SSFAWSProvUTRej("{\"statusCode\":600,\"errorCode\":\"a\"}", 64u, 64u, 0u, NULL,
+                                NULL));
+    SSF_ASSERT(_SSFAWSProvUTRej("{\"statusCode\":-400,\"errorCode\":\"a\"}", 64u, 64u, 0u, NULL,
+                                NULL));
+    SSF_ASSERT(_SSFAWSProvUTRej("{\"statusCode\":\"400\",\"errorCode\":\"a\"}", 64u, 64u, 0u,
+                                NULL, NULL));
+    SSF_ASSERT(_SSFAWSProvUTRej("{\"errorCode\":\"a\"}", 64u, 64u, 0u, NULL, NULL));
+    SSF_ASSERT(_SSFAWSProvUTRej("{\"statusCode\":400.9,\"errorCode\":\"a\"}", 64u, 64u, 0u,
+                                NULL, NULL));
+    SSF_ASSERT(_SSFAWSProvUTRej("{\"statusCode\":4e2,\"errorCode\":\"a\"}", 64u, 64u, 0u,
+                                NULL, NULL));
+    SSF_ASSERT(_SSFAWSProvUTRej("{\"statusCode\":1e300,\"errorCode\":\"a\"}", 64u, 64u, 0u,
+                                NULL, NULL));
+    SSF_ASSERT(_SSFAWSProvUTRej("{\"statusCode\":0400,\"errorCode\":\"a\"}", 64u, 64u, 0u,
+                                NULL, NULL));
+    SSF_ASSERT(_SSFAWSProvUTRej("{\"statusCode\":40,\"errorCode\":\"a\"}", 64u, 64u, 0u,
+                                NULL, NULL));
+    SSF_ASSERT(_SSFAWSProvUTRej("{\"statusCode\":099,\"errorCode\":\"a\"}", 64u, 64u, 0u,
+                                NULL, NULL));
+    SSF_ASSERT(_SSFAWSProvUTRej("{\"statusCode\":1000,\"errorCode\":\"a\"}", 64u, 64u, 0u,
+                                NULL, NULL));
+    SSF_ASSERT(_SSFAWSProvUTRej("{\"statusCode\":5x9,\"errorCode\":\"a\"}", 64u, 64u, 0u,
+                                NULL, NULL));
+    SSF_ASSERT(_SSFAWSProvUTRej("{\"statusCode\":59x,\"errorCode\":\"a\"}", 64u, 64u, 0u,
+                                NULL, NULL));
+    SSF_ASSERT(_SSFAWSProvUTRej("{\"statusCode\":400}", 64u, 64u, 0u, NULL, NULL));
+    SSF_ASSERT(_SSFAWSProvUTRej("{\"statusCode\":400,\"errorCode\":7}", 64u, 64u, 0u, NULL,
+                                NULL));
+    SSF_ASSERT(_SSFAWSProvUTRej("{\"statusCode\":400,\"errorCode\":\"a\",\"errorMessage\":7}",
+                                64u, 64u, 400u, "a", ""));
+    SSF_ASSERT(_SSFAWSProvUTRej("[1]", 64u, 64u, 0u, NULL, NULL));
+    SSF_ASSERT(_SSFAWSProvUTRej("", 64u, 64u, 0u, NULL, NULL));
+
+    /* DBC */
+    SSF_ASSERT_TEST((void)SSFAWSProvParseRejected(NULL, 1u, _utRx, sizeof(_utRx), &sc, code,
+                                                  sizeof(code), msg, sizeof(msg)));
+    SSF_ASSERT_TEST((void)SSFAWSProvParseRejected((const uint8_t *)"{}", 2u, NULL, 1u, &sc, code,
+                                                  sizeof(code), msg, sizeof(msg)));
+    SSF_ASSERT_TEST((void)SSFAWSProvParseRejected((const uint8_t *)"{}", 2u, _utRx, 0u, &sc,
+                                                  code, sizeof(code), msg, sizeof(msg)));
+    SSF_ASSERT_TEST((void)SSFAWSProvParseRejected((const uint8_t *)"{}", 2u, _utRx,
+                                                  sizeof(_utRx), NULL, code, sizeof(code), msg,
+                                                  sizeof(msg)));
+    SSF_ASSERT_TEST((void)SSFAWSProvParseRejected((const uint8_t *)"{}", 2u, _utRx,
+                                                  sizeof(_utRx), &sc, NULL, sizeof(code), msg,
+                                                  sizeof(msg)));
+    SSF_ASSERT_TEST((void)SSFAWSProvParseRejected((const uint8_t *)"{}", 2u, _utRx,
+                                                  sizeof(_utRx), &sc, code, 0u, msg,
+                                                  sizeof(msg)));
+    SSF_ASSERT_TEST((void)SSFAWSProvParseRejected((const uint8_t *)"{}", 2u, _utRx,
+                                                  sizeof(_utRx), &sc, code, sizeof(code), NULL,
+                                                  sizeof(msg)));
+    SSF_ASSERT_TEST((void)SSFAWSProvParseRejected((const uint8_t *)"{}", 2u, _utRx,
+                                                  sizeof(_utRx), &sc, code, sizeof(code), msg,
+                                                  0u));
+    SSF_ASSERT_TEST((void)SSFAWSProvParseRejected((const uint8_t *)&_utRx[4], 2u, _utRx,
+                                                  sizeof(_utRx), &sc, code, sizeof(code), msg,
+                                                  sizeof(msg)));
+    SSF_ASSERT_TEST((void)SSFAWSProvParseRejected((const uint8_t *)code, 2u, _utRx,
+                                                  sizeof(_utRx), &sc, code, sizeof(code), msg,
+                                                  sizeof(msg)));
+    SSF_ASSERT_TEST((void)SSFAWSProvParseRejected((const uint8_t *)msg, 2u, _utRx,
+                                                  sizeof(_utRx), &sc, code, sizeof(code), msg,
+                                                  sizeof(msg)));
+    SSF_ASSERT_TEST((void)SSFAWSProvParseRejected((const uint8_t *)&sc, 2u, _utRx,
+                                                  sizeof(_utRx), &sc, code, sizeof(code), msg,
+                                                  sizeof(msg)));
+    SSF_ASSERT_TEST((void)SSFAWSProvParseRejected((const uint8_t *)"{}", 2u, (char *)rx16,
+                                                  sizeof(rx16), &rx16[1], code, sizeof(code),
+                                                  msg, sizeof(msg)));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Checks the accepted-response parser on each built curve.                                      */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTCsrAccepted(void)
+{
+    uint8_t *der;
+    size_t len;
+
+    memset(&_utAccZero, 0, sizeof(_utAccZero));
+#if SSF_EC_CONFIG_ENABLE_P256 == 1
+    SSF_ASSERT(SSFECDSAPubKeyFromPrivKey(SSF_EC_CURVE_P256, _utAWSProvP256Priv,
+                                         sizeof(_utAWSProvP256Priv), _utPub, sizeof(_utPub),
+                                         &_utPubLen));
+    len = _SSFAWSProvUTAccGood(_utAWSProvP256CertPem);
+#if SSF_AWSPROV_UT_ACC_FULL == 1
+    _SSFAWSProvUTAccOk(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P256, _utAWSProvP256CertDer,
+                       sizeof(_utAWSProvP256CertDer));
+    _SSFAWSProvUTAccRefusals();
+#else
+    _SSFAWSProvUTAccSized(len, SSF_EC_CURVE_P256, _utAWSProvP256CertPem, _utAWSProvP256CertDer,
+                          sizeof(_utAWSProvP256CertDer));
+#endif /* SSF_AWSPROV_UT_ACC_FULL */
+
+    /* DBC */
+    SSF_ASSERT_TEST((void)SSFAWSProvParseCsrAccepted(NULL, len, _utRx, sizeof(_utRx),
+                                                     SSF_EC_CURVE_P256, _utPub, _utPubLen,
+                                                     &_utAcc));
+    SSF_ASSERT_TEST((void)SSFAWSProvParseCsrAccepted((const uint8_t *)_utJson, len, NULL,
+                                                     sizeof(_utRx), SSF_EC_CURVE_P256, _utPub,
+                                                     _utPubLen, &_utAcc));
+    SSF_ASSERT_TEST((void)SSFAWSProvParseCsrAccepted((const uint8_t *)_utJson, len, _utRx, 0u,
+                                                     SSF_EC_CURVE_P256, _utPub, _utPubLen,
+                                                     &_utAcc));
+    SSF_ASSERT_TEST((void)SSFAWSProvParseCsrAccepted((const uint8_t *)_utJson, len, _utRx,
+                                                     sizeof(_utRx), SSF_EC_CURVE_P256, NULL,
+                                                     _utPubLen, &_utAcc));
+    SSF_ASSERT_TEST((void)SSFAWSProvParseCsrAccepted((const uint8_t *)_utJson, len, _utRx,
+                                                     sizeof(_utRx), SSF_EC_CURVE_P256, _utPub,
+                                                     (_utPubLen - 1u), &_utAcc));
+    SSF_ASSERT_TEST((void)SSFAWSProvParseCsrAccepted((const uint8_t *)_utJson, len, _utRx,
+                                                     sizeof(_utRx), SSF_EC_CURVE_P256, _utPub,
+                                                     _utPubLen, NULL));
+    SSF_ASSERT_TEST((void)SSFAWSProvParseCsrAccepted((const uint8_t *)&_utRx[8], len, _utRx,
+                                                     sizeof(_utRx), SSF_EC_CURVE_P256, _utPub,
+                                                     _utPubLen, &_utAcc));
+    SSF_ASSERT_TEST((void)SSFAWSProvParseCsrAccepted((const uint8_t *)_utJson, len,
+                                                     (char *)&_utAcc, 64u, SSF_EC_CURVE_P256,
+                                                     _utPub, _utPubLen, &_utAcc));
+    SSF_ASSERT_TEST((void)SSFAWSProvParseCsrAccepted((const uint8_t *)_utJson, len, _utRx,
+                                                     sizeof(_utRx), SSF_EC_CURVE_P256,
+                                                     _utAcc.certDer, _utPubLen, &_utAcc));
+#endif /* SSF_EC_CONFIG_ENABLE_P256 */
+#if SSF_EC_CONFIG_ENABLE_P384 == 1
+    SSF_ASSERT(SSFECDSAPubKeyFromPrivKey(SSF_EC_CURVE_P384, _utAWSProvP384Priv,
+                                         sizeof(_utAWSProvP384Priv), _utPub, sizeof(_utPub),
+                                         &_utPubLen));
+    len = _SSFAWSProvUTAccGood(_utAWSProvP384CertPem);
+#if SSF_AWSPROV_UT_ACC_FULL == 1
+    _SSFAWSProvUTAccOk(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P384, _utAWSProvP384CertDer,
+                       sizeof(_utAWSProvP384CertDer));
+    memcpy(_utDerTmp, _utAWSProvP384CertDer, sizeof(_utAWSProvP384CertDer));
+    der = _SSFAWSProvUTFind(_utDerTmp, sizeof(_utAWSProvP384CertDer),
+                            (const uint8_t *)"\x2B\x81\x04\x00\x22", 5u);
+    SSF_ASSERT(der != NULL);
+    der[4] = 0x23;
+    SSF_ASSERT(SSFPEMEncode("CERTIFICATE", _utDerTmp, sizeof(_utAWSProvP384CertDer), _utPemTmp,
+                            sizeof(_utPemTmp), &len));
+    len = _SSFAWSProvUTAccGood(_utPemTmp);
+    SSF_ASSERT(_SSFAWSProvUTAccRefused(_utJson, len, sizeof(_utRx), SSF_EC_CURVE_P384));
+#else
+    _SSFAWSProvUTAccSized(len, SSF_EC_CURVE_P384, _utAWSProvP384CertPem, _utAWSProvP384CertDer,
+                          sizeof(_utAWSProvP384CertDer));
+#endif /* SSF_AWSPROV_UT_ACC_FULL */
+#endif /* SSF_EC_CONFIG_ENABLE_P384 */
+    (void)len;
+    (void)der;
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Runs the ssfawsprov unit test.                                                                */
 /* --------------------------------------------------------------------------------------------- */
 void SSFAWSProvUnitTest(void)
@@ -641,6 +1326,8 @@ void SSFAWSProvUnitTest(void)
 #if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
     _SSFAWSProvUTCsrRequest();
 #endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN */
+    _SSFAWSProvUTCsrAccepted();
+    _SSFAWSProvUTRejected();
 }
 
 #endif /* SSF_CONFIG_AWSPROV_UNIT_TEST */

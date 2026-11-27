@@ -123,6 +123,348 @@ bool SSFAWSProvTopicsInit(SSFAWSProvTopics_t *topicsOut, SSFCStrIn_t templateNam
     return true;
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* CreateCertificateFromCsr responses: defines                                                   */
+/* --------------------------------------------------------------------------------------------- */
+#define SSF_AWSPROV_CERT_LABEL     "CERTIFICATE"
+#define SSF_AWSPROV_CERT_ID_LEN    (SSF_AWSPROV_CERT_ID_SIZE - 1u)
+#define SSF_AWSPROV_STATUS_LEN     (3u)
+
+/* id-ecPublicKey */
+static const uint8_t _ssfAWSProvOidEC[] = { 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x02, 0x01 };
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if [a, a + aLen) and [b, b + bLen) do not overlap.                               */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFAWSProvIsDisjoint(const void *a, size_t aLen, const void *b, size_t bLen)
+{
+    return ((((uintptr_t)a + aLen) <= (uintptr_t)b) || ((uintptr_t)a >= ((uintptr_t)b + bLen)));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if payload is copied to rxBuf with a NUL and is valid JSON, else false.          */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFAWSProvRxCopy(const uint8_t *payload, size_t payloadLen, char *rxBuf,
+                              size_t rxSize)
+{
+    size_t i;
+
+    SSF_REQUIRE(payload != NULL);
+    SSF_REQUIRE(rxBuf != NULL);
+
+    if (payloadLen >= rxSize) return false;
+    for (i = 0; i < payloadLen; i++)
+    {
+        if (payload[i] == 0u) return false;
+        rxBuf[i] = (char)payload[i];
+    }
+    rxBuf[payloadLen] = 0;
+    return SSFJsonIsValid(rxBuf);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Sets path to the single top-level member keyStr.                                              */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvPath(SSFGPath_t *path, size_t pathSize, const char *keyStr)
+{
+    SSF_REQUIRE(path != NULL);
+    SSF_REQUIRE(pathSize == (sizeof(SSFGPath_t) * (SSF_JSON_CONFIG_MAX_IN_DEPTH + 1u)));
+    SSF_REQUIRE(keyStr != NULL);
+
+    memset((void *)path, 0, pathSize);
+    SSF_GPATH_SET_KEY(path[0], keyStr);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true with the span of top-level string member keyStr, quotes excluded.                */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFAWSProvStrSpan(const char *jsStr, const char *keyStr, size_t *startOut,
+                               size_t *lenOut)
+{
+    SSFGPath_t path[SSF_JSON_CONFIG_MAX_IN_DEPTH + 1];
+    SSFJsonType_t jt;
+    size_t index;
+    size_t start;
+    size_t end;
+
+    SSF_REQUIRE(jsStr != NULL);
+    SSF_REQUIRE(keyStr != NULL);
+    SSF_REQUIRE(startOut != NULL);
+    SSF_REQUIRE(lenOut != NULL);
+
+    _SSFAWSProvPath(path, sizeof(path), keyStr);
+    if (SSFJsonMessage(jsStr, &index, &start, &end, path, 0, &jt) == false) return false;
+    if (jt != SSF_JSON_TYPE_STRING) return false;
+    SSF_ASSERT(end > start);
+    *startOut = start + 1u;
+    *lenOut = (end - start) - 1u;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if str[0..len) is lowercase hexadecimal.                                         */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFAWSProvIsLowerHex(const char *str, size_t len)
+{
+    size_t i;
+
+    SSF_REQUIRE(str != NULL);
+
+    for (i = 0; i < len; i++)
+    {
+        if (((str[i] < '0') || (str[i] > '9')) && ((str[i] < 'a') || (str[i] > 'f')))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the certificate is on curve and its public key equals pubKey.                 */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFAWSProvCertKeyIs(const SSFX509Cert_t *cert, SSFECCurve_t curve,
+                                 const uint8_t *pubKey, size_t pubKeyLen)
+{
+    SSF_REQUIRE(cert != NULL);
+    SSF_REQUIRE(pubKey != NULL);
+
+    /* Is the certificate key on the device key's curve? */
+    if (curve == SSF_EC_CURVE_P384)
+    {
+        /* Yes if it is a P-384 key */
+        if (SSFX509IsKeyP384(cert) == false) return false;
+    }
+    else
+    {
+        /* Yes if it is a P-256 key */
+        if (SSFX509IsKeyP256(cert) == false) return false;
+    }
+    if ((cert->pubKeyAlgOidRawLen != sizeof(_ssfAWSProvOidEC)) ||
+        (memcmp(cert->pubKeyAlgOidRaw, _ssfAWSProvOidEC, sizeof(_ssfAWSProvOidEC)) != 0))
+    {
+        return false;
+    }
+    if ((cert->pubKeyUnusedBits != 0u) || (cert->pubKeyLen != pubKeyLen)) return false;
+    return (memcmp(cert->pubKey, pubKey, pubKeyLen) == 0);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the accepted fields are taken from rxBuf into out, else false.                */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFAWSProvCsrAcceptedFields(char *rxBuf, size_t rxSize, size_t payloadLen,
+                                         SSFECCurve_t curve, const uint8_t *pubKey,
+                                         size_t pubKeyLen, SSFAWSProvCsrAccepted_t *out)
+{
+    SSFGPath_t path[SSF_JSON_CONFIG_MAX_IN_DEPTH + 1];
+    SSFPEMResult_t pr;
+    const char *label;
+    char *pemStr;
+    size_t labelLen;
+    size_t pemSize;
+    size_t pemLen;
+    size_t start;
+    size_t len;
+    size_t pos;
+
+    SSF_REQUIRE(rxBuf != NULL);
+    SSF_REQUIRE(payloadLen < rxSize);
+    SSF_REQUIRE(pubKey != NULL);
+    SSF_REQUIRE(out != NULL);
+
+    /* certificateId: exactly 64 lowercase hex characters */
+    if (_SSFAWSProvStrSpan(rxBuf, "certificateId", &start, &len) == false) return false;
+    if ((len != SSF_AWSPROV_CERT_ID_LEN) || (_SSFAWSProvIsLowerHex(&rxBuf[start], len) == false))
+    {
+        return false;
+    }
+    memcpy(out->certificateId, &rxBuf[start], len);
+    out->certificateId[len] = 0;
+
+    /* certificateOwnershipToken: kept as its raw escaped JSON text */
+    if (_SSFAWSProvStrSpan(rxBuf, "certificateOwnershipToken", &start, &len) == false)
+    {
+        return false;
+    }
+    if ((len == 0u) || (len >= sizeof(out->token))) return false;
+    memcpy(out->token, &rxBuf[start], len);
+    out->token[len] = 0;
+    out->tokenLen = len;
+
+    /* certificatePem: unescaped into rxBuf after the payload, one CERTIFICATE block */
+    pemStr = &rxBuf[payloadLen + 1u];
+    pemSize = rxSize - (payloadLen + 1u);
+    if (pemSize == 0u) return false;
+    _SSFAWSProvPath(path, sizeof(path), "certificatePem");
+    if (SSFJsonGetString(rxBuf, path, pemStr, pemSize, &pemLen) == false) return false;
+    pos = 0;
+    pr = SSFPEMDecodeNext(pemStr, pemLen, &pos, &label, &labelLen, out->certDer,
+                          sizeof(out->certDer), &out->certDerLen);
+    if (pr != SSF_PEM_BLOCK) return false;
+    if (SSFPEMLabelIs(label, labelLen, SSF_AWSPROV_CERT_LABEL) == false) return false;
+    if (SSFPEMDecodeNext(pemStr, pemLen, &pos, &label, &labelLen, NULL, 0, &len) !=
+        SSF_PEM_END) return false;
+
+    /* The certificate parses and holds the device public key */
+    if (SSFX509Parse(out->certDer, (uint32_t)out->certDerLen, &out->cert) == false) return false;
+    return _SSFAWSProvCertKeyIs(&out->cert, curve, pubKey, pubKeyLen);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if a CreateCertificateFromCsr accepted response is parsed into out.              */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFAWSProvParseCsrAccepted(const uint8_t *payload, size_t payloadLen, char *rxBuf,
+                                size_t rxSize, SSFECCurve_t curve, const uint8_t *pubKey,
+                                size_t pubKeyLen, SSFAWSProvCsrAccepted_t *out)
+{
+    const SSFECCurveParams_t *c;
+    bool ok = false;
+
+    SSF_REQUIRE(payload != NULL);
+    SSF_REQUIRE(rxBuf != NULL);
+    SSF_REQUIRE(rxSize > 0u);
+    SSF_REQUIRE(pubKey != NULL);
+    SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE(_SSFAWSProvIsDisjoint(payload, payloadLen, rxBuf, rxSize));
+    SSF_REQUIRE(_SSFAWSProvIsDisjoint(payload, payloadLen, out, sizeof(*out)));
+    SSF_REQUIRE(_SSFAWSProvIsDisjoint(rxBuf, rxSize, out, sizeof(*out)));
+    SSF_REQUIRE(_SSFAWSProvIsDisjoint(pubKey, pubKeyLen, rxBuf, rxSize));
+    SSF_REQUIRE(_SSFAWSProvIsDisjoint(pubKey, pubKeyLen, out, sizeof(*out)));
+    SSF_REQUIRE((curve > SSF_EC_CURVE_MIN) && (curve < SSF_EC_CURVE_MAX));
+
+    memset(out, 0, sizeof(*out));
+    c = SSFECGetCurveParams(curve);
+    /* Is the curve built? */
+    if (c != NULL)
+    {
+        /* Yes, parse the copy */
+        SSF_REQUIRE(pubKeyLen == (1u + (2u * (size_t)c->bytes)));
+        ok = (_SSFAWSProvRxCopy(payload, payloadLen, rxBuf, rxSize) &&
+              _SSFAWSProvCsrAcceptedFields(rxBuf, rxSize, payloadLen, curve, pubKey, pubKeyLen,
+                                           out));
+    }
+    memset(rxBuf, 0, rxSize);
+    /* Did any step fail? */
+    if (ok == false)
+    {
+        /* Yes, leave nothing behind, the token included */
+        memset(out, 0, sizeof(*out));
+    }
+    return ok;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Replaces every byte of str[0..len) outside 0x20..0x7E with a question mark.                   */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvSanitize(char *str, size_t len)
+{
+    size_t i;
+
+    SSF_REQUIRE(str != NULL);
+
+    for (i = 0; i < len; i++)
+    {
+        if (((uint8_t)str[i] < 0x20u) || ((uint8_t)str[i] > 0x7Eu)) str[i] = '?';
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the rejected fields are taken from rxBuf, else false.                         */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFAWSProvRejectedFields(const char *rxBuf, uint16_t *statusCodeOut,
+                                      char *errorCodeOut, size_t errorCodeSize,
+                                      char *errorMessageOut, size_t errorMessageSize)
+{
+    SSFGPath_t path[SSF_JSON_CONFIG_MAX_IN_DEPTH + 1];
+    SSFJsonType_t jt;
+    size_t index;
+    size_t start;
+    size_t end;
+    size_t len;
+    const char *d;
+
+    SSF_REQUIRE(rxBuf != NULL);
+    SSF_REQUIRE(statusCodeOut != NULL);
+    SSF_REQUIRE(errorCodeOut != NULL);
+    SSF_REQUIRE(errorCodeSize > 0u);
+    SSF_REQUIRE(errorMessageOut != NULL);
+    SSF_REQUIRE(errorMessageSize > 0u);
+
+    /* statusCode: exactly three digits, 100..599, no sign, fraction or exponent */
+    _SSFAWSProvPath(path, sizeof(path), "statusCode");
+    if (SSFJsonMessage(rxBuf, &index, &start, &end, path, 0, &jt) == false) return false;
+    if ((jt != SSF_JSON_TYPE_NUMBER) || (((end - start) + 1u) != SSF_AWSPROV_STATUS_LEN))
+    {
+        return false;
+    }
+    d = &rxBuf[start];
+    if ((d[0] < '1') || (d[0] > '5') || (d[1] < '0') || (d[1] > '9') || (d[2] < '0') ||
+        (d[2] > '9')) return false;
+
+    /* errorCode: a string that must fit */
+    _SSFAWSProvPath(path, sizeof(path), "errorCode");
+    if (SSFJsonGetString(rxBuf, path, errorCodeOut, errorCodeSize, &len) == false) return false;
+    _SSFAWSProvSanitize(errorCodeOut, len);
+
+    /* errorMessage: optional, as much as fits; a cut escape leaves zeros, sanitized below */
+    memset(errorMessageOut, 0, errorMessageSize);
+    _SSFAWSProvPath(path, sizeof(path), "errorMessage");
+    len = 0;
+    (void)SSFJsonGetString(rxBuf, path, errorMessageOut, errorMessageSize, &len);
+    SSF_ASSERT(len < errorMessageSize);
+    errorMessageOut[len] = 0;
+    _SSFAWSProvSanitize(errorMessageOut, len);
+    *statusCodeOut = (uint16_t)((((uint16_t)(d[0] - '0')) * 100u) +
+                                (((uint16_t)(d[1] - '0')) * 10u) + ((uint16_t)(d[2] - '0')));
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if a rejected response is parsed: statusCode, errorCode, errorMessage.           */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFAWSProvParseRejected(const uint8_t *payload, size_t payloadLen, char *rxBuf,
+                             size_t rxSize, uint16_t *statusCodeOut, char *errorCodeOut,
+                             size_t errorCodeSize, char *errorMessageOut,
+                             size_t errorMessageSize)
+{
+    bool ok;
+
+    SSF_REQUIRE(payload != NULL);
+    SSF_REQUIRE(rxBuf != NULL);
+    SSF_REQUIRE(rxSize > 0u);
+    SSF_REQUIRE(statusCodeOut != NULL);
+    SSF_REQUIRE(errorCodeOut != NULL);
+    SSF_REQUIRE(errorCodeSize > 0u);
+    SSF_REQUIRE(errorMessageOut != NULL);
+    SSF_REQUIRE(errorMessageSize > 0u);
+    SSF_REQUIRE(_SSFAWSProvIsDisjoint(payload, payloadLen, rxBuf, rxSize));
+    SSF_REQUIRE(_SSFAWSProvIsDisjoint(errorCodeOut, errorCodeSize, rxBuf, rxSize));
+    SSF_REQUIRE(_SSFAWSProvIsDisjoint(errorMessageOut, errorMessageSize, rxBuf, rxSize));
+    SSF_REQUIRE(_SSFAWSProvIsDisjoint(errorCodeOut, errorCodeSize, errorMessageOut,
+                                      errorMessageSize));
+    SSF_REQUIRE(_SSFAWSProvIsDisjoint(payload, payloadLen, errorCodeOut, errorCodeSize));
+    SSF_REQUIRE(_SSFAWSProvIsDisjoint(payload, payloadLen, errorMessageOut, errorMessageSize));
+    SSF_REQUIRE(_SSFAWSProvIsDisjoint(payload, payloadLen, statusCodeOut,
+                                      sizeof(*statusCodeOut)));
+    SSF_REQUIRE(_SSFAWSProvIsDisjoint(statusCodeOut, sizeof(*statusCodeOut), rxBuf, rxSize));
+
+    *statusCodeOut = 0;
+    errorCodeOut[0] = 0;
+    errorMessageOut[0] = 0;
+    ok = (_SSFAWSProvRxCopy(payload, payloadLen, rxBuf, rxSize) &&
+          _SSFAWSProvRejectedFields(rxBuf, statusCodeOut, errorCodeOut, errorCodeSize,
+                                    errorMessageOut, errorMessageSize));
+    memset(rxBuf, 0, rxSize);
+    /* Did any step fail? */
+    if (ok == false)
+    {
+        /* Yes, all outputs empty */
+        memset(errorCodeOut, 0, errorCodeSize);
+        memset(errorMessageOut, 0, errorMessageSize);
+    }
+    return ok;
+}
+
 #if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
 /* --------------------------------------------------------------------------------------------- */
 /* CreateCertificateFromCsr request: defines and data                                            */
@@ -144,7 +486,6 @@ bool SSFAWSProvTopicsInit(SSFAWSProvTopics_t *topicsOut, SSFCStrIn_t templateNam
 
 /* Stand-in public key and signature for measuring; only their lengths matter */
 static const uint8_t _ssfAWSProvMeasure[SSF_AWSPROV_MEASURE_SIZE] = { 0 };
-static const uint8_t _ssfAWSProvOidEC[] = { 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x02, 0x01 };
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
 static const uint8_t _ssfAWSProvOidP256[] = { 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07 };
 static const uint8_t _ssfAWSProvOidSHA256[] = { 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x04, 0x03, 0x02 };
@@ -189,14 +530,6 @@ static void _SSFAWSProvCsrParams(SSFECCurve_t curve, const SSFX509GenName_t *sub
 #endif /* SSF_EC_CONFIG_ENABLE_P384 */
     default: SSF_ERROR(); break;
     }
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* Returns true if [a, a + aLen) and [b, b + bLen) do not overlap.                               */
-/* --------------------------------------------------------------------------------------------- */
-static bool _SSFAWSProvIsDisjoint(const void *a, size_t aLen, const void *b, size_t bLen)
-{
-    return ((((uintptr_t)a + aLen) <= (uintptr_t)b) || ((uintptr_t)a >= ((uintptr_t)b + bLen)));
 }
 
 /* --------------------------------------------------------------------------------------------- */

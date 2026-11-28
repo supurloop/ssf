@@ -3766,6 +3766,52 @@ void SSFBNUnitTest(void)
 #endif
     }
 
+    /* ---- RSA-PERF R4: fused constant-time ModExp table select vs a direct copy ---- */
+    {
+#define _SSF_BN_UT_SEL_CAP (12u)
+#define _SSF_BN_UT_SEL_N ((uint32_t)1u << SSF_BN_MODEXP_WIN_K)
+        static SSFBNLimb_t tbl[_SSF_BN_UT_SEL_N * _SSF_BN_UT_SEL_CAP];
+        static SSFBNLimb_t ref[_SSF_BN_UT_SEL_N * _SSF_BN_UT_SEL_CAP];
+        static const uint16_t lens[] = { 1u, 2u, 3u, 5u, 8u, 11u, 12u };
+        SSFBNLimb_t dst[_SSF_BN_UT_SEL_CAP];
+        uint32_t seed = 0x9E3779B9u;
+        uint32_t w;
+        uint32_t j;
+        uint16_t li;
+
+        /* Distinct random entries, so selecting the wrong one cannot pass */
+        for (j = 0u; j < (_SSF_BN_UT_SEL_N * _SSF_BN_UT_SEL_CAP); j++)
+        {
+            seed = (seed * 1664525u) + 1013904223u;
+            tbl[j] = seed ^ j;
+            ref[j] = tbl[j];
+        }
+        for (li = 0u; li < (uint16_t)(sizeof(lens) / sizeof(lens[0])); li++)
+        {
+            for (w = 0u; w < _SSF_BN_UT_SEL_N; w++)
+            {
+                /* dst prefilled with garbage: limbs below len overwritten, the rest untouched */
+                for (j = 0u; j < _SSF_BN_UT_SEL_CAP; j++) dst[j] = 0xA5A5A5A5u ^ j;
+                _SSFBNModExpSelectReads = 0u;
+                _SSFBNModExpSelectTest(dst, tbl, (uint16_t)_SSF_BN_UT_SEL_CAP, lens[li], w);
+                for (j = 0u; j < lens[li]; j++)
+                {
+                    SSF_ASSERT(dst[j] == tbl[(w * _SSF_BN_UT_SEL_CAP) + j]);
+                }
+                for (j = lens[li]; j < _SSF_BN_UT_SEL_CAP; j++)
+                {
+                    SSF_ASSERT(dst[j] == (0xA5A5A5A5u ^ j));
+                }
+                /* Every entry read for every limb, whatever w is (the constant-time shape) */
+                SSF_ASSERT(_SSFBNModExpSelectReads == (_SSF_BN_UT_SEL_N * (uint32_t)lens[li]));
+            }
+        }
+        /* The table is read only */
+        for (j = 0u; j < (_SSF_BN_UT_SEL_N * _SSF_BN_UT_SEL_CAP); j++) SSF_ASSERT(tbl[j] == ref[j]);
+#undef _SSF_BN_UT_SEL_N
+#undef _SSF_BN_UT_SEL_CAP
+    }
+
     /* ---- RSA-PERF R2: the row kernel body this target builds (0 C, 1 ARM UMAAL) ---- */
     {
         /* Named per architecture, not by the library's selection macro, so a wrong selection */

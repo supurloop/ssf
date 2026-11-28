@@ -41,7 +41,8 @@
 #error "SSF_BN_MAX_LIMBS must fit in int16_t to keep uint16_t sums safe in Mul/Square"
 #endif
 
-/* SSF_BN_KARATSUBA_THRESHOLD and SSF_BN_MODEXP_WIN_K come from ssfbn_opt.h or ssfcrypt_opt.h */
+/* SSF_BN_KARATSUBA_THRESHOLD, SSF_BN_MODEXP_WIN_K and SSF_BN_CONFIG_ASM come from ssfbn_opt.h */
+/* or ssfcrypt_opt.h                                                                            */
 
 /* Karatsuba step 7 stays inside the 2n-limb result only for n >= 4 */
 #if (SSF_BN_KARATSUBA_THRESHOLD < 4)
@@ -911,12 +912,43 @@ SSFBNLimb_t SSFBNSubUint32(SSFBN_t *r, const SSFBN_t *a, uint32_t b)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* One row-kernel limb: r = low(a * b + x + c), c = high(...); exact since the sum <= 2^64 - 1.  */
+/* ARM UMAAL (ARMv7E-M, v8-M Mainline with DSP, AArch32 A/R v6+) does it in one instruction     */
+/* with fixed timing; every other target, and SSF_BN_CONFIG_ASM 0, uses the C expression in the */
+/* caller's prod (one shared temporary keeps the C code byte-identical to the pre-asm helper).   */
+/* --------------------------------------------------------------------------------------------- */
+#if (SSF_BN_CONFIG_ASM == 1) && defined(__GNUC__) && defined(__ARM_ARCH) && \
+    !defined(__aarch64__) && \
+    (defined(__ARM_FEATURE_DSP) || \
+     ((__ARM_ARCH >= 6) && (__ARM_ARCH_PROFILE != 'M') && \
+      (defined(__thumb2__) || !defined(__thumb__))))
+#define _SSF_BN_ROW_KERNEL_ID (1u)
+#define _SSF_BN_MAC(r, x, b, a, c) \
+    do { \
+        SSFBNLimb_t _lo = (x); \
+        __asm__("umaal %0, %1, %2, %3" : "+r"(_lo), "+r"(c) : "r"(a), "r"(b)); \
+        (r) = _lo; \
+    } while (0)
+#else
+#define _SSF_BN_ROW_KERNEL_ID (0u)
+#define _SSF_BN_MAC(r, x, b, a, c) \
+    do { \
+        prod = (((SSFBNDLimb_t)(a) * (SSFBNDLimb_t)(b)) + (SSFBNDLimb_t)(x)) + \
+               (SSFBNDLimb_t)(c); \
+        (r) = (SSFBNLimb_t)prod; \
+        (c) = (SSFBNLimb_t)(prod >> SSF_BN_LIMB_BITS); \
+    } while (0)
+#endif
+
+/* --------------------------------------------------------------------------------------------- */
 /* r[j] = low(a * b[j] + x[j] + carry) over n limbs; returns the carry out. r may be x or x - 1. */
 /* --------------------------------------------------------------------------------------------- */
 static SSFBNLimb_t _SSFBNMulAddRow(SSFBNLimb_t *r, const SSFBNLimb_t *x, const SSFBNLimb_t *b,
                                    SSFBNLimb_t a, uint32_t n, SSFBNLimb_t carry)
 {
+#if _SSF_BN_ROW_KERNEL_ID == 0
     SSFBNDLimb_t prod;
+#endif
 
     /* No argument checks by design: innermost hot loop, callers pass checked limb arrays. */
     /* See dbc_hot_audit.txt before adding any. a * b + x + carry <= 2^64 - 1, so it is exact. */
@@ -925,10 +957,7 @@ static SSFBNLimb_t _SSFBNMulAddRow(SSFBNLimb_t *r, const SSFBNLimb_t *x, const S
     if ((n & 1u) != 0u)
     {
         /* Yes, do the odd limb first so the loop below runs in pairs */
-        prod = (((SSFBNDLimb_t)a * (SSFBNDLimb_t)b[0]) + (SSFBNDLimb_t)x[0]) +
-               (SSFBNDLimb_t)carry;
-        r[0] = (SSFBNLimb_t)prod;
-        carry = (SSFBNLimb_t)(prod >> SSF_BN_LIMB_BITS);
+        _SSF_BN_MAC(r[0], x[0], b[0], a, carry);
         r++;
         x++;
         b++;
@@ -937,14 +966,8 @@ static SSFBNLimb_t _SSFBNMulAddRow(SSFBNLimb_t *r, const SSFBNLimb_t *x, const S
     /* Each x[j] is read before r[j] is written, so r == x - 1 shifts the result down safely */
     for (n >>= 1; n > 0u; n--)
     {
-        prod = (((SSFBNDLimb_t)a * (SSFBNDLimb_t)b[0]) + (SSFBNDLimb_t)x[0]) +
-               (SSFBNDLimb_t)carry;
-        r[0] = (SSFBNLimb_t)prod;
-        carry = (SSFBNLimb_t)(prod >> SSF_BN_LIMB_BITS);
-        prod = (((SSFBNDLimb_t)a * (SSFBNDLimb_t)b[1]) + (SSFBNDLimb_t)x[1]) +
-               (SSFBNDLimb_t)carry;
-        r[1] = (SSFBNLimb_t)prod;
-        carry = (SSFBNLimb_t)(prod >> SSF_BN_LIMB_BITS);
+        _SSF_BN_MAC(r[0], x[0], b[0], a, carry);
+        _SSF_BN_MAC(r[1], x[1], b[1], a, carry);
         r += 2;
         x += 2;
         b += 2;
@@ -953,6 +976,14 @@ static SSFBNLimb_t _SSFBNMulAddRow(SSFBNLimb_t *r, const SSFBNLimb_t *x, const S
 }
 
 #if SSF_CONFIG_BN_UNIT_TEST == 1
+/* --------------------------------------------------------------------------------------------- */
+/* Test-only: the _SSFBNMulAddRow body built (0 portable C, 1 ARM UMAAL).                        */
+/* --------------------------------------------------------------------------------------------- */
+uint32_t _SSFBNRowKernelId(void)
+{
+    return _SSF_BN_ROW_KERNEL_ID;
+}
+
 /* --------------------------------------------------------------------------------------------- */
 /* Test-only entry to _SSFBNMulAddRow.                                                           */
 /* --------------------------------------------------------------------------------------------- */

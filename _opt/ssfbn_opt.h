@@ -20,6 +20,11 @@ extern "C" {
 #define SSF_BN_MODEXP_WIN_K                  (4u)
 #endif
 
+/* 1: inline asm in the multiply row kernel where the target has it (ARM UMAAL); 0: portable C */
+#ifndef SSF_BN_CONFIG_ASM
+#define SSF_BN_CONFIG_ASM                    (1u)
+#endif
+
 #ifdef __cplusplus
 }
 #endif

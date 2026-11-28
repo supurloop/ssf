@@ -5,7 +5,7 @@ Scope      : run time of RSA sign / verify / keygen and the ssfbn code under the
              speedup costs in code size, RAM and security properties. Code at commit e9cd857
              (branch mqtt). Nothing here is applied to the tree; all numbers are from
              prototypes in a scratch copy.
-Status     : R5 DONE (f8b3342); R1 DONE (cfccdaa); R3(a) DONE (0b3114d); R3(c) P1-P4 (see the
+Status     : R5 DONE (f8b3342); R1 DONE (cfccdaa); R3(a) DONE (0b3114d); R3(c) P1-P4 and R2 (see the
              git log); others OPEN.
 
 SUMMARY
@@ -188,7 +188,7 @@ R1. Row kernel for the Montgomery inner loops (portable C)                     D
     9,680 -> 9,664; 26,288 -> 26,272); P-256 / P-384 keygen and sign -8 B; ECC verify,
     ECDH, X25519, Ed25519 unchanged.
 
-R2. UMAAL in the row kernel (ARMv7E-M: M4, M7, M33/M55 with DSP; ARMv6+ A/R)           OPEN
+R2. UMAAL in the row kernel (ARMv7E-M: M4, M7, M33/M55 with DSP; ARMv6+ A/R)           DONE
     Change: the R1 helper body becomes one "umaal lo, carry, a, b[j]" per limb (GCC/Clang
     inline asm, as SSF_OPTIMIZER_BARRIER already uses), guarded by __ARM_FEATURE_DSP or an
     A/R-profile __ARM_ARCH >= 6; every other target keeps R1's C.
@@ -197,6 +197,93 @@ R2. UMAAL in the row kernel (ARMv7E-M: M4, M7, M33/M55 with DSP; ARMv6+ A/R)    
     Trade-offs: the first inline asm in ssfbn. GCC/Clang only (IAR and Arm Compiler 5 fall
     back to C unless given their own syntax). Cortex-M3 (ARMv7-M, no DSP) has no UMAAL and
     uses the C path. UMAAL has fixed timing, so constant time is kept.
+
+    R2 IMPLEMENTATION PLAN (ARM UMAAL only; PIC32 MIPS / XC32 deferred)
+    Scope: one inline asm statement of one instruction, inside the body of _SSFBNMulAddRow
+    (R1's helper). Every caller, the odd-limb prologue, the pairing and the r == x - 1
+    contract stay. Loads, stores, the loop, pointer steps and register choice stay C.
+    Selection (GCC / Clang / armclang AC6), else R1's C:
+        defined(__GNUC__) && defined(__ARM_ARCH) && !defined(__aarch64__) &&
+        (defined(__ARM_FEATURE_DSP) ||
+         ((__ARM_ARCH >= 6) && (__ARM_ARCH_PROFILE != 'M') &&
+          (defined(__thumb2__) || !defined(__thumb__))))
+      M4 / M7 / M33 / M55 with DSP and A/R v6+ get UMAAL. M0 / M0+ / M23, M3 (no DSP) and
+      Thumb-1 v6 keep C. IAR and Arm Compiler 5 keep C.
+    Shape: _SSF_BN_MAC(r, x, b, a, c) macro, about 10-12 lines with the #if.
+      asm:  lo = x; umaal lo, c, a, b; r = lo   (a*b + x + c, exact: <= 2^64 - 1)
+      C:    R1's prod expression, unchanged
+      The helper's three prod blocks become three _SSF_BN_MAC calls. Prototype (M4 -Os):
+      helper 92 B, 3 umaal, 4 instructions per limb in the loop; M0+ / M3 build C.
+    Config: SSF_BN_CONFIG_ASM in _opt/ssfbn_opt.h, default 1; 0 forces R1's C (compilers that
+    mis-handle the asm, MISRA builds: Rule 1.2 extension, Dir 4.3 encapsulated by the
+    macro, cross-checking).
+    Constant time: UMAAL has fixed timing on M4 / M7 / M33 / A-profile. (M3's UMULL / UMLAL
+    terminate early. That is pre-existing, and M3 stays on C.)
+    Steps (TDD):
+      1. Red: test-only _SSFBNRowKernelId() (0 C, 1 UMAAL). ssfbn_ut.c asserts the id the
+         target should build (1 when the selection macro holds and SSF_BN_CONFIG_ASM is 1,
+         else 0), so a silent fallback to C fails. _SSFBNMulAddRowTest's tests (n = 0..9,
+         carry-in 0 / 1 / 0xFFFFFFFF, all-ones and random, r separate / r == x / r == x - 1,
+         untouched limbs outside r) are the arithmetic oracle; the gaps are filled here.
+         Host build fails: the id entry point does not exist.
+         The expected id is stated per architecture (__ARM_ARCH_7EM__, _7A__, _7R__, _8A__,
+         _8R__, v8-M Mainline with DSP), not with the library's selection macro, so the two
+         cross-check. Writing it found a plan bug: AArch64 has __ARM_ARCH 8 and profile 'A',
+         so the selection would have picked UMAAL, which A64 lacks. Hence !__aarch64__.
+         DONE: red, ut:3774 #error (SSF_BN_CONFIG_ASM undefined). The existing row oracle
+         already covers every listed case (n = 0..10), so nothing was added there.
+      2. Green: the macro, the config (#ifndef default 1 in _opt/ssfbn_opt.h, beside
+         SSF_BN_MODEXP_WIN_K) and the id. First show the ARM red: id stubbed to 0 fails
+         under qemu-arm. Then Host passes with id 0. Unit suite under
+         qemu-arm (armhf user mode, -march=armv7-a, Thumb-2: id 1). ARM -mcpu=cortex-m4 /
+         m0plus warning builds, 0 warnings; objdump shows umaal on M4, none on M0+.
+         DONE:
+           - ARM red: the C fallback forced on armv7-a under qemu fails ut:3782 (id 1).
+           - Green: host 64/64 (id 0). Full suite under qemu-arm, armv7-a Thumb-2 -O2, 64/64
+             (id 1; ssfbn.o has 9 umaal, the helper being inlined into its callers).
+           - -Os: 0 warnings for M4 / M7 / M33 (3 umaal, all in _SSFBNMulAddRow) and for
+             M0+ / M3 (no umaal). ssfbn.o: M4 19,656 -> 19,636 B, M0+ 23,394 -> 23,390 B.
+           - The qemu-arm runner is a throwaway image, localhost/ssf-cross-armhf
+             (ssf-cross + libssl-dev:armhf), linked dynamically.
+      3. Measure, before = HEAD, after = R2: qemu-arm instruction counts for RSA-2048 /
+         4096 sign and verify and P-256 sign / verify. ssfbn.o and client image size (M4,
+         M0+; LTO on / off). Painted peak stack. SSF_BN_CONFIG_ASM = 0 must match HEAD.
+         DONE. ARM instructions (qemu-arm, armv7-a Thumb-2 -Os, static), before = HEAD
+         (ead293f), after = R2. Same signatures (fnv) for every operation.
+           Operation               Before          After           Delta
+           RSA-2048 sign PKCS#1    64,904,695      50,263,203     -14,641,492   -22.56%
+           RSA-2048 sign PSS       64,951,187      50,309,695     -14,641,492   -22.54%
+           RSA-4096 sign PKCS#1   412,857,372     303,842,904    -109,014,468   -26.40%
+           RSA-4096 sign PSS      412,942,515     303,928,047    -109,014,468   -26.40%
+           RSA-2048 verify *        1,804,768       1,351,398        -453,370   -25.12%
+           RSA-4096 verify *        6,790,409       4,962,031      -1,828,378   -26.93%
+           P-256 ECDSA sign         3,901,189       3,893,487          -7,702    -0.20%
+           P-256 pubkey derive      3,690,782       3,688,843          -1,939    -0.05%
+           P-256 ECDSA verify *    15,642,597      15,636,911          -5,686    -0.04%
+           * difference of runs (sign + verify minus sign; for P-256 also minus the pubkey
+             derivation), so the absolute values carry process start-up; the deltas do not.
+           Against the earlier prototype figures (-31.9% sign / -38.8% verify against the
+           pre-R1 base), the expected step from R1 is about -20% / -27%. Measured: -22.6% /
+           -25.1%.
+           ECC gains almost nothing: the P-256 field arithmetic runs its own curve-width
+           code, not the row kernel (the R0u estimate of -5.3% P-256 sign predates that).
+         Code, client image (text + data), before -> after:
+           M4  -Os          103,791 -> 103,759   (-32)    ssfbn.o 16,678 -> 16,652 (-26)
+           M4  -Os LTO       83,012 ->  82,980   (-32)
+           M0+ -Os          113,299 -> 113,299   (0)      ssfbn.o 20,240 -> 20,240 (0)
+           M0+ -Os LTO       88,480 ->  88,480   (0)
+         RAM: static none. Painted peak stack identical (RSA-2048 / 4096 PKCS#1 20,200 B,
+         PSS 21,008 B, P-256 sign + verify 4,968 B; +8 B on earlier figures from the driver's
+         new P-256 code, same in both trees).
+         SSF_BN_CONFIG_ASM = 0 (and every C target): _SSFBNMulAddRow is identical to HEAD,
+         instruction for instruction (M0+, M3, M4 -Os). A first version, with a local
+         temporary per macro use, cost M0+ 2 instructions per limb pair (57 -> 59). The C
+         macro now uses the helper's one shared prod.
+      4. Docs: ssfbn.md row-kernel text, SSF_BN_CONFIG_ASM, the target matrix. Results here.
+         DONE: ssfbn.md configuration table (SSF_BN_CONFIG_ASM: targets, fallback, results,
+         MISRA), the MontMul row-kernel text and the DBC exception note (the only inline
+         asm in ssfbn).
+      5. Only if asked: full suites, commit.
 
 R3. Faster blinding inverse r^-1 mod n                  (a) DONE (0b3114d); (c) DONE (P1-P4); (b) DROPPED
     Today _SSFBNModInvBinary runs every step at the full width of n, and halving x needs a

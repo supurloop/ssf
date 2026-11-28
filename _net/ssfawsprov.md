@@ -139,8 +139,8 @@ which is zeroed after every parse.
 - **RegisterThing accepted:** `thingName` 1..128 of `[a-zA-Z0-9:_-]` (it becomes the operational
   MQTT client id; checked on the raw text, so an escape is refused); `deviceConfiguration` an
   object (or absent, given as `{}`) copied whole. The whole response may nest at most
-  `SSF_JSON_CONFIG_MAX_IN_DEPTH` levels (4 by default, the response object included), so a
-  template's device configuration can hold objects or arrays two levels deep; deeper makes the
+  `SSF_JSON_CONFIG_MAX_IN_DEPTH` levels (10 by default, the response object included), so a
+  template's device configuration can hold objects or arrays eight levels deep; deeper makes the
   response unparseable (the run ends with BAD_RESPONSE).
 - **Rejected:** `statusCode` exactly three digits 100..599; `errorCode` required and under 64
   characters, `errorMessage` optional and cut to fit; both reduced to printable ASCII. A reject that

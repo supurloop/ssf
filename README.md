@@ -163,7 +163,7 @@ Encoding and decoding interfaces for common data formats, all with strict buffer
 | [Base64](_codec/ssfbase64.md) | Base64 encoder/decoder | ~700 B | — | ~64 B | — | Yes |
 | [Base64URL](_codec/ssfbase64url.md) | RFC 4648 §5 URL-safe Base64 encoder/decoder (unpadded output, strict decode; JWT convention) | ~300 B | — | ~1.1 KB⁵⁶ | — | Yes |
 | [Hex ASCII](_codec/ssfhex.md) | Binary-to-hex ASCII encoder/decoder | ~600 B | — | ~64 B | — | Yes |
-| [JSON](_codec/ssfjson.md) | JSON parser/generator with path-based field access and in-place update | ~7 KB | — | ~250 B⁹ | — | Yes |
+| [JSON](_codec/ssfjson.md) | JSON parser/generator with path-based field access and in-place update | ~7 KB | — | ~650 B⁹ | — | Yes |
 | [TLV](_codec/ssftlv.md) | Type-Length-Value encoder/decoder | ~1.2 KB | — | ~96 B | — | Yes |
 | [INI](_codec/ssfini.md) | INI file parser/generator | ~3.5 KB | — | ~64 B | — | Yes |
 | [UBJSON](_codec/ssfubjson.md) | Universal Binary JSON parser/generator | ~9 KB | — | ~270 B¹⁰ | — | Yes |
@@ -173,7 +173,7 @@ Encoding and decoding interfaces for common data formats, all with strict buffer
 | [Pattern Matching](_codec/ssfmatch.md) | Case-insensitive compare, `*`/`?` glob, URI path templates with `{param}` extraction | ~600 B | — | ~100 B⁵⁷ | — | Yes |
 | [Generic Object](_codec/ssfgobj.md) | BETA: Hierarchical generic object parser/generator for cross-codec in-memory representation | ~3 KB | ~8 B | ~160 B¹¹ | yes¹⁵ | Yes¹⁷ |
 
-⁹ Recursive parser; stack scales with `SSF_JSON_CONFIG_MAX_IN_DEPTH` (default 4). Estimate uses the default depth; each additional nesting level adds ~64 B.
+⁹ Recursive parser; stack scales with `SSF_JSON_CONFIG_MAX_IN_DEPTH` (default 10). Estimate uses the default depth; each additional nesting level adds ~64 B.
 
 ¹⁰ Recursive parser; stack scales with `SSF_UBJSON_CONFIG_MAX_IN_DEPTH` (default 4). Estimate uses the default depth; each additional nesting level adds ~68 B.
 

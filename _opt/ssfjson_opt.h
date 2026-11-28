@@ -12,7 +12,7 @@ extern "C" {
 
 /* Define the maximum parse depth, each opening { or [ starts a new depth level; 1..254. */
 #ifndef SSF_JSON_CONFIG_MAX_IN_DEPTH
-#define SSF_JSON_CONFIG_MAX_IN_DEPTH (4u)
+#define SSF_JSON_CONFIG_MAX_IN_DEPTH (10u)
 #endif
 #if (SSF_JSON_CONFIG_MAX_IN_DEPTH < 1u) || (SSF_JSON_CONFIG_MAX_IN_DEPTH > 254u)
 #error SSF_JSON_CONFIG_MAX_IN_DEPTH must be 1..254.

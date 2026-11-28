@@ -58,7 +58,7 @@ Options live in [`_opt/ssfjson_opt.h`](../_opt/ssfjson_opt.h) (aggregated into t
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `SSF_JSON_CONFIG_MAX_IN_DEPTH` | `4` | Maximum nesting depth for the parser, `1` to `254`; each `{` or `[` counts as one level, anywhere in the input; deeper input is invalid. Overridable (see below). |
+| `SSF_JSON_CONFIG_MAX_IN_DEPTH` | `10` | Maximum nesting depth for the parser, `1` to `254`; each `{` or `[` counts as one level, anywhere in the input; deeper input is invalid. Overridable (see below). |
 | `SSF_JSON_CONFIG_MAX_IN_LEN` | `4095` | Maximum JSON string length accepted by the parser in bytes, `1` to `SIZE_MAX / 2` and at most `2^31 - 1` (so at most `32767` where `size_t` is 16 bits). Input one byte longer is invalid. Overridable (see below). |
 | `SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE` | `0` | `1` to compile `SSFJsonGetDouble()`; `0` to omit floating-point parsing |
 | `SSF_JSON_CONFIG_ENABLE_FLOAT_GEN` | `1` | `1` to compile `SSFJsonPrintDouble()`; `0` to omit floating-point generation |
@@ -80,7 +80,7 @@ editing the options file, e.g. `-DSSF_JSON_CONFIG_MAX_IN_LEN=65534`, or a `#defi
   `SSF_JSON_CONFIG_MAX_IN_LEN` of at least `SSF_AWSPROV_CONFIG_RX_SIZE - 1` (`4095` by
   default) and stops the build with `#error` otherwise.
 - The unit tests run with the defaults, with the length set to `2047` and `65534`, and with
-  the depth set to `8` ([`tools/config-matrix/features.sh`](../tools/config-matrix/features.sh));
+  the depth set to `4` ([`tools/config-matrix/features.sh`](../tools/config-matrix/features.sh));
   they assume a length of at least `1024` and a depth of at least `4`.
 
 <a id="api-summary"></a>
@@ -883,9 +883,9 @@ the stored string value.
 Depth: the conversion counts every value, leaves included, while `SSFJsonIsValid()` counts
 container levels. A value can be nested inside at most `SSF_JSON_CONFIG_MAX_IN_DEPTH - 1`
 objects or arrays, and the gobj tree applies the same rule with
-[`SSF_GOBJ_CONFIG_MAX_IN_DEPTH`](ssfgobj.md#opt-gobj-max-depth). With both at their default of
-4, `{"a":{"b":{"c":1}}}` converts but `{"a":{"b":{"c":{"d":1}}}}` does not, although it is valid
-JSON. To convert documents that use the full JSON depth, set both options one higher than the
+[`SSF_GOBJ_CONFIG_MAX_IN_DEPTH`](ssfgobj.md#opt-gobj-max-depth). The smaller of the two
+applies: with their defaults (`10` and `4`) the gobj limit does, so `{"a":{"b":{"c":1}}}`
+converts but `{"a":{"b":{"c":{"d":1}}}}` does not, although it is valid JSON. To convert documents that use the full JSON depth, set both options one higher than the
 deepest nesting you need to convert (this also raises the depth `SSFJsonIsValid()` accepts).
 
 | Parameter | Direction | Type | Description |

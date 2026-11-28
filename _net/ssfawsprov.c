@@ -1723,8 +1723,8 @@ void SSFAWSProvEvent(void *ctx, SSFMQTTCEvent_t event, SSFMQTTCReason_t reason)
     default:
         break;
     }
-    /* Posted also after a stop: IDLE and the stopped guards ignore it */
-    if (eid != SSF_SM_EVENT_MAX) SSFSMPutEvent(SSF_SM_AWSPROV, eid);
+    /* Only during a run: after it nothing may stay queued, so the app can DeInit at once */
+    if (_awsprov.isStarted && (eid != SSF_SM_EVENT_MAX)) SSFSMPutEvent(SSF_SM_AWSPROV, eid);
     if (_awsprov.appEventFn != NULL) _awsprov.appEventFn(_awsprov.appEventCtx, event, reason);
 }
 

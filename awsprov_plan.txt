@@ -24,7 +24,8 @@ Status     : G01 done (commit 9041eba, 2026-11-26). G02 done (commit d510ab3, 20
              M02 done (commit 43537e7, 2026-11-27). M03 done (commit 178f16f, 2026-11-27).
              M04 done (commit e1a6af3, 2026-11-27). M05 done (commit a6483eb, 2026-11-27).
              M06 done (commit 8cf1ffb, 2026-11-27). M07 done (commit e5c9c24, 2026-11-27).
-             M08 done (2026-11-27).
+             M08 done (commit 657b056, 2026-11-27).
+             M09 done (2026-11-27).
              Everything else is plan only.
 
 Layout
@@ -1895,14 +1896,128 @@ AWSPROV-M08  Handing the credentials to the operational connection
       test guards them). features.sh all rows pass.
 
 AWSPROV-M09  Documentation: _net/ssfawsprov.md
-  Content: Flow diagram; API; sizing (rxBlockSize >= ~3 KB, txBlockSize >= ~1.5 KB, JSON limit,
-           CLIENT_ID_SIZE 129); AWS setup: provisioning template, the corrected claim policy
-           with $aws/certificates/create-from-csr/* (1.5), the iot:Data-ATS TLS policy check and
-           update command (1.1), trust Amazon Root CA 1 and 3, port 8883 or 443 with ALPN
-           "x-amzn-mqtt-ca"; trusted-user 5-minute window; JITP note (1.6); what is not
-           supported (section 5).
-  Test   : Every code snippet compiles (copy into a scratch test, as other .md files do).
-  Done   : Reviewed against the final API.
+  Found in the code and the plan (2026-11-27)
+    - The stub's sizing is out of date. An inbound response PUBLISH must fit rxBlockSize whole
+      (payload up to RX_SIZE - 1, a topic of up to 88 bytes, fixed header); an outbound
+      request must fit txBlockSize (payload up to REG_REQ_SIZE - 1 or CSR_REQ_SIZE - 1, topic
+      up to 79, packet id, header). At defaults that is about 4.2 KB rx and 2.7 KB tx, not
+      3 KB / 1.5 KB. TX_REFUSED is what an undersized txBlockSize produces.
+    - "Compiles, as other .md files do": no SSF .md has a snippet check (no tool, nothing in
+      the history), so M09 needs its own.
+    - Notes earlier milestones left for M09:
+        1.1  an older account's iot:Data-ATS may still use a TLS12_* policy: show the
+             describe/update-domain-configuration commands (ssftlsc is TLS 1.3 only);
+        1.5  the corrected claim policy (create-from-csr/*, which the AWS example misses);
+        1.6  JITP needs no module: SSFTLSCSetClientCert with a one- or two-certificate chain;
+        M02  SSFAWSProvTopics_t is not copyable and must outlive the MQTT connection;
+        M03  build the CSR once (M07 does) and recommend SSF_ECDSA_CONFIG_VERIFY_AFTER_SIGN 1
+             for field devices (fault attacks on deterministic signatures);
+        M07  the token stays in ssfmqttc pool blocks until SSFMQTTCDeInit; SSFTLSCDeInit
+             wipes the claim session; app-thread only; doneFn must not Start/Stop;
+        M08  the blob is a secret; clear the session's client certificate before a Wipe or
+             reuse; certificateId is not checked against the certificate;
+        G14  ssfmqttc (so ssfawsprov) fails with SSF_CONFIG_ENABLE_THREAD_SUPPORT 0 today;
+        V01-V03 not run: nothing here has met a live AWS account yet (token size, which
+             key-exchange group, the policy).
+    - Section 5 lists what is not supported (CreateKeysAndCertificate, CBOR, RSA device
+      keys, rotation, MQTT 5).
+
+  Decisions (need approval)
+    D1 Checking the code in the doc.
+       A (recommended) tools/doccheck/run.sh (new, small): extracts every ```c block of the
+         given .md files into its own .c in build-cov/doccheck/, compiles each with the
+         build-linux.ninja warning flags plus -Werror (compile only, no link), exit 1 on any
+         failure. Blocks that are fragments are marked <!-- doccheck: skip --> on the line
+         before, each with a reason. Run for ssfawsprov.md in M09; other .md files can opt in
+         later.
+       B scratch only: the same check once, not committed; recorded in the Result.
+    D2 Sizing.
+       A (recommended) two header macros, SSF_AWSPROV_MIN_RX_BLOCK_SIZE and
+         SSF_AWSPROV_MIN_TX_BLOCK_SIZE, computed from the options, which the doc and the
+         app use. The unit test checks them against the largest real packets (encoded with
+         ssfmqttpkt) and that one byte less fails. A small code change in a docs task.
+       B numbers in the doc only.
+    D3 Status wording. The doc and the _net/README.md row say plainly "not yet validated
+       against a live AWS account (V01-V03 open)" and name G14 as a known limitation.
+       A (recommended) yes, at the top of the doc and in the README row.
+       B only in Known Limitations.
+
+  Change, as D1-D3 A
+    - _net/ssfawsprov.md, laid out like ssfmqttc.md:
+        title, links, status line (D3), one-paragraph summary;
+        Dependencies (ssfmqttc, ssftlsc, ssfsm with SSF_SM_AWSPROV and its events, ssfjson,
+          ssfx509, ssfpem, ssfpkey, ssfecdsa, ssfcrc32, the opt headers);
+        Design: the flow (ASCII diagram: claim connection, four subscriptions, CSR,
+          certificate, RegisterThing, operational connection), the states, retries and
+          backoff, why every run ends, what each parser checks;
+        AWS setup: provisioning template, the claim policy (JSON, with the create-from-csr
+          correction), the endpoint TLS policy check and update, trust Amazon Root CA 1 and
+          3 (get them from AWS; not reproduced), port 8883 or 443 with ALPN
+          "x-amzn-mqtt-ca", trusted-user claims (deadline <= 5 min), JITP;
+        Application flow: one complete example (first boot: key, claim session, Init, Start,
+          done callback keeps and stores the credentials, teardown, operational session and
+          connection; every later boot: read, Decode, ApplyTLS, connect);
+        Buffers and memory: the work set, the credentials, txBlockSize/rxBlockSize (D2),
+          JSON limit, CLIENT_ID_SIZE 129, ssfsm timers;
+        Security: the secrets and where each copy lives and is wiped; VERIFY_AFTER_SIGN; the
+          blob; what isn't checked (CA signature, certificateId);
+        Configuration: every SSF_AWSPROV_CONFIG_* option, SSFAWSProvOpts_t fields, the
+          default macros;
+        API summary and function reference: every public function (layer 1 and 2,
+          credentials), with REQUIREs and failure behavior from the code;
+        Known limitations and not supported: G14, V01-V03, section 5.
+    - _net/README.md: the row links ssfawsprov.md; status per D3.
+    - D2 macros in ssfawsprov.h, with their unit test.
+    - tools/doccheck/run.sh (D1), and a line about it in tools/ (README if there is one).
+  Test
+    - tools/doccheck/run.sh _net/ssfawsprov.md: every block compiles with -Werror; each
+      skip has a reason.
+    - The D2 unit test (largest CSR, RegisterThing and CSR-accepted packets: fit at the
+      macro, refused one byte below).
+    - Every function, option, macro, reason and field named in the doc exists in the code
+      (a grep check of the doc against the headers, kept in the Result).
+    - Independent review (fresh agent): the doc against the code and the plan's AWS facts,
+      for anything wrong, missing or overstated.
+  Approved: D1-D3 option A, as planned, 2026-11-27.
+  Done
+    - ./ssf passes. doccheck clean. One commit.
+
+  Result (2026-11-27)
+    - _net/ssfawsprov.md: status, dependencies, design (flow, states, reasons, what the
+      parsers check), AWS setup (template, corrected claim policy, endpoint TLS policy with
+      the CLI commands, roots, port and ALPN, trusted-user, JITP), a complete application
+      example (first boot and every boot after), buffers and memory, security,
+      configuration, API summary, function reference, known limitations (V01-V03, G14,
+      section 5).
+    - D1: tools/doccheck/run.sh. It takes its flags and include paths from build-linux.ninja,
+      adds -Werror, compiles each ```c block (skip / body / include markers). Self-tested: a
+      good block, a body-wrapped block, a skip, an include; an error and a warning each exit
+      1; usage exits 2; a prototype changed in a copy of the doc fails at the right line.
+      ssfawsprov.md: 14 blocks compile (the example and every prototype), none skipped.
+    - D2: SSF_AWSPROV_MIN_RX_BLOCK_SIZE (4190 at defaults) and SSF_AWSPROV_MIN_TX_BLOCK_SIZE
+      (2645) in ssfawsprov.h. TDD: the test failed to compile, then passed. It checks both
+      against SSFMQTTPktPublishLen for the largest response and request, and end to end that
+      ssfmqttc delivers the largest response at the macro and drops it one byte below. The
+      M07 tests' 4096 rx block was below the macro (they send about 2 KB).
+    - D3: the doc's status line and the _net/README.md row (now linked).
+    - Name check: every SSF* name in the doc exists in the code.
+    - Independent review (fresh agent, the doc against the code and section 1):
+        code, fixed: SSFAWSProvEvent posted to the state machine also after a run, so an
+          event could still be queued at DeInit and then reach a removed machine (asserts).
+          That guard had been dropped as an equivalent mutant in M07; it is back, with a test
+          (event after a run, DeInit, SSFSMTask; red without the guard).
+        example, fixed: the clock was never set (SSFRTCSet; a 1970 clock fails every
+          handshake); an early return left the key and the sessions behind (a teardown
+          helper now runs on every path); credentials not stored are wiped; a new key per
+          run, so a CSR is never signed twice.
+        text, fixed: what counts as a try; TxPublish refusal; a reject that fails parsing is
+          retried and can end as BAD_RESPONSE; what Start asserts on and what ends in BUILD;
+          which builders zero what; parameters are ASCII (control bytes escaped); the CSR
+          accepted parse needs payload + PEM in RX_SIZE (so shrink it for that sum); retries
+          and a late BUILD leave extra certificates; trusted-user wording per section 1 and
+          deadline from Start; the GovCloud default policy; the older-endpoint policy tied
+          to V01; the ssfsm event pool.
+    - ./ssf 64/64 and ASan 64/64, 0 warnings. features.sh all rows pass on the final code.
 
 AWSPROV-M10  Fuzz targets
   Change : tools/fuzz/fuzz_awsprov_parse.c over SSFAWSProvParseCsrAccepted, ParseRejected and

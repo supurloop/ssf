@@ -74,6 +74,28 @@ extern "C" {
 #define SSF_AWSPROV_SUB_PROV_REJECTED (3u)
 #define SSF_AWSPROV_SUB_COUNT         (4u)
 
+/* Longest request topic: $aws/provisioning-templates/<36>/provision/json (9 shorter than the */
+/* longest response topic, .../rejected) */
+#define SSF_AWSPROV_MAX_REQ_TOPIC_LEN (SSF_AWSPROV_MAX_TOPIC_SIZE - 1u - 9u)
+
+/* Length of a QoS 1 PUBLISH of a topic of t and a payload of p bytes, as ssfmqttc counts it */
+#define SSF_AWSPROV_PUB_REM(t, p) (2u + (t) + 2u + (p))
+#define SSF_AWSPROV_PUB_LEN(t, p) (1u + SSF_AWSPROV_PUB_REM(t, p) + \
+    ((SSF_AWSPROV_PUB_REM(t, p) < 128u) ? 1u : ((SSF_AWSPROV_PUB_REM(t, p) < 16384u) ? 2u : \
+     ((SSF_AWSPROV_PUB_REM(t, p) < 2097152ul) ? 3u : 4u))))
+
+/* Smallest SSFMQTTCInit rxBlockSize that takes any response the parsers accept, and the */
+/* smallest txBlockSize that takes any request the builders make (any template name) */
+#define SSF_AWSPROV_MIN_RX_BLOCK_SIZE \
+    SSF_AWSPROV_PUB_LEN(SSF_AWSPROV_MAX_TOPIC_SIZE - 1u, SSF_AWSPROV_CONFIG_RX_SIZE - 1u)
+#define SSF_AWSPROV_MIN_TX_CSR \
+    SSF_AWSPROV_PUB_LEN(sizeof(SSF_AWSPROV_TOPIC_CSR) - 1u, SSF_AWSPROV_CONFIG_CSR_REQ_SIZE - 1u)
+#define SSF_AWSPROV_MIN_TX_REG \
+    SSF_AWSPROV_PUB_LEN(SSF_AWSPROV_MAX_REQ_TOPIC_LEN, SSF_AWSPROV_CONFIG_REG_REQ_SIZE - 1u)
+#define SSF_AWSPROV_MIN_TX_BLOCK_SIZE \
+    ((SSF_AWSPROV_MIN_TX_CSR > SSF_AWSPROV_MIN_TX_REG) ? SSF_AWSPROV_MIN_TX_CSR : \
+     SSF_AWSPROV_MIN_TX_REG)
+
 /* certificateId size with NUL: 64 lowercase hex characters */
 #define SSF_AWSPROV_CERT_ID_SIZE (65u)
 

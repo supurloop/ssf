@@ -2251,6 +2251,8 @@ static void _SSFAWSProvUTPumpFor(SSFPortTick_t ticks)
 /* --------------------------------------------------------------------------------------------- */
 /* Fresh ssfsm, broker, ssfmqttc (txBlockSize given) and provisioning; default options.           */
 /* --------------------------------------------------------------------------------------------- */
+static uint32_t _utRxBlock = SSF_AWSPROV_UT_RX_BLOCK;
+
 static void _SSFAWSProvUTSmBegin(uint32_t txBlockSize)
 {
     SSFSMInit(SSF_SM_MAX_ACTIVE_EVENTS, SSF_SM_MAX_ACTIVE_TIMERS);
@@ -2267,7 +2269,7 @@ static void _SSFAWSProvUTSmBegin(uint32_t txBlockSize)
     memset(_utAppEvents, 0, sizeof(_utAppEvents));
     memset(&_utWork, 0x5A, sizeof(_utWork));
 
-    SSFMQTTCInit(&_utBk.transport, 4u, txBlockSize, SSF_AWSPROV_UT_RX_BLOCK, SSFAWSProvRxPublish,
+    SSFMQTTCInit(&_utBk.transport, 4u, txBlockSize, _utRxBlock, SSFAWSProvRxPublish,
                  NULL, SSFAWSProvEvent, NULL);
     SSFAWSProvInit();
 
@@ -2913,6 +2915,17 @@ static void _SSFAWSProvUTSmLate(void)
     _utOpts.maxAttempts = 2u;
     _SSFAWSProvUTRun(SSF_AWSPROV_REASON_ATTEMPTS);
     SSF_ASSERT(_utBk.csrCount == 2u);
+    _SSFAWSProvUTSmEnd();
+
+    /* After a run, an ssfmqttc event queues nothing: DeInit right away, then SSFSMTask */
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    _SSFAWSProvUTRun(SSF_AWSPROV_REASON_NONE);
+    SSFAWSProvEvent(NULL, SSF_MQTTC_EVENT_DISCONNECTED, SSF_MQTTC_REASON_PEER_CLOSED);
+    SSFAWSProvEvent(NULL, SSF_MQTTC_EVENT_CONNECT_FAILED, SSF_MQTTC_REASON_PEER_CLOSED);
+    SSFAWSProvEvent(NULL, SSF_MQTTC_EVENT_READY, SSF_MQTTC_REASON_NONE);
+    SSFAWSProvDeInit();
+    (void)SSFSMTask(NULL);
+    SSFAWSProvInit();
     _SSFAWSProvUTSmEnd();
 
     /* No Start or Stop from inside the done callback */
@@ -3600,6 +3613,61 @@ static void _SSFAWSProvUTCred(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Block sizing macros: equal to ssfmqttc's packet length for the largest request and response, */
+/* and a largest response is delivered at SSF_AWSPROV_MIN_RX_BLOCK_SIZE, dropped one below.      */
+/* --------------------------------------------------------------------------------------------- */
+#define SSF_AWSPROV_UT_NAME36 "abcdefghijklmnopqrstuvwxyz0123456789"
+
+static void _SSFAWSProvUTBlockSizes(void)
+{
+    static uint8_t pkt[SSF_AWSPROV_MIN_RX_BLOCK_SIZE + 8u];
+    static char payload[SSF_AWSPROV_CONFIG_RX_SIZE];
+    static const char provRej[] = SSF_AWSPROV_UT_PT_PREFIX SSF_AWSPROV_UT_NAME36
+                                  SSF_AWSPROV_UT_PT_REJECTED;
+    static const char provReq[] = SSF_AWSPROV_UT_PT_PREFIX SSF_AWSPROV_UT_NAME36
+                                  SSF_AWSPROV_UT_PT_REQ;
+    size_t csrLen;
+    size_t regLen;
+    size_t len;
+    uint32_t i;
+
+    SSF_ASSERT(SSF_AWSPROV_UT_LIT_LEN(provRej) == (SSF_AWSPROV_MAX_TOPIC_SIZE - 1u));
+    SSF_ASSERT(SSF_AWSPROV_MIN_RX_BLOCK_SIZE ==
+               SSFMQTTPktPublishLen(SSF_AWSPROV_UT_LIT_LEN(provRej),
+                                    SSF_AWSPROV_CONFIG_RX_SIZE - 1u, SSF_MQTTC_QOS_1));
+    csrLen = SSFMQTTPktPublishLen(SSF_AWSPROV_UT_LIT_LEN(SSF_AWSPROV_UT_CSR_REQ),
+                                  SSF_AWSPROV_CONFIG_CSR_REQ_SIZE - 1u, SSF_MQTTC_QOS_1);
+    regLen = SSFMQTTPktPublishLen(SSF_AWSPROV_UT_LIT_LEN(provReq),
+                                  SSF_AWSPROV_CONFIG_REG_REQ_SIZE - 1u, SSF_MQTTC_QOS_1);
+    SSF_ASSERT(SSF_AWSPROV_MIN_TX_BLOCK_SIZE == ((csrLen > regLen) ? csrLen : regLen));
+
+    /* End to end: the largest response at QoS 1 on the longest topic */
+    memset(payload, 'x', sizeof(payload) - 1u);
+    SSFMQTTPktEncodePublish(pkt, sizeof(pkt), &len, provRej, sizeof(provRej),
+                            (const uint8_t *)payload, sizeof(payload) - 1u, SSF_MQTTC_QOS_1,
+                            false, 7u);
+    SSF_ASSERT(len == SSF_AWSPROV_MIN_RX_BLOCK_SIZE);
+    for (i = 0; i < 2u; i++)
+    {
+        _utRxBlock = (uint32_t)SSF_AWSPROV_MIN_RX_BLOCK_SIZE - i;
+        _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+        _utOpts.templateName = SSF_AWSPROV_UT_NAME36;
+        _utOpts.responseTimeout = SSF_AWSPROV_UT_LONG;
+        _utBk.csrScript[0] = SSF_AWSPROV_UT_R_NONE;
+        SSFAWSProvStart(&_utWork, &_utOpts, _SSFAWSProvUTDoneFn, &_utDone, _SSFAWSProvUTAppEvent,
+                        _utAppEvents);
+        while (_utBk.csrCount < 1u) _SSFAWSProvUTPump();
+        _SSFAWSProvUTBkInject(pkt, len);
+        _SSFAWSProvUTPump();
+        SSF_ASSERT(_utAppEvents[SSF_MQTTC_EVENT_RX_PUBLISH_DROPPED] == i);
+        SSFAWSProvStop();
+        _SSFAWSProvUTPumpUntilStopped();
+        _SSFAWSProvUTSmEnd();
+    }
+    _utRxBlock = SSF_AWSPROV_UT_RX_BLOCK;
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Checks the provisioning state machine.                                                        */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFAWSProvUTStateMachine(void)
@@ -3615,6 +3683,7 @@ static void _SSFAWSProvUTStateMachine(void)
                                               &_utRegExpectLen));
 
     _SSFAWSProvUTSmHappy();
+    _SSFAWSProvUTBlockSizes();
     _SSFAWSProvUTSmSteps();
     _SSFAWSProvUTSmBackoff();
     _SSFAWSProvUTSmBackoffMath();

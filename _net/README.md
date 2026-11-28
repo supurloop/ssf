@@ -6,7 +6,7 @@ Network protocol clients and the byte stream transport interface they run on.
 
 | Module | Description | Source Files | Documentation |
 |--------|-------------|--------------|---------------|
-| ssfawsprov | AWS IoT Core Fleet Provisioning over MQTT (CreateCertificateFromCsr, RegisterThing); in development | ssfawsprov.c, ssfawsprov.h | — |
+| ssfawsprov | AWS IoT Core Fleet Provisioning over MQTT (CreateCertificateFromCsr, RegisterThing); not yet validated against a live AWS account; needs thread support 1 until ssfmqttc is fixed (G14) | ssfawsprov.c, ssfawsprov.h | [ssfawsprov.md](ssfawsprov.md) |
 | ssfhttphdr | HTTP/1.1 request head builder and strict response head parser (RFC 9112); shared by HTTP users | ssfhttphdr.c, ssfhttphdr.h | [ssfhttphdr.md](ssfhttphdr.md) |
 | ssfmqttc | MQTT 3.1.1 client, QoS 0 and 1, single connection | ssfmqttc.c, ssfmqttc.h | [ssfmqttc.md](ssfmqttc.md) |
 | ssfmqttpkt | MQTT 3.1.1 control packet framing, encoding and decoding | ssfmqttpkt.c, ssfmqttpkt.h | — |

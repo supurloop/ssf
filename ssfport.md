@@ -55,6 +55,13 @@ None — `ssfport` is the foundation layer on which all other SSF modules depend
   not reordered or elided. `volatile` alone is not sufficient on MSVC. The GCC/Clang form is an
   empty inline asm with `"r"(p)` and a `"memory"` clobber; the MSVC form pairs `_ReadWriteBarrier`
   with a volatile read of the first byte.
+- `SSF_CT_VALUE_BARRIER(x)` hides an integer value (at most register width) from the optimizer,
+  so it cannot prove that a constant-time mask is 0 or all ones and turn a masked select into a
+  branch. GCC and clang do exactly that on cores without a conditional move (Cortex-M0 / M0+ /
+  M23: ARMv6-M and ARMv8-M Baseline have no IT instruction). The GCC/Clang form is an empty
+  inline asm with `"+r"(x)` and emits no instruction; other compilers get a volatile round trip.
+  The crypto modules use it in every masked select, and in the `SSFCryptCT*` predicates of
+  [ssfcrypt](_crypto/ssfcrypt.md#notes).
 - `SSFPortGetEntropy()` is backed by the OS CSPRNG (BCryptGenRandom on Windows, `/dev/urandom`
   on POSIX).
 - All `SSF_CONFIG_*_UNIT_TEST` enables can be set to `0` in a production build to exclude unit

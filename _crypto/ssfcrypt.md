@@ -37,6 +37,13 @@ compiler when the target buffer is never read again.
   non-`NULL`; both are validated with `SSF_REQUIRE`.
 - Both `SSFCryptCTMemEq()` parameters are `const void *`, so callers can pass `uint8_t *`,
   `char *`, or any other byte-granular pointer without a cast at the call site.
+- `SSFCryptCTNonZero(x)`, `SSFCryptCTIsZero(x)`, `SSFCryptCTEq(a, b)` and `SSFCryptCTLt(a, b)`
+  (static inline, `uint32_t`) return 1 or 0 without a comparison operator, for building
+  constant-time masks (`0u - bit`). A `==`, `!=` or `<` on a secret can compile to a branch on
+  cores without a conditional move, and the optimizer also recognizes the usual branch-free
+  idioms (it turns `(x | -x) >> 31` back into `x != 0`). So each helper passes its
+  intermediate and its result through
+  [`SSF_CT_VALUE_BARRIER`](../ssfport.md#notes), which leaves it nothing to recognize.
 - Use `SSFCryptSecureZero()` to clear secret keying material, intermediate scalars, hash
   contexts, and any other sensitive buffer that is about to leave scope. The implementation
   writes through a `volatile` pointer so the compiler cannot eliminate the clear via

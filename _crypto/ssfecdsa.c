@@ -605,6 +605,7 @@ static void _SSFECDSAReduceModN(SSFBN_t *r, const SSFBN_t *x, const SSFECCurvePa
     /* tmp = r - n. If r >= n, borrow == 0 and we commit tmp; else keep r. */
     borrow = SSFBNSub(&tmp, r, &c->n);
     mask = (SSFBNLimb_t)(borrow - 1u); /* all-ones if borrow == 0, else 0 */
+    SSF_CT_VALUE_BARRIER(mask);
     for (i = 0; i < r->len; i++)
     {
         r->limbs[i] = (tmp.limbs[i] & mask) | (r->limbs[i] & ~mask);

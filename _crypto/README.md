@@ -29,6 +29,35 @@ Cryptographic interfaces.
 | ssftls | TLS 1.3 core building blocks: key schedule, transcript hash, record layer (no handshake state machine) | ssftls.c, ssftls.h | [ssftls.md](ssftls.md) |
 | ssfcms | RFC 5652 CMS SignedData verifier (zero-copy parse, detached file signatures by digest, ECDSA / RSA / Ed25519, RFC 6211 algorithm protection) | ssfcms.c, ssfcms.h | [ssfcms.md](ssfcms.md) |
 
+<a id="constant-time"></a>
+
+## Constant time
+
+Code that handles secrets (private keys, nonces, scalars, MAC keys, shared secrets) runs the
+same instruction sequence whatever the secret is: no branch and no memory index depends on
+it. Masked selects build their masks through [`SSF_CT_VALUE_BARRIER`](../ssfport.md#notes)
+and the [`SSFCryptCT*`](ssfcrypt.md#notes) predicates. Without them, GCC and clang turn masks
+into branches on cores with no conditional move.
+
+This is checked as compiled, not just as written. Each constant-time function runs under
+qemu with different secrets and must give an identical instruction trace. That covers ssfbn
+(conditional copy, swap and compare, modular and Montgomery arithmetic, ModExp, the safegcd
+inverse), ssffe25519, Poly1305, `SSFCryptCTMemEq`, X25519, Ed25519 and P-256 ECDH / ECDSA.
+It was run with GCC 15.2 and clang 23 at `-Os` and `-O2`, for Cortex-M0+, M23, M3, M4 and
+M33 (2026-11). Results:
+
+- **Cortex-M3 / M4 / M33:** every case passes.
+- **Cortex-M0 / M0+ / M23 (ARMv6-M, ARMv8-M Baseline): not yet constant time.** These cores
+  have no 32 x 32 -> 64 multiply. Every 64-bit product calls libgcc's `__muldi3`, which has
+  a data-dependent branch, so the big-number and curve25519 multiplies (and RSA, ECDH,
+  ECDSA, X25519 and Ed25519 above them) are variable time there. Fix planned (a
+  constant-time multiply helper for these cores). SSF's own code passes there too.
+
+What the check does not cover: memory access patterns as seen by a cache (table lookups
+indexed by secrets, such as the AES S-box); operand-dependent instruction timing (for
+example the Cortex-M3's early-terminating `UMULL`); compilers and options not listed; and
+inputs it did not try.
+
 ## See Also
 
 - [Codecs](../_codec/README.md) — Encoding interfaces used alongside cryptographic primitives

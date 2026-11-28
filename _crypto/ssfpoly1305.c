@@ -234,6 +234,7 @@ void SSFPoly1305End(SSFPoly1305Context_t *ctx, uint8_t *tag, size_t tagSize)
 
     /* Select h if h < p, else h - p. */
     mask = (g4 >> 31) - 1u;
+    SSF_CT_VALUE_BARRIER(mask);
     g0 &= mask; g1 &= mask; g2 &= mask; g3 &= mask; g4 &= mask;
     mask = ~mask;
     ctx->h0 = (ctx->h0 & mask) | g0;

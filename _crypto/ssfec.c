@@ -35,6 +35,7 @@
 /* --------------------------------------------------------------------------------------------- */
 #include "ssfassert.h"
 #include "ssfec.h"
+#include "ssfcrypt.h"
 #include "ssfusexport.h"
 
 #if SSF_CONFIG_EC_UNIT_TEST == 1
@@ -1191,7 +1192,7 @@ static void _SSFECScalarMulComb(SSFECPoint_t *r, const SSFBN_t *k, const SSFECCu
         SSFBNSetOne(&picked.z, c->limbs);
         for (i = 0; i < _SSF_EC_COMB_NTABLE; i++)
         {
-            SSFBNLimb_t sel = (SSFBNLimb_t)((uint32_t)i == (uint32_t)mask);
+            SSFBNLimb_t sel = (SSFBNLimb_t)SSFCryptCTEq(i, mask);
             SSFBNCondCopy(&picked.x, &table[i].x, sel);
             SSFBNCondCopy(&picked.y, &table[i].y, sel);
         }
@@ -1205,7 +1206,7 @@ static void _SSFECScalarMulComb(SSFECPoint_t *r, const SSFBN_t *k, const SSFECCu
         _SSFECPointAddMixedNoDouble(r, r, &picked, c);
 
         /* CT-restore r when mask == 0 (the add output was garbage from the sentinel). */
-        maskIsZero = (SSFBNLimb_t)((mask == 0u) ? 1u : 0u);
+        maskIsZero = (SSFBNLimb_t)SSFCryptCTIsZero(mask);
         SSFBNCondCopy(&r->x, &rSaved.x, maskIsZero);
         SSFBNCondCopy(&r->y, &rSaved.y, maskIsZero);
         SSFBNCondCopy(&r->z, &rSaved.z, maskIsZero);

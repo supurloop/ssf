@@ -217,8 +217,12 @@ static int8_t _SSFBNRawCmp(const SSFBNLimb_t *a, const SSFBNLimb_t *b, uint16_t 
 
     for (i = (int16_t)(n - 1u); i >= 0; i--)
     {
-        gt |= (((uint32_t)(a[i] > b[i])) & ~(gt | lt));
-        lt |= (((uint32_t)(a[i] < b[i])) & ~(gt | lt));
+        /* live: all ones until the first differing limb from the top decides the result */
+        uint32_t live = 0u - (1u ^ (gt | lt));
+
+        SSF_CT_VALUE_BARRIER(live);
+        gt |= SSFCryptCTLt(b[i], a[i]) & live;
+        lt |= SSFCryptCTLt(a[i], b[i]) & live;
     }
     return (int8_t)((int32_t)gt - (int32_t)lt);
 }
@@ -1333,7 +1337,8 @@ void SSFBNModAdd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *
     borrow = _SSFBNRawSub(r->limbs, r->limbs, m->limbs, m->len);
 
     /* a + b < m exactly when the add did not carry and the subtract borrowed: add m back, CT */
-    mask = (SSFBNLimb_t)(-(int32_t)((SSFBNLimb_t)(carry == 0u) & (SSFBNLimb_t)(borrow != 0u)));
+    mask = (SSFBNLimb_t)(0u - (SSFCryptCTIsZero(carry) & SSFCryptCTNonZero(borrow)));
+    SSF_CT_VALUE_BARRIER(mask);
     addCarry = 0u;
     for (i = 0u; i < m->len; i++)
     {
@@ -1368,9 +1373,10 @@ void SSFBNModSub(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *
 
     /* If borrow, add m back; CT via value-masked add. */
     {
-        SSFBNLimb_t mask = (SSFBNLimb_t)(-(int32_t)(borrow != 0u));
+        SSFBNLimb_t mask = (SSFBNLimb_t)(0u - SSFCryptCTNonZero(borrow));
         SSFBNDLimb_t carry = 0;
         uint16_t i;
+        SSF_CT_VALUE_BARRIER(mask);
         for (i = 0; i < m->len; i++)
         {
             carry += ((SSFBNDLimb_t)r->limbs[i] + (SSFBNDLimb_t)(m->limbs[i] & mask));
@@ -1591,6 +1597,7 @@ static void _SSFBNModMulCTShift(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b,
         borrow = _SSFBNRawSub(tmp.limbs, prod.limbs, shifted.limbs, prodLen);
         /* mask = all-ones if borrow == 0 (subtract was valid, i.e. prod >= shifted), else 0. */
         mask = (SSFBNLimb_t)(borrow - 1u);
+        SSF_CT_VALUE_BARRIER(mask);
         for (j = 0; j < prodLen; j++)
         {
             prod.limbs[j] = (tmp.limbs[j] & mask) | (prod.limbs[j] & ~mask);
@@ -2093,7 +2100,11 @@ static int32_t _SSFBNS30Divsteps(int32_t delta, uint32_t f0, uint32_t g0, _SSFBN
     for (i = 0u; i < _SSF_BN_S30_BITS; i++)
     {
         /* c1 all ones when delta > 0 and g is odd: then (f, g) = (g, -f) and delta = -delta */
-        c1 = (0u - ((0u - d) >> 31)) & (0u - (g & 1u));
+        c1 = 0u - d;
+        c2 = g & 1u;
+        SSF_CT_VALUE_BARRIER(c1);
+        SSF_CT_VALUE_BARRIER(c2);
+        c1 = (0u - (c1 >> 31)) & (0u - c2);
         x = (f ^ g) & c1;
         f ^= x;
         g ^= x;
@@ -2109,7 +2120,9 @@ static int32_t _SSFBNS30Divsteps(int32_t delta, uint32_t f0, uint32_t g0, _SSFBN
         d = (d ^ c1) - c1;
 
         /* c2 all ones when g is odd (always after a swap): g += f, and its row adds f's row */
-        c2 = 0u - (g & 1u);
+        c2 = g & 1u;
+        SSF_CT_VALUE_BARRIER(c2);
+        c2 = 0u - c2;
         g += f & c2;
         q += u & c2;
         r += v & c2;
@@ -2231,6 +2244,7 @@ static void _SSFBNS30AddIfNeg(int32_t *x, const int32_t *m, uint16_t n)
     int32_t neg = x[n - 1u] >> 31;
     uint16_t i;
 
+    SSF_CT_VALUE_BARRIER(neg);
     for (i = 0u; i < n; i++) x[i] += m[i] & neg;
     _SSFBNS30Carry(x, n);
 }
@@ -2687,6 +2701,7 @@ static void _SSFBNReduceP256(SSFBN_t *r, const SSFBN_t *t)
         tmp.len = 8;
         subBorrow = _SSFBNRawSub(tmp.limbs, r->limbs, SSF_BN_NIST_P256.limbs, 8);
         mask = (SSFBNLimb_t)(subBorrow - 1u);
+        SSF_CT_VALUE_BARRIER(mask);
         for (j = 0u; j < 8u; j++)
         {
             r->limbs[j] = (tmp.limbs[j] & mask) | (r->limbs[j] & ~mask);
@@ -2793,6 +2808,7 @@ static void _SSFBNReduceP384(SSFBN_t *r, const SSFBN_t *t)
         tmp.len = 12;
         subBorrow = _SSFBNRawSub(tmp.limbs, r->limbs, SSF_BN_NIST_P384.limbs, 12);
         mask = (SSFBNLimb_t)(subBorrow - 1u);
+        SSF_CT_VALUE_BARRIER(mask);
         for (j = 0u; j < 12u; j++)
         {
             r->limbs[j] = (tmp.limbs[j] & mask) | (r->limbs[j] & ~mask);
@@ -3278,9 +3294,9 @@ void SSFBNMontMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBNMon
 
     borrow = _SSFBNRawSub(r->limbs, r->limbs, ctx->mod.limbs, n);
     {
-        SSFBNLimb_t cond = ((SSFBNLimb_t)(borrow != 0u)) & ((SSFBNLimb_t)(t[n] == 0u));
-        SSFBNLimb_t mask = (SSFBNLimb_t)(-(int32_t)cond);
+        SSFBNLimb_t mask = (SSFBNLimb_t)(0u - (SSFCryptCTNonZero(borrow) & SSFCryptCTIsZero(t[n])));
         SSFBNDLimb_t addCarry = 0;
+        SSF_CT_VALUE_BARRIER(mask);
         for (i = 0; i < n; i++)
         {
             addCarry += ((SSFBNDLimb_t)r->limbs[i] + (SSFBNDLimb_t)(ctx->mod.limbs[i] & mask));
@@ -3398,9 +3414,10 @@ void SSFBNMontSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBNMont_t *ctx)
     borrow = _SSFBNRawSub(r->limbs, r->limbs, ctx->mod.limbs, n);
     /* Cond-subtract m: needed iff !borrow OR t[2n]==1; constant-time via value-masked add. */
     {
-        SSFBNLimb_t cond = ((SSFBNLimb_t)(borrow != 0u)) & ((SSFBNLimb_t)(t[2u * n] == 0u));
-        SSFBNLimb_t mask = (SSFBNLimb_t)(-(int32_t)cond);
+        SSFBNLimb_t mask =
+            (SSFBNLimb_t)(0u - (SSFCryptCTNonZero(borrow) & SSFCryptCTIsZero(t[2u * n])));
         SSFBNDLimb_t addCarry = 0;
+        SSF_CT_VALUE_BARRIER(mask);
         for (i = 0; i < n; i++)
         {
             addCarry += ((SSFBNDLimb_t)r->limbs[i] + (SSFBNDLimb_t)(ctx->mod.limbs[i] & mask));
@@ -3471,6 +3488,8 @@ static void _SSFBNModExpSelect(SSFBNLimb_t *dst, const SSFBNLimb_t *tbl, uint16_
 {
     const SSFBNLimb_t *p;
     SSFBNLimb_t acc;
+    SSFBNLimb_t m0;
+    SSFBNLimb_t m1;
     uint32_t i;
     uint16_t j;
 
@@ -3483,8 +3502,13 @@ static void _SSFBNModExpSelect(SSFBNLimb_t *dst, const SSFBNLimb_t *tbl, uint16_
         /* Two entries per pass (2^K >= 2); (i ^ w) - 1 has its top bit set iff i == w */
         for (i = 0u; i < SSF_BN_MODEXP_TBL_N; i += 2u)
         {
-            acc |= (p[0] & (0u - (((i ^ w) - 1u) >> 31))) |
-                   (p[cap] & (0u - ((((i + 1u) ^ w) - 1u) >> 31)));
+            /* The barrier sits before the shift: the mask stays opaque to the optimizer, and */
+            /* the shift still folds into the and (one instruction per term on Thumb-2)       */
+            m0 = (i ^ w) - 1u;
+            m1 = ((i + 1u) ^ w) - 1u;
+            SSF_CT_VALUE_BARRIER(m0);
+            SSF_CT_VALUE_BARRIER(m1);
+            acc |= (p[0] & (0u - (m0 >> 31))) | (p[cap] & (0u - (m1 >> 31)));
             p += 2u * (uint32_t)cap;
             _SSF_BN_COUNT_ADD(_SSFBNModExpSelectReads, 2u);
         }
@@ -3773,7 +3797,8 @@ void SSFBNCondSwap(SSFBN_t *a, SSFBN_t *b, SSFBNLimb_t swap)
     SSF_REQUIRE(b->limbs != NULL);
     SSF_REQUIRE(a->len == b->len);
 
-    mask = (SSFBNLimb_t)(-(int32_t)(swap != 0u));
+    mask = (SSFBNLimb_t)(0u - SSFCryptCTNonZero(swap));
+    SSF_CT_VALUE_BARRIER(mask);
 
     for (i = 0; i < a->len; i++)
     {
@@ -3797,7 +3822,8 @@ void SSFBNCondCopy(SSFBN_t *dst, const SSFBN_t *src, SSFBNLimb_t sel)
     SSF_REQUIRE(src->limbs != NULL);
     SSF_REQUIRE(dst->len == src->len);
 
-    mask = (SSFBNLimb_t)(-(int32_t)(sel != 0u));
+    mask = (SSFBNLimb_t)(0u - SSFCryptCTNonZero(sel));
+    SSF_CT_VALUE_BARRIER(mask);
 
     for (i = 0; i < dst->len; i++)
     {

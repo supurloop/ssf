@@ -151,6 +151,7 @@ void SSFFE25519Reduce(SSFFE25519_t *a)
         borrow = (diff >> 63) & 1u;
     }
     mask = (uint32_t)(-(int32_t)(1u - borrow)); /* all-ones if a >= p, else 0 */
+    SSF_CT_VALUE_BARRIER(mask);
     for (i = 0; i < 8u; i++)
     {
         a->v[i] = (a->v[i] & ~mask) | (t[i] & mask);
@@ -189,6 +190,8 @@ void SSFFE25519CSwap(SSFFE25519_t *a, SSFFE25519_t *b, uint32_t swap)
 
     /* No argument checks by design: hot path, callers pass validated or local operands. */
     /* See dbc_hot_audit.txt item A before adding any back. */
+
+    SSF_CT_VALUE_BARRIER(mask);
 
     for (i = 0; i < 8u; i++)
     {

@@ -3,7 +3,8 @@ SSF CONSTANT-TIME HELPERS: SECRET-DEPENDENT BRANCHES IN COMPILED CODE (ARMv6-M)
 Audit date : 2026-11-27
 Scope      : constant-time select / swap helpers in _crypto, as compiled (not as written).
              Code at commit c0d17b7 (branch mqtt). arm-none-eabi-gcc 15.2, -mthumb -Os.
-Status     : C1 OPEN (found during RSA-PERF R4 step 0; tracked here, separately from R4).
+Status     : C1 FIXED (steps 2-4 below), C2 OPEN (C1 found during RSA-PERF R4 step 0; C2 found by the C1 step 1
+             check). Step 1 of the C1 plan is done; see STEP 1 RESULTS.
 
 FINDING
 -------
@@ -60,3 +61,235 @@ C1. Mask-select helpers compile to a branch on the secret flag on Cortex-M0 / M0
          outside its loop control. TDD: the script is red on c0d17b7 for M0+.
       4. Measure the cost: a barrier can stop some instruction scheduling; expect a small
          effect, in instructions only.
+
+C1 IMPLEMENTATION PLAN
+----------------------
+Goal: no constant-time function in _crypto takes a branch, or runs a different
+instruction sequence, depending on secret data, on any supported ARM core, as compiled.
+A check that runs in CI-style scripts enforces this, so a compiler change cannot bring the
+bug back unnoticed.
+
+Inventory (step 0 confirms and completes it; functions the .md files call constant time,
+plus every mask idiom found by grep):
+  ssfbn       SSFBNCondCopy, SSFBNCondSwap, SSFBNCmp, SSFBNIsZero / IsOne / IsEven,
+              SSFBNAdd / Sub, SSFBNModAdd / ModSub, SSFBNModMulCT / CTOdd, SSFBNMontMul /
+              MontSquare (final conditional subtract), MontConvertIn / Out,
+              _SSFBNModExpMontCore (window decode and _SSFBNModExpSelect),
+              _SSFBNModInvCTCore (divsteps, conditional negate), SSFBNModMulNISTPrime
+  ssffe25519  SSFFE25519CSwap, SSFFE25519Reduce (mask select, :153), ToBytes, Mul / Sqr /
+              Inv (straight-line, check anyway)
+  ssfx25519   the Montgomery ladder (:227-256)
+  ssfed25519  _SSFEd25519GeCSwap and its ladder (:479-508), the mask at :98, the zero
+              test at :210, scalar reduction mod L
+  ssfec       comb select (:1181-1210). ":1208 maskIsZero = (mask == 0u) ? 1u : 0u" is a
+              ternary on secret scalar bits IN THE SOURCE, not only as compiled. Also the
+              point-add fix-ups (:334-348, :447-461) and the scalar multiplies.
+  ssfecdsa    the conditional subtract at :607
+  ssfpoly1305 the final h - p select (:235-243)
+  ssfcrypt    SSFCryptCTMemEq (MAC tag, signature and digest compares)
+  ssfrsa      :1099 (keygen); the PKCS#1 / PSS compares go through SSFCryptCTMemEq
+Out of scope, noted for later (C2+):
+  - Secret-indexed memory addresses (table lookups such as AES S-boxes): a cache-timing
+    question, and none of the listed M0 / M0+ / M23 parts has a data cache. The check
+    below sees control flow, not addresses.
+  - libgcc helpers with variable time on secrets: __aeabi_uidivmod in keygen's trial
+    division of secret candidates on cores without UDIV. The check does trace through
+    libgcc calls, so any CT function that calls a variable-time helper does show up.
+  - (Clang: covered. The user chose to add it; see step 1.)
+
+Step 1. The check (red first): a scratch tool, not committed (user's choice). It lives in
+the session scratchpad; this file records its method and results.
+  Method: trace equality. A driver calls each listed function several times with inputs
+  that differ only in the secret (sel / swap 0 and 1 and other nonzero values, window
+  values 0..2^K-1, all-zero / all-ones / random scalars and residues, equal and unequal
+  compare buffers) and identical public parameters (lengths, curve, modulus). Each call
+  runs under qemu-arm -d exec,nochain, and the check records the sequence of executed
+  translation-block PCs between two marker calls. Every call of one function must give
+  the same sequence (compared by length and hash; the first difference is printed).
+  Compilers: arm-none-eabi-gcc 15.2 and clang (--target=thumbv6m / thumbv7m / thumbv7em /
+    thumbv8m.base / thumbv8m.main -none-eabi, matching -mcpu), so armclang (clang) code
+    is covered too.
+  Builds: the code under test and the driver are compiled with each compiler for
+    -mcpu=cortex-m0plus, cortex-m23 (v8-M Baseline), cortex-m3, cortex-m4, cortex-m33, each
+    at -Os and -O2. They are linked bare-metal with newlib's semihosting runtime
+    (--specs=rdimon.specs) and run under qemu-arm user mode on the matching CPU model:
+    -cpu cortex-m0 (M0+), cortex-m3, cortex-m4, cortex-m33 (M33, and M23: qemu has no
+    M23 model, and M33 runs a superset of v8-M Baseline). The CPU model also enforces the
+    core's instruction set, so a stray Thumb-2 instruction in an M0+ build traps.
+  Host only, no containers: arm-none-eabi-gcc 15.2 (newlib), clang 23.1.6 and ld.lld
+  (--sysroot=/usr/arm-none-eabi, linked with arm-none-eabi-gcc's newlib), qemu-arm 11.1.3.
+  Verified: an M0+ semihosted program built with each compiler runs under -cpu cortex-m0
+  and traces (-d exec,nochain: one line per executed block, with its PC). -cpu max does not
+  work here (it handles semihosting differently). Run: scratchpad ctcheck/run.sh
+  [core ...]; exit 1 on any divergence. Report: function, core, -O level, the input pair, the first diverging PC
+  mapped to a source line (addr2line).
+  Red: on c0d17b7 it must fail SSFBNCondCopy, SSFBNCondSwap and SSFFE25519CSwap on
+    cortex-m0plus, and pass them on cortex-m4. Those are already-known positives that show
+    the check works. Then record everything else it finds.
+  Limits, stated in the report: control flow only; only the inputs tried; qemu is not a
+    cycle model (instruction timing that depends on operand values is outside it; M3's
+    UMULL / UMLAL early termination is known and is a separate question).
+
+Step 2. The barrier.
+  ssfport.h, beside SSF_OPTIMIZER_BARRIER:
+    SSF_CT_VALUE_BARRIER(x): GCC / Clang  __asm__("" : "+r"(x)),  which hides x's value so
+    the optimizer cannot prove a mask is 0 or all ones and turn the select into a branch.
+    Other compilers: a volatile round-trip of x.
+  Apply it where each mask is made (one line per helper), and replace the ssfec :1208
+  ternary with arithmetic (maskIsZero = 1 - ((mask | -mask) >> 31)) plus the barrier.
+  Unit tests: the existing results tests must pass unchanged. The ctcheck run is the
+  test of the fix: red to green per function and core.
+
+Step 3. Green: ctcheck passes every function, core and -O level, plus:
+  - full unit suite on the host and via tools/cross-test armhf;
+  - ARM warning builds (build-arm.sh) clean;
+  - cost: armv7-a instruction counts (RSA-2048 sign, P-256 sign / verify, X25519,
+    Ed25519 sign / verify) and the M0+ code under test. Expect a small effect; the barrier
+    blocks some scheduling around each mask only;
+  - client image size (M4, M0+; LTO on / off).
+
+Step 4. Docs:
+  - ssfport (the macro);
+  - ssfbn.md / ssffe25519.md (the CondCopy / CondSwap / CSwap guarantee, now checked);
+  - _crypto/README.md: a constant-time section that says what ctcheck covers and does not;
+  - (no tool README: the check is not committed; its method is recorded above).
+  Close C1 here with the results; open C2+ for the out-of-scope items as they are confirmed.
+
+Step 5. Only if asked: full suites, commit.
+
+Decisions (user, 2026-11-27): the check stays a scratch tool, not committed; clang is
+covered alongside GCC. The user installed clang, lld and qemu-user on the host, so no
+container image is needed.
+
+
+STEP 1 RESULTS (2026-11-27, code at fc6a14f)
+--------------------------------------------
+The check: a scratch tool (session scratchpad, ctcheck/), not committed.
+  - driver.c: 32 cases, each called 3-5 times between ct_begin() / ct_end() markers, with
+    inputs that differ only in the secret.
+  - run.sh / all.sh: build every compiler x core x -O.
+  - cmpstream.py: streams the qemu -d exec,nochain trace. Each call gets a rolling hash of
+    its PC sequence and a per-PC count. A case fails if its calls' hashes differ; the PCs
+    whose counts differ are mapped to source lines with addr2line.
+  The driver is built at -O0 (one call site per case), the code under test at the level
+  under test. The whole matrix (20 builds) takes about 50 s on 24 cores.
+  Public-data allowances: the trace is not compared inside SSFEd25519Verify or
+  SSFECDSAVerify (verify-after-sign runs on the public signature), from their entry to
+  their bl return site. ECDSA sign keys are picked outside the measured region so that
+  every signature has the same DER shape (the encoding of the public r and s).
+  Cases:
+    ssfbn: CondCopy, CondSwap, Cmp, Add, Sub, ModAdd, ModSub, IsZero, IsOne, MontMul,
+           MontSquare, MontConvertIn / Out, ModMulCTOdd, ModMulSmall, ModMulNISTPrime,
+           ModInvCT, ModInvSmall (8-limb P-256 prime), ModExp (secret exponent, 4 limbs)
+    ssffe25519: CSwap, Reduce, ToBytes, Mul, Inv
+    SSFCryptCTMemEq, SSFPoly1305Mac (secret key), SSFX25519ComputeSecret,
+    SSFEd25519PubKeyFromSeed / Sign, SSFECDHComputeSecret / SSFECDSAPubKeyFromPrivKey /
+    SSFECDSASign (P-256; the last two use the fixed-base comb)
+  Red as expected: SSFBNCondCopy, SSFBNCondSwap and SSFFE25519CSwap fail on M0+ with GCC
+  -Os and pass on M4, the known positives.
+
+Result by core (both compilers, -Os and -O2):
+  Cortex-M3 / M4 / M33: all 32 cases pass (gcc and clang, -Os and -O2).
+  Cortex-M0+ / M23: 21-22 of 32 fail with each compiler. Root causes:
+
+  C1 (compiled branches in our code), compiler by compiler:
+    SSFBNCondCopy                   gcc and clang, -Os and -O2
+    SSFBNCondSwap                   gcc and clang, -Os and -O2
+    SSFFE25519CSwap                 gcc -Os / -O2, clang -Os
+    _SSFBNRawCmp (ssfbn.c:220-221, "a[i] > b[i]" compares)          clang
+    SSFBNMontMul (:3282) / MontSquare (:3402), final conditional
+      subtract "(borrow != 0u) & (t[n] == 0u)"                       clang
+    _SSFBNS30AddIfNeg (:2234, safegcd)                               clang
+    _SSFBNModMulNISTFast (:2692, final masked select)                clang -Os
+    _SSFBNModExpSelect (R4's new select)                             clang -O2
+  The R4 select is branch-free with GCC (checked in R4) but not with clang -O2, so R4's
+  "fixes the RSA case" holds for GCC only, until C1's barrier is in.
+  Every one is the same pattern: a 0 / all-ones mask (or a 0 / 1 compare) that the
+  optimizer can see, which a core without IT / conditional moves turns into a branch.
+
+C2. libgcc __muldi3 (64-bit multiply) is variable time on ARMv6-M / v8-M Baseline   OPEN
+    Cortex-M0 / M0+ / M23 have no 32x32 -> 64 multiply instruction. Every
+    (uint64_t)a * b in the code, with GCC and with clang (both link libgcc here), becomes
+    a call to __aeabi_lmul -> __muldi3. That builds the product from 16-bit halves with
+    the generic C of longlong.h, whose carry fix-up is a branch (libgcc2.c:532,
+    "if (x1 < x2) x3 += B"). So every big-number and curve25519 multiply is variable time
+    on these cores: MontMul / MontSquare (the row kernel), FE25519 Mul / Inv, and
+    everything above them (RSA, ECDH, ECDSA, X25519, Ed25519). It is a cause in 18 of the 21
+    failing cases with gcc -Os on M0+ (17 of 22 with clang). It is not in SSF's source, so C1's barrier cannot fix it.
+    Fix options (not started):
+      (a) A constant-time 32x32 -> 64 helper for targets without UMULL (__ARM_ARCH_6M__,
+          __ARM_ARCH_8M_BASE__): four MULS on 16-bit halves, with carries done
+          arithmetically. Use it in the row kernel (the R2 macro's C branch) and in
+          ssffe25519 / ssfed25519 / ssfpoly1305 wherever a 64-bit product is formed.
+          Speed: about the same as __aeabi_lmul (R1 measured a 16-bit-halves C kernel
+          at -12.1% on M0+ RSA sign), so likely no cost, possibly a gain.
+      (b) R7 (an ARMv6-M assembly row kernel) covers BN only and would need (a) for the
+          field code anyway.
+    Not checked: other libgcc helpers that the crypto code may call on these cores
+    (64-bit shifts are inline; the 64-bit divide is only used in public paths).
+
+Not affected by either: SSFCryptCTMemEq, SSFPoly1305Mac, SSFBNAdd / Sub / ModAdd / ModSub
+/ IsZero / IsOne, SSFFE25519Reduce / ToBytes pass on every core and both compilers. (The
+ssfec.c:1208 ternary compiles branch-free on every M3 / M4 / M33 build; on M0+ / M23 the
+comb cases fail through C1 / C2 anyway, and the source fix stays in the plan.)
+
+Limits: control flow only; only the inputs tried; qemu is not a cycle model (operand-
+dependent instruction timing, such as the M3's UMULL / UMLAL early termination, is not
+seen).
+
+STEPS 2-4 RESULTS (C1 FIXED)
+----------------------------
+Change:
+  - ssfport.h: SSF_CT_VALUE_BARRIER(x). GCC / clang: __asm__("" : "+r"(x)), no instruction
+    emitted. Others: a volatile round trip.
+  - ssfcrypt.h: SSFCryptCTNonZero / IsZero / Eq / Lt (static inline, uint32_t, return 1 or
+    0). No comparison operator, with a barrier on the intermediate whose top bit is the
+    answer and another on the returned bit.
+  - Every masked select in the constant-time paths builds its mask through a barrier:
+      ssfbn: CondCopy, CondSwap, _SSFBNRawCmp (compares -> SSFCryptCTLt, a barriered
+        "live" mask), ModAdd, ModSub, ModMulCT (shift-subtract), MontMul / MontSquare final
+        subtract, _SSFBNS30AddIfNeg, the divsteps masks, ModMulNIST P-256 / P-384 final
+        select, _SSFBNModExpSelect
+      ssffe25519 Reduce and CSwap, ssfed25519 FeSub, ssfecdsa reduce-mod-n,
+      ssfpoly1305 final select, ssfrsa _SSFRSAMod65537
+      ssfec comb: "sel = (i == mask)" -> SSFCryptCTEq, and the source-level ternary
+        "(mask == 0u) ? 1u : 0u" -> SSFCryptCTIsZero
+How it went (each round re-run on all 20 builds):
+  1. Barrier on each finished mask: GCC all green, but clang M0+ / M23 still branched in
+     CondCopy / CondSwap / MontMul. Clang computes the mask itself with a branch, before
+     the barrier, by matching "(x | -x) >> 31" to "x != 0".
+  2. Barrier moved inside the predicates, on the intermediate: CondCopy / CondSwap pass;
+     ModAdd newly fails on clang, which turned "1 ^ (t >> 31)" into "t >= 0" and branched.
+  3. Barrier also on each predicate's returned bit: 0 failures.
+  4. Cost tuning: a barrier on a finished mask stops Thumb-2 folding the shift into the and
+     ("and r, p, t, asr #31"). In the ModExp select that cost +278 K instructions on RSA-2048
+     sign. Moving the barrier to just before the shift (select, divsteps) keeps the folding:
+     +69 K. Re-checked: still 0 failures.
+Check (scratch tool, 20 builds), final code:
+  gcc and clang, -Os and -O2:
+    Cortex-M3 / M4 / M33: 32 / 32 ok.
+    Cortex-M0+ / M23:     14 ok, 18 diverge only inside libgcc __muldi3 (C2), 0 FAIL.
+  Host suite 64 / 64; full suite under qemu-arm (armv7-a Thumb-2 -O2) 64 / 64.
+  build-arm.sh 0 warnings (the usual 3 POSIX-only files fail).
+  doccheck: the same 4 pre-existing failing blocks as HEAD (ssfport.md, ssfcrypt.md,
+  ssfbn.md, ssffe25519.md), none of them in edited text.
+Cost, ARMv7-A Thumb-2 -Os instructions (qemu-arm), before = HEAD (fc6a14f), same outputs:
+    Operation                Before          After          Delta
+    RSA-2048 sign PKCS#1    49,500,387      49,569,307       +68,920   +0.14%
+    P-256 ECDSA sign         3,893,458       3,850,097       -43,361   -1.11%
+    P-256 pubkey derive      3,688,814       3,641,028       -47,786   -1.30%
+    P-256 ECDSA verify *    15,636,951      15,633,598        -3,353   -0.02%
+    X25519 shared secret     4,220,675       4,203,036       -17,639   -0.42%
+    Ed25519 sign             23,602,037      23,529,901       -72,136   -0.31%
+    * sign + pubkey + verify minus sign and pubkey.
+  RSA's remaining cost: the per-function profile of the first round showed the select,
+  the safegcd inverse (+23.6 K) and RawCmp / ModAdd (+5 K). The ECC and 25519 gains were not
+  profiled; the likely cause is the arithmetic predicates replacing compare sequences.
+  Code, client image (text + data):
+    M4  -Os  103,807 -> 103,903 (+96)    LTO  83,044 ->  83,220 (+176)
+    M0+ -Os  113,355 -> 113,463 (+108)   LTO  88,536 ->  88,624 (+88)
+  RAM: none.
+Docs: ssfport.md (SSF_CT_VALUE_BARRIER), ssfcrypt.md (the predicates), ssfbn.md (CondCopy
+  / CondSwap), ssffe25519.md (CSwap, and the C2 caveat), _crypto/README.md (new
+  "Constant time" section: what is checked, results per core, the open C2 gap on
+  M0 / M0+ / M23, and what the check does not cover).

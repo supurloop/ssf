@@ -45,6 +45,45 @@ extern "C" {
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFCryptCTMemEq(const void *a, const void *b, size_t n);
+
+/* Constant-time predicates on uint32_t values: 1 or 0, with no comparison operator. Value     */
+/* barriers sit on the intermediate whose top bit is the answer and on the returned bit, so   */
+/* the optimizer can neither match the expression back to a compare (clang turns (x | -x) >> */
+/* 31 into x != 0, and 1 ^ (t >> 31) into t >= 0) nor learn that the result is 0 or 1. On    */
+/* ARMv6-M either lets it branch on the secret. 0u - result is a mask it cannot reason about. */
+static inline uint32_t SSFCryptCTNonZero(uint32_t x)
+{
+    uint32_t t = x | (0u - x);
+
+    SSF_CT_VALUE_BARRIER(t);
+    t >>= 31;
+    SSF_CT_VALUE_BARRIER(t);
+    return t;
+}
+
+static inline uint32_t SSFCryptCTIsZero(uint32_t x)
+{
+    uint32_t t = 1u ^ SSFCryptCTNonZero(x);
+
+    SSF_CT_VALUE_BARRIER(t);
+    return t;
+}
+
+static inline uint32_t SSFCryptCTEq(uint32_t a, uint32_t b)
+{
+    return SSFCryptCTIsZero(a ^ b);
+}
+
+/* 1 if a < b (unsigned), else 0 */
+static inline uint32_t SSFCryptCTLt(uint32_t a, uint32_t b)
+{
+    uint32_t t = ((~a) & b) | (((~a) | b) & (a - b));
+
+    SSF_CT_VALUE_BARRIER(t);
+    t >>= 31;
+    SSF_CT_VALUE_BARRIER(t);
+    return t;
+}
 void SSFCryptSecureZero(void *p, size_t n);
 
 /* --------------------------------------------------------------------------------------------- */

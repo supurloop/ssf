@@ -382,6 +382,16 @@ typedef pthread_mutex_t SSFMutex_t;
 #define SSF_OPTIMIZER_BARRIER(p) ((void)(p))
 #endif
 
+/* Hide an integer value (at most register width) from the optimizer, so it cannot prove a   */
+/* constant-time mask is 0 or all ones and turn a masked select into a branch. Cores with no  */
+/* conditional move (ARMv6-M, v8-M Baseline) do that otherwise. Emits no instruction.         */
+#if defined(__GNUC__) || defined(__clang__)
+#define SSF_CT_VALUE_BARRIER(x) __asm__("" : "+r"(x))
+#else
+#define SSF_CT_VALUE_BARRIER(x) \
+    do { volatile uint32_t _ssfCtV = (uint32_t)(x); (x) = _ssfCtV; } while (0)
+#endif
+
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */

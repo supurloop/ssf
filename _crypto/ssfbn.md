@@ -1164,7 +1164,9 @@ void SSFBNCondCopy(SSFBN_t *dst, const SSFBN_t *src, SSFBNLimb_t sel);
 ```
 Constant-time conditional primitives. **Every limb** of both operands is touched regardless
 of the control input, so the branch direction does not leak via cache or timing. `swap` and
-`sel` are treated as "nonzero → perform the operation". `SSFBNCondCopy` is available for
+`sel` are treated as "nonzero → perform the operation"; the mask is built with
+[`SSFCryptCTNonZero`](ssfcrypt.md#notes), so no build turns the selection into a branch (checked
+compiled, see [Constant time](README.md#constant-time)). `SSFBNCondCopy` is available for
 callers building their own constant-time point / scalar selection logic (ssfec uses it in
 point addition); [`SSFBNModExp`](#modexp)'s table select has its own fused loop. Both operands must have the same `len`.
 

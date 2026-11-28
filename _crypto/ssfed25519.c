@@ -97,6 +97,7 @@ static void _SSFEd25519FeSub(SSFFE25519_t *r, const SSFFE25519_t *a, const SSFFE
     {
         uint32_t mask = (uint32_t)(0u - (uint32_t)borrow);
         uint64_t carry = 0;
+        SSF_CT_VALUE_BARRIER(mask);
         for (i = 0; i < 8u; i++)
         {
             carry += (uint64_t)r->v[i] + (2u * (uint64_t)(SSF_FE25519_P.v[i] & mask));

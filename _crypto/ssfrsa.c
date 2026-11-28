@@ -1095,8 +1095,9 @@ static uint32_t _SSFRSAMod65537(uint32_t x)
     uint32_t ge;
 
     /* Subtract 65537 once if r >= 65537; never more is needed (r < 2 * 65537) */
-    ge = 1u ^ ((r - 65537u) >> 31);
-    r -= (65537u & (0u - ge));
+    ge = 0u - (1u ^ ((r - 65537u) >> 31));
+    SSF_CT_VALUE_BARRIER(ge);
+    r -= (65537u & ge);
     return r;
 }
 

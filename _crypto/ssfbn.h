@@ -380,6 +380,9 @@ extern uint32_t _SSFBNModInvCTRangeErrs;
 /* Test-only: when true the safegcd core flips bit 0 of its result (a simulated fault) */
 extern bool _SSFBNModInvCTFaultTest;
 
+/* Test-only: SSFBNModInvCT's divstep count for a bits-wide modulus (Bernstein-Yang Thm 11.2) */
+uint32_t _SSFBNModInvCTStepsTest(uint32_t bits);
+
 /* Test-only: r = a^-1 mod m by extended Euclid (any m), the oracle for the safegcd tests */
 bool _SSFBNModInvEuclidTest(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
 

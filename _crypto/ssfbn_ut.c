@@ -4367,6 +4367,20 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(_scrubDirty == 0u);
     }
 
+    /* ---- RSA-PERF R3(c) A5: the divstep count matches Bernstein-Yang Thm 11.2's own numbers ---- */
+    {
+        /* Thm 11.2: floor((49d + 80) / 17) for d < 46, floor((49d + 57) / 17) for d >= 46. The */
+        /* paper gives 135 at d = 46 (proof of 11.2) and 738 at d = 255 (Section 11); 741 at   */
+        /* d = 256 is its widely quoted figure. 32 and 45 are the d < 46 case (one-limb m).    */
+        SSF_ASSERT(_SSFBNModInvCTStepsTest(32u) == 96u);
+        SSF_ASSERT(_SSFBNModInvCTStepsTest(45u) == 134u);
+        SSF_ASSERT(_SSFBNModInvCTStepsTest(46u) == 135u);
+        SSF_ASSERT(_SSFBNModInvCTStepsTest(255u) == 738u);
+        SSF_ASSERT(_SSFBNModInvCTStepsTest(256u) == 741u);
+        SSF_ASSERT(_SSFBNModInvCTStepsTest(384u) == 1110u);
+        SSF_ASSERT(_SSFBNModInvCTStepsTest(2048u) == 5906u);
+    }
+
     /* ---- RSA-PERF R3(c) P4: ModInvOdd and ModInvExt with odd m run the safegcd core ---- */
     {
         static const uint16_t widths[] = { 1u, 2u, 3u, 16u, 64u, SSF_BN_MAX_MOD_LIMBS };
@@ -4398,8 +4412,7 @@ void SSFBNUnitTest(void)
                 continue;
             }
             /* No, the fixed safegcd batch count of an n-limb modulus */
-            steps = ((32u * (uint32_t)n) >= 46u) ? (((49u * 32u * (uint32_t)n) + 80u) / 17u) :
-                                                   (((49u * 32u * (uint32_t)n) + 57u) / 17u);
+            steps = _SSFBNModInvCTStepsTest(32u * (uint32_t)n);
             batches = (steps + 29u) / 30u;
 
             for (pass = 0u; pass < 4u; pass++)
@@ -4552,8 +4565,7 @@ void SSFBNUnitTest(void)
                 continue;
             }
             /* No, the fixed batch count: ceil(steps / 30), steps from Bernstein-Yang Thm 11.2 */
-            steps = ((32u * (uint32_t)n) >= 46u) ? (((49u * 32u * (uint32_t)n) + 80u) / 17u) :
-                                                   (((49u * 32u * (uint32_t)n) + 57u) / 17u);
+            steps = _SSFBNModInvCTStepsTest(32u * (uint32_t)n);
             batches = (steps + 29u) / 30u;
 
             for (pass = 0u; pass < 8u; pass++)
@@ -4823,11 +4835,13 @@ void SSFBNUnitTest(void)
             }
         }
 
-        /* a >= m acts as its residue (11: none; 14 = 3 mod 11: 4). Contracts: even m, */
-        /* a and m of different lengths, NULL arguments */
+        /* Even m returns false (r untouched), as SSFBNModInvSmall does. a >= m acts as its residue */
+        /* (11: none; 14 = 3 mod 11: 4). Contracts: a and m of different lengths, NULL arguments */
         SSFBNSetUint32(&m, 10u, 1u);
         SSFBNSetUint32(&a, 3u, 1u);
-        SSF_ASSERT_TEST(SSFBNModInvCT(&r, &a, &m));
+        SSFBNSetUint32(&r, 0xA5A5A5A5u, 1u);
+        SSF_ASSERT(SSFBNModInvCT(&r, &a, &m) == false);
+        SSF_ASSERT(r.limbs[0] == 0xA5A5A5A5u);
         SSFBNSetUint32(&m, 11u, 1u);
         SSFBNSetUint32(&a, 11u, 1u);
         SSF_ASSERT(SSFBNModInvCT(&r, &a, &m) == false);

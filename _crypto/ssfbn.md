@@ -777,10 +777,12 @@ bool SSFBNModInvOdd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
 ```c
 bool SSFBNModInvCT(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
 ```
-`r = a⁻¹ mod m` in constant time for any odd `m > 1`, prime or not (`SSF_REQUIRE`: odd `m`,
+`r = a⁻¹ mod m` in constant time for any odd `m > 1`, prime or not (`SSF_REQUIRE`:
 `a->len == m->len`, `m->len` at most [`SSF_BN_MAX_MOD_LIMBS`](#ssf-bn-max-mod-limbs)). `a`
 need not be reduced; it acts as `a mod m`. Returns `false` when `gcd(a, m) ≠ 1`, including
-`a ≡ 0`, and for `m = 1`; `r` is written only on success. `r` may alias `a`. Before writing
+`a ≡ 0`, for `m = 1`, and for an even `m` (treated as public, as in
+[`SSFBNModInvSmall`](#modinvsmall); [`SSFBNModInvExt`](#modinv) inverts modulo an even `m`);
+`r` is written only on success. `r` may alias `a`. Before writing
 `r` it checks `a · r ≡ 1 (mod m)` with the constant-time
 [`SSFBNModMulCTOdd`](#ssfbnmodmulct), a fault check, and returns `false` if that fails (about
 0.6 M instructions at 2048 bits, ARMv7-A). [`SSFBNModInvOdd`](#modinv) and the odd-`m` path
@@ -790,8 +792,8 @@ The algorithm is Bernstein and Yang's safegcd ("Fast constant-time gcd computati
 modular inversion", TCHES 2019), with signed 30-bit limbs as described in libsecp256k1's
 `doc/safegcd_implementation.md`. Divsteps run in branch-free batches of 30 on the low bits,
 and each batch's 2×2 matrix updates the full-width values. The number of divsteps is fixed by
-the width of `m`, `⌊(49d + 80) / 17⌋` for `d = 32 · m->len ≥ 46` (`⌊(49d + 57) / 17⌋`
-below), which the paper proves brings `g` to zero whenever `f² + 4g² ≤ 5 · 2^(2d)`: every
+the width of `m`, `⌊(49d + 57) / 17⌋` for `d = 32 · m->len ≥ 46` (741 at 256 bits) and
+`⌊(49d + 80) / 17⌋` below (one-limb `m`), which the paper's Theorem 11.2 proves brings `g` to zero whenever `f² + 4g² ≤ 5 · 2^(2d)`: every
 odd `m` and every `a` at `m->len` limbs. Run time therefore depends
 only on `m->len`: under qemu the executed instruction count is identical for every `a` and
 every `m` of a given width. The only difference is the final write of `r`, skipped when the
@@ -811,8 +813,8 @@ the candidate inverse and check product are sized for `SSF_BN_MAX_MOD_LIMBS`. On
 `-Os` at the RSA-4096 cap the frame is 3.8 KB, and the whole call about 5.4 KB with the check
 multiply. `f`, `g`, `d`, `e`, the copy of `m`, the batch matrix, the candidate and the
 product are wiped before it returns (`m` may be a secret prime). Requires two's complement
-integers and arithmetic right shifts of negative values; a compile-time check rejects other
-compilers.
+integers, arithmetic right shifts of negative values and modular narrowing to `int32_t`; a
+compile-time check rejects other compilers.
 
 <a id="modinvsmall"></a>
 ```c

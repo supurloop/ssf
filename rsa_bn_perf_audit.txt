@@ -637,15 +637,28 @@ R3. Faster blinding inverse r^-1 mod n                  (a) DONE (0b3114d); (c) 
              constant-time a * r == 1 fault check. P1 shipped without it and nothing recorded
              the change. Only SSFBNModInvSmall had it. In tree this left no gap, because RSA
              sign checks every signature by verifying it. Details below.
-          A3 NIT. Even m: SSFBNModInvCT REQUIREs odd m, SSFBNModInvSmall returns false,
-             SSFBNModInvExt runs Euclid. As documented.
-          A4 NIT. (int32_t) narrowing of values outside int32 range is implementation-defined
-             (modular on every target compiler). The compile-time check covers arithmetic
-             right shifts only.
-          A5 NIT. The batch-count tests recompute the same Thm 11.2 formula, so they show
-             the count is fixed, not that the bound is right. The bound is covered by the
-             g == 0 assert in the core and the Euclid / Fermat oracles on random and edge
-             inputs.
+          A3 FIXED (follow-up). Even m: SSFBNModInvCT REQUIREd odd m while SSFBNModInvSmall
+             returned false. SSFBNModInvCT now returns false too (m's parity is public), with
+             r untouched; ModInvOdd keeps its REQUIRE (odd m is its contract), ModInvExt still
+             runs Euclid. Test: even m returns false and leaves the r sentinel.
+          A4 FIXED (follow-up). (int32_t) narrowing of uint32_t values above INT32_MAX (the
+             batch matrix, delta) is implementation-defined. The compile-time check now
+             covers it alongside the arithmetic right shifts.
+          A5 FIXED (follow-up): a real, latent bug. The batch-count tests recomputed the
+             core's own formula, and that formula had Thm 11.2's two cases swapped. The paper
+             (safegcd-20190413.pdf, Thm 11.2) gives floor((49d + 80) / 17) for d < 46 and
+             floor((49d + 57) / 17) for d >= 46; the code used +80 for d >= 46 and +57 below.
+             - d >= 46: one or two divsteps too many, safe; at some widths one batch too
+               many (len 12 = P-384: 38 -> 37 batches; 39, 66, 79, ... limbs; not 8, 64
+               or the RSA widths tested).
+             - d = 32 (one-limb m): 95 divsteps where the paper needs 96. Not a live failure:
+               the batches round 95 and 96 up to the same 4 (120 divsteps).
+             Fix: one helper _SSFBNS30Steps with the cases the right way round. The test now
+             pins it to the paper's own numbers (135 at d = 46 and 738 at d = 255, both in
+             the paper; 741 at 256), plus 96 at d = 32, 134 at 45, 1110 at 384 and 5906 at
+             2048. Red first (ut:4375 with the old formula). An exhaustive search at
+             d <= 13 found the true worst case below both formulas, so testing outputs can't
+             tell them apart; only the paper's values can.
 
       A2 FAULT CHECK (follow-up)
         Change: SSFBNModInvCT (so also ModInvOdd and ModInvExt with odd m) and

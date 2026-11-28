@@ -2019,9 +2019,13 @@ bool SSFBNModInvOdd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
 #define _SSF_BN_S30_LIMBS(n) ((((32u * (uint32_t)(n)) + 2u) + 29u) / 30u)
 #define _SSF_BN_S30_MAX_LIMBS _SSF_BN_S30_LIMBS(SSF_BN_MAX_MOD_LIMBS)
 
-/* The signed-limb code needs two's complement and arithmetic right shifts of negative values */
+/* The signed-limb code needs two's complement, arithmetic right shifts of negative values, */
+/* and modular narrowing of uint32_t values above INT32_MAX to int32_t (all implementation-  */
+/* defined; every target compiler does all three)                                            */
 typedef char _SSFBNS30ArithShiftCheck_t[((((int32_t)-2) >> 1) == (int32_t)-1) &&
-                                        ((((int64_t)-2) >> 1) == (int64_t)-1) ? 1 : -1];
+                                        ((((int64_t)-2) >> 1) == (int64_t)-1) &&
+                                        (((int32_t)0xFFFFFFFEu) == (int32_t)-2) &&
+                                        (((int32_t)0x80000000u) == INT32_MIN) ? 1 : -1];
 
 /* 2x2 transition matrix of 30 divsteps: 2^30 * (f', g') = (u * f + v * g, q * f + r * g) */
 typedef struct
@@ -2341,6 +2345,26 @@ uint32_t _SSFBNModInvCTUpdateDETest(const SSFBN_t *m, int32_t kd, int32_t cd, in
 #endif /* SSF_CONFIG_BN_UNIT_TEST */
 
 /* --------------------------------------------------------------------------------------------- */
+/* Divsteps that bring g to zero when f^2 + 4g^2 <= 5 * 2^(2 * bits): Bernstein-Yang Thm 11.2,   */
+/* floor((49d + 80) / 17) for d < 46 and floor((49d + 57) / 17) for d >= 46 (741 at 256 bits).    */
+/* Holds for odd f = m and any g = a below 2^bits, a >= m included.                              */
+/* --------------------------------------------------------------------------------------------- */
+static uint32_t _SSFBNS30Steps(uint32_t bits)
+{
+    return (bits < 46u) ? (((49u * bits) + 80u) / 17u) : (((49u * bits) + 57u) / 17u);
+}
+
+#if SSF_CONFIG_BN_UNIT_TEST == 1
+/* --------------------------------------------------------------------------------------------- */
+/* Test-only: the safegcd divstep count for a bits-wide modulus.                                 */
+/* --------------------------------------------------------------------------------------------- */
+uint32_t _SSFBNModInvCTStepsTest(uint32_t bits)
+{
+    return _SSFBNS30Steps(bits);
+}
+#endif /* SSF_CONFIG_BN_UNIT_TEST */
+
+/* --------------------------------------------------------------------------------------------- */
 /* safegcd: r = a^(-1) mod m if gcd(a, m) == 1; f, g, d, e, ms hold cap signed 30-bit limbs.     */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFBNModInvCTCore(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m, int32_t *f,
@@ -2370,11 +2394,8 @@ static bool _SSFBNModInvCTCore(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m, i
     if (SSFBNIsOne(m)) return false;
     /* No */
 
-    /* Divsteps that bring g to zero when f^2 + 4g^2 <= 5 * 2^(2 * bits) (Bernstein-Yang Thm   */
-    /* 11.2): true for odd f = m and any g = a below 2^bits, a >= m included. bits >= 32, so   */
-    /* the paper's separate bound for d < 22 never applies.                                     */
     bits = SSF_BN_LIMB_BITS * (uint32_t)m->len;
-    steps = (bits >= 46u) ? (((49u * bits) + 80u) / 17u) : (((49u * bits) + 57u) / 17u);
+    steps = _SSFBNS30Steps(bits);
     n = (uint16_t)_SSF_BN_S30_LIMBS(m->len);
 
     /* m^-1 mod 2^32 by Newton (m * m == 1 mod 8; each step doubles the correct bits) */
@@ -2452,7 +2473,8 @@ static bool _SSFBNModInvCTCore(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m, i
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* If gcd(a, m) == 1 writes r = a^(-1) mod m (odd m > 1, a < 2^(32 * m->len)), returns true.    */
+/* If gcd(a, m) == 1 writes r = a^(-1) mod m (odd m > 1, a < 2^(32 * m->len)), returns true;   */
+/* false for even m.                                                                             */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFBNModInvCT(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
 {
@@ -2475,7 +2497,14 @@ bool SSFBNModInvCT(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
     SSF_REQUIRE(m->len >= 1u);
     SSF_REQUIRE(m->len <= r->cap);
     SSF_REQUIRE(m->len <= SSF_BN_MAX_MOD_LIMBS);
-    SSF_REQUIRE((m->limbs[0] & 1u) != 0u);
+
+    /* Is m even (safegcd needs an odd modulus)? */
+    if (SSFBNIsEven(m))
+    {
+        /* Yes, m's parity is public (as in SSFBNModInvSmall); SSFBNModInvExt handles even m */
+        return false;
+    }
+    /* No */
 
     ok = _SSFBNModInvCTCore(&x, a, m, f, g, d, e, ms, (uint16_t)_SSF_BN_S30_MAX_LIMBS);
     /* Was an inverse found? */

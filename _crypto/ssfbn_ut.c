@@ -3766,6 +3766,26 @@ void SSFBNUnitTest(void)
 #endif
     }
 
+    /* ---- RSA-PERF R2: the row kernel body this target builds (0 C, 1 ARM UMAAL) ---- */
+    {
+        /* Named per architecture, not by the library's selection macro, so a wrong selection */
+        /* (a silent C fallback, or UMAAL picked where it does not exist) fails here           */
+#ifndef SSF_BN_CONFIG_ASM
+#error SSF_BN_CONFIG_ASM must be defined by ssfbn_opt.h
+#endif
+#if (SSF_BN_CONFIG_ASM == 1) && defined(__GNUC__) && !defined(__aarch64__) && \
+    (defined(__ARM_ARCH_7EM__) || defined(__ARM_ARCH_7A__) || defined(__ARM_ARCH_7R__) || \
+     defined(__ARM_ARCH_8A__) || defined(__ARM_ARCH_8R__) || \
+     ((defined(__ARM_ARCH_8M_MAIN__) || defined(__ARM_ARCH_8_1M_MAIN__)) && \
+      defined(__ARM_FEATURE_DSP)))
+        /* ARMv7E-M (M4 / M7), v8-M Mainline with DSP (M33 / M55), v7-A / R, AArch32 v8-A / R */
+        SSF_ASSERT(_SSFBNRowKernelId() == 1u);
+#else
+        /* Host, AArch64, v6-M (M0 / M0+), v7-M (M3), v8-M Baseline (M23), SSF_BN_CONFIG_ASM 0 */
+        SSF_ASSERT(_SSFBNRowKernelId() == 0u);
+#endif
+    }
+
     /* ---- Row kernel: _SSFBNMulAddRow vs a reference loop: all lengths, aliasing, extremes --- */
     {
         static const SSFBNLimb_t carries[] = { 0u, 1u, 0xFFFFFFFFu };

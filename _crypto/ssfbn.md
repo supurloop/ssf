@@ -71,15 +71,15 @@ other big-integer libraries.
 
   | Status | Functions |
   |---|---|
-  | **Constant-time** (safe on secrets) | [`SSFBNCmp`](#ssfbncmp), [`SSFBNModExp`/`SSFBNModExpMont`/`SSFBNModExpHalf`](#modexp), [`SSFBNMontMul`](#montmul), [`SSFBNMontSquare`](#montsquare), [`SSFBNMontConvertIn`/`Out`](#montconv), [`SSFBNCondSwap`](#condswap), [`SSFBNCondCopy`](#condswap), [`SSFBNAdd`](#ssfbnadd), [`SSFBNSub`](#ssfbnsub), [`SSFBNModAdd`](#modaddsub), [`SSFBNModSub`](#modaddsub), [`SSFBNModMulCT`/`SSFBNModMulCTOdd`](#ssfbnmodmulct), [`SSFBNModMulNISTPrime`](#modmulnist), [`SSFBNMul`](#ssfbnmul), [`SSFBNSquare`](#ssfbnsquare), [`SSFBNIsEven`/`SSFBNIsOdd`](#predicates), [`SSFBNIsZero`/`IsOne`](#predicates) (the returned bool is itself one bit; branching on it reveals that bit) |
+  | **Constant-time** (safe on secrets) | [`SSFBNCmp`](#ssfbncmp), [`SSFBNModExp`/`SSFBNModExpMont`/`SSFBNModExpHalf`](#modexp), [`SSFBNMontMul`](#montmul), [`SSFBNMontSquare`](#montsquare), [`SSFBNMontConvertIn`/`Out`](#montconv), [`SSFBNCondSwap`](#condswap), [`SSFBNCondCopy`](#condswap), [`SSFBNAdd`](#ssfbnadd), [`SSFBNSub`](#ssfbnsub), [`SSFBNModAdd`](#modaddsub), [`SSFBNModSub`](#modaddsub), [`SSFBNModMulCT`/`SSFBNModMulCTOdd`](#ssfbnmodmulct), [`SSFBNModMulNISTPrime`](#modmulnist), [`SSFBNMul`](#ssfbnmul), [`SSFBNSquare`](#ssfbnsquare), [`SSFBNIsEven`/`SSFBNIsOdd`](#predicates), [`SSFBNIsZero`/`IsOne`](#predicates) (the returned bool is itself one bit; branching on it reveals that bit), [`SSFBNModInvCT`](#modinvct) / [`SSFBNModInvSmall`](#modinvsmall) / [`SSFBNModInvOdd`](#modinv) (any odd `m`; whether an inverse exists is the returned bool) |
   | **Constant-time when `m` is odd and at most [`SSF_BN_MAX_MOD_LIMBS`](#ssf-bn-max-mod-limbs) limbs** (variable-time otherwise; parity and length are public) | [`SSFBNMod`](#ssfbnmod), [`SSFBNModMul`](#ssfbnmodmul), [`SSFBNModSquare`](#ssfbnmodsquare) |
-  | **Variable-time** (do not use on secrets) | [`SSFBNDivMod`](#ssfbndivmod), [`SSFBNGcd`](#ssfbngcd), [`SSFBNModInvExt`/`SSFBNModInvOdd`](#modinv), [`SSFBNModMulNIST`](#modmulnist) (constant-time only for the P-256 / P-384 primes), [`SSFBNModExpPub`/`SSFBNModExpMontPub`](#modexppub), [`SSFBNBitLen`](#bitlen), [`SSFBNTrailingZeros`](#trailingzeros), [`SSFBNShiftLeft1`/`Right1`](#shift), [`SSFBNShiftLeft`/`Right`](#shift-multi), [`SSFBNIsProbablePrime`](#ssfbnisprobableprime), [`SSFBNGenPrime`](#ssfbngenprime) |
-  | **Constant-time only when `m` is prime** | [`SSFBNModInvSmall`](#modinvsmall) — the same Fermat inverse at curve width (at most `SSF_BN_SMALL_MAX_LIMBS` limbs), with the same `a · r ≡ 1` check. [`SSFBNModInv`](#modinv) — uses Fermat's little theorem (`a^(m-2) mod m`), which is constant-time but yields the correct answer only for prime `m`. After computing it, the function verifies `a · r ≡ 1 (mod m)` with the constant-time [`SSFBNModMulCT`](#ssfbnmodmulct) and returns `false` if it does not hold, so non-prime moduli are rejected (even when an inverse exists). |
-- **Secret scalars go through `SSFBNModInv` / `SSFBNModInvSmall` (with prime `m`) or the ModExp
-  path, never `SSFBNModInvExt` or `SSFBNModExpPub`.** ECDSA signing, for instance, computes
+  | **Variable-time** (do not use on secrets) | [`SSFBNDivMod`](#ssfbndivmod), [`SSFBNGcd`](#ssfbngcd), [`SSFBNModInvExt`](#modinv) (constant-time for odd `m`; extended Euclid for even `m`), [`SSFBNModMulNIST`](#modmulnist) (constant-time only for the P-256 / P-384 primes), [`SSFBNModExpPub`/`SSFBNModExpMontPub`](#modexppub), [`SSFBNBitLen`](#bitlen), [`SSFBNTrailingZeros`](#trailingzeros), [`SSFBNShiftLeft1`/`Right1`](#shift), [`SSFBNShiftLeft`/`Right`](#shift-multi), [`SSFBNIsProbablePrime`](#ssfbnisprobableprime), [`SSFBNGenPrime`](#ssfbngenprime) |
+  | **Constant-time only when `m` is prime** | [`SSFBNModInv`](#modinv) — uses Fermat's little theorem (`a^(m-2) mod m`), which is constant-time but yields the correct answer only for prime `m`. After computing it, the function verifies `a · r ≡ 1 (mod m)` with the constant-time [`SSFBNModMulCT`](#ssfbnmodmulct) and returns `false` if it does not hold, so non-prime moduli are rejected (even when an inverse exists). |
+- **Secret scalars go through `SSFBNModInvCT` / `SSFBNModInvSmall` / `SSFBNModInvOdd` (any odd
+  `m`), `SSFBNModInv` (prime `m`) or the ModExp path, never `SSFBNModInvExt` with an even `m`
+  or `SSFBNModExpPub`.** ECDSA signing, for instance, computes
   `k⁻¹ mod n` where `n` is the curve order (prime); ssfecdsa uses `SSFBNModInvSmall` there.
-  Reserve `SSFBNModInvExt` for cases where the modulus is known non-prime *and* none of the
-  inputs are secret.
+  Reserve `SSFBNModInvExt` with an even modulus for cases where none of the inputs are secret.
   Reserve `SSFBNModExpPub` / `SSFBNModExpMontPub` for public-exponent operations such as
   RSA verify (`e = 65537`).
 - **`SSFBNMul` and `SSFBNSquare` expand; the caller must size the destination.** For
@@ -151,6 +151,9 @@ other big-integer libraries.
   `_SSFBNMulAddRow` (one row of `r[j] = low(a × b[j] + x[j] + carry)`) is the innermost loop
   of `SSFBNMontMul`, `SSFBNMontSquare` and the schoolbook multiply and carries no parameter
   asserts; every caller passes limb arrays and lengths it has already checked.
+  `_SSFBNS30Divsteps`, `_SSFBNS30UpdateFG` and `_SSFBNS30UpdateDE` run once per 30-divstep
+  batch of [`SSFBNModInvCT()`](#modinvct), on its own local arrays, and carry no parameter
+  asserts.
 
 <a id="configuration"></a>
 
@@ -273,10 +276,11 @@ The `ssfrsa` and `ssfbn` modules sanity-check against this macro at compile time
 | | [`void SSFBNModMulNIST(r, a, b, m)`](#modmulnist) | `r = (a × b) mod m` using NIST fast reduction for P-256 / P-384 |
 | | [`void SSFBNModMulNISTPrime(r, a, b, m)`](#modmulnist) | The same for `m` the P-256 or P-384 prime only (no generic fallback); constant-time |
 | | [`bool SSFBNModInv(r, a, m)`](#modinv) | `r = a⁻¹ mod m` via Fermat's little theorem (prime `m`) |
-| | [`bool SSFBNModInvSmall(r, a, m)`](#modinvsmall) | `r = a⁻¹ mod m`, Fermat at curve width (prime `m` of at most `SSF_BN_SMALL_MAX_LIMBS` limbs); constant-time |
+| | [`bool SSFBNModInvSmall(r, a, m)`](#modinvsmall) | `r = a⁻¹ mod m`, safegcd at curve width (odd `m` of at most `SSF_BN_SMALL_MAX_LIMBS` limbs), with an `a · r ≡ 1` check; constant-time |
 | | [`void SSFBNModMulSmall(r, a, b, m)`](#modinvsmall) | `r = (a × b) mod m` at curve width (odd `m`, `b < m`); constant-time |
-| | [`bool SSFBNModInvExt(r, a, m)`](#modinv) | `r = a⁻¹ mod m` via binary extended GCD (odd `m`) or extended Euclid (any coprime `m`); variable-time |
-| | [`bool SSFBNModInvOdd(r, a, m)`](#modinv) | `r = a⁻¹ mod m` via binary extended GCD only (odd `m`, `a < m`); variable-time |
+| | [`bool SSFBNModInvExt(r, a, m)`](#modinv) | `r = a⁻¹ mod m` via safegcd (odd `m`, constant-time) or extended Euclid (even `m`, variable-time) |
+| | [`bool SSFBNModInvOdd(r, a, m)`](#modinv) | `r = a⁻¹ mod m` via safegcd (odd `m`, `a < m`); constant-time |
+| | [`bool SSFBNModInvCT(r, a, m)`](#modinvct) | `r = a⁻¹ mod m` via Bernstein–Yang safegcd (odd `m > 1`, prime or not); constant-time |
 | | [`void SSFBNGcd(r, a, b)`](#ssfbngcd) | `r = gcd(a, b)` via binary GCD |
 
 **[Montgomery multiplication](#mont)**
@@ -498,7 +502,7 @@ void SSFBNShiftRight1(SSFBN_t *a);
 ```
 In-place 1-bit shifts. `ShiftLeft1` discards the top bit if it overflows the active limb
 count; `ShiftRight1` discards the LSB. The module's shift-and-subtract reductions use them;
-the binary extended GCD shifts its working values over their shrinking length instead.
+the safegcd inverse shifts its signed 30-bit working values inside each batch instead.
 
 <a id="shift-multi"></a>
 ```c
@@ -755,46 +759,88 @@ bool SSFBNModInvOdd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
   (`m − 2`, then the check product) is held at that width and wiped before it returns from
   either outcome of the check, since `m` can be secret (RSA keygen's `q⁻¹ mod p`). The frame is 544 B at the
   RSA-4096 cap.
-- [`SSFBNModInvExt`](#modinv) works for any coprime `a` and `m`. For odd `m` and
-  `0 < a < m` it runs the binary extended GCD (halvings and subtractions only;
-  about 6× faster than extended Euclid at 2048 bits). Its shifts, compares and subtractions
-  work over the limbs `u` and `v` still occupy, which shrink as they converge, and each
-  halving of a coefficient mod `m` is one pass. For even `m` or an unreduced `a` it runs
-  extended Euclid.
-  **Variable-time** in both paths — do not use on long-term secrets. No in-tree module calls
-  it (RSA keygen derives `d` without a general inverse), so with
-  `--gc-sections` extended Euclid is linked only when an application calls it.
-- [`SSFBNModInvOdd`](#modinv) is the binary path alone: `m` must be odd and `a < m`
-  (`SSF_REQUIRE`); `a = 0` or a shared factor returns `false`. Same result and timing as
-  `SSFBNModInvExt` on those inputs, without linking extended Euclid. RSA signing uses it for
-  the per-signature blinding inverse `r⁻¹ mod n` of a fresh random `r`, whose timing exposure is
-  described in [ssfrsa](ssfrsa.md); the binary path's intermediates are wiped.
-  `m->len` must not exceed [`SSF_BN_MAX_MOD_LIMBS`](#ssf-bn-max-mod-limbs) (`SSF_REQUIRE`;
-  the final `a · r` check needs `2 · m->len` limbs).
-  Extended Euclid holds its values at that width and only its quotient product at
-  `SSF_BN_MAX_LIMBS` (5.2 KB of stack at the RSA-4096 cap).
+- [`SSFBNModInvExt`](#modinv) works for any coprime `a` and `m`. For odd `m` it is
+  [`SSFBNModInvCT`](#modinvct) (constant-time; `a` reduced or not). For even `m` it runs
+  extended Euclid, which is **variable-time** — do not use it on secrets with an even
+  modulus. No in-tree module calls it (RSA keygen derives `d` without a general inverse), so
+  with `--gc-sections` extended Euclid is linked only when an application calls it. Extended
+  Euclid holds its values at `m`'s width and only its quotient product at `SSF_BN_MAX_LIMBS`
+  (5.2 KB of stack at the RSA-4096 cap).
+- [`SSFBNModInvOdd`](#modinv) is [`SSFBNModInvCT`](#modinvct) with the narrower contract it
+  has always had: `m` odd and `a < m` (`SSF_REQUIRE`); `a = 0` or a shared factor returns
+  `false`. It was the binary extended GCD (variable-time) until R3(c) P4 (2026-11); the
+  result is the same and it is now constant-time. No in-tree module calls it.
+  `m->len` must not exceed [`SSF_BN_MAX_MOD_LIMBS`](#ssf-bn-max-mod-limbs) for either function
+  (`SSF_REQUIRE`).
+
+<a id="modinvct"></a>
+```c
+bool SSFBNModInvCT(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
+```
+`r = a⁻¹ mod m` in constant time for any odd `m > 1`, prime or not (`SSF_REQUIRE`:
+`a->len == m->len`, `m->len` at most [`SSF_BN_MAX_MOD_LIMBS`](#ssf-bn-max-mod-limbs)). `a`
+need not be reduced; it acts as `a mod m`. Returns `false` when `gcd(a, m) ≠ 1`, including
+`a ≡ 0`, for `m = 1`, and for an even `m` (treated as public, as in
+[`SSFBNModInvSmall`](#modinvsmall); [`SSFBNModInvExt`](#modinv) inverts modulo an even `m`);
+`r` is written only on success. `r` may alias `a`. Before writing
+`r` it checks `a · r ≡ 1 (mod m)` with the constant-time
+[`SSFBNModMulCTOdd`](#ssfbnmodmulct), a fault check, and returns `false` if that fails (about
+0.6 M instructions at 2048 bits, ARMv7-A). [`SSFBNModInvOdd`](#modinv) and the odd-`m` path
+of [`SSFBNModInvExt`](#modinv) are this function, so they have the check too.
+
+The algorithm is Bernstein and Yang's safegcd ("Fast constant-time gcd computation and
+modular inversion", TCHES 2019), with signed 30-bit limbs as described in libsecp256k1's
+`doc/safegcd_implementation.md`. Divsteps run in branch-free batches of 30 on the low bits,
+and each batch's 2×2 matrix updates the full-width values. The number of divsteps is fixed by
+the width of `m`, `⌊(49d + 57) / 17⌋` for `d = 32 · m->len ≥ 46` (741 at 256 bits) and
+`⌊(49d + 80) / 17⌋` below (one-limb `m`), which the paper's Theorem 11.2 proves brings `g` to zero whenever `f² + 4g² ≤ 5 · 2^(2d)`: every
+odd `m` and every `a` at `m->len` limbs. Run time therefore depends
+only on `m->len`: under qemu the executed instruction count is identical for every `a` and
+every `m` of a given width. The only difference is the final write of `r`, skipped when the
+returned result is `false`.
+
+Cost (ARMv7-A Thumb-2 `-Os` instructions; the old inverses for comparison):
+
+| Width | `SSFBNModInvCT` | Fermat (`SSFBNModInvSmall` before R3(c)) | binary GCD (`SSFBNModInvOdd` before R3(c) P4, variable-time) |
+|---|---:|---:|---:|
+| 256-bit | 49 K | 702 K | 151 K |
+| 384-bit | 85 K | 1,875 K | 298 K |
+| 2048-bit | 1.25 M | — | 7.27 M |
+| 4096-bit | 4.51 M | — | 28.8 M |
+
+The working arrays (`f`, `g`, `d`, `e` and the modulus, each `⌈(32 · n + 2) / 30⌉` limbs) and
+the candidate inverse and check product are sized for `SSF_BN_MAX_MOD_LIMBS`. On Cortex-M4
+`-Os` at the RSA-4096 cap the frame is 3.8 KB, and the whole call about 5.4 KB with the check
+multiply. `f`, `g`, `d`, `e`, the copy of `m`, the batch matrix, the candidate and the
+product are wiped before it returns (`m` may be a secret prime). Requires two's complement
+integers, arithmetic right shifts of negative values and modular narrowing to `int32_t`; a
+compile-time check rejects other compilers.
 
 <a id="modinvsmall"></a>
 ```c
 bool SSFBNModInvSmall(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
 void SSFBNModMulSmall(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m);
 ```
-Curve-width counterparts of [`SSFBNModInv`](#modinv) and [`SSFBNModMulCT`](#ssfbnmodmulct) for
+Curve-width counterparts of [`SSFBNModInvCT`](#modinvct) and [`SSFBNModMulCT`](#ssfbnmodmulct) for
 moduli of at most `SSF_BN_SMALL_MAX_LIMBS` limbs (12, a P-384 value, or the whole BN cap in
 builds narrower than that). Their working storage is sized by that constant rather than by
 `SSF_BN_CONFIG_MAX_BITS`, so in a build that also enables RSA they need a small fraction of the
-stack of the full-width routines: on Cortex-M4 (default RSA-4096 cap) the call chain under
-`SSFBNModInvSmall` peaks at about 4.4 KB, against about 16.8 KB under `SSFBNModInv` →
-`SSFBNModExp` → `SSFBNModExpMont`. ssfec and ssfecdsa use them for every inverse and mod-n
+stack of the full-width routines: on Cortex-M4 `-Os` the `SSFBNModInvSmall` frame is 424 B plus
+144 B for the shared safegcd core, against 3.8 KB for `SSFBNModInvCT` at the RSA-4096 cap and
+about 16.8 KB under `SSFBNModInv` → `SSFBNModExp` → `SSFBNModExpMont`. ssfec and ssfecdsa use them for every inverse and mod-n
 product.
 
-- `SSFBNModInvSmall` computes `a^(m-2) mod m` in Montgomery form with 4-bit windows. The
-  exponent `m - 2` is public, so the sequence of squares and table reads depends only on `m`
-  and the table is indexed directly: **constant-time** in `a`. It then checks
-  `a · r ≡ 1 (mod m)` and returns `false` if that fails, exactly like `SSFBNModInv`: `false`
-  for `a = 0`, an even `m` (treated as public), `m = 1`, a composite `m`, or `gcd(a, m) ≠ 1`.
-  `r` may alias `a`. Every value derived from `a`, and the Montgomery context, is wiped before
-  return.
+- `SSFBNModInvSmall` runs the constant-time safegcd of [`SSFBNModInvCT`](#modinvct) on
+  working arrays sized by `SSF_BN_SMALL_MAX_LIMBS`, so its run time depends only on `m->len`:
+  **constant-time** in `a`, for any odd `m`, prime or not. `a` need not be reduced: any `a` at
+  `m->len` limbs acts as `a mod m` (SSFECPointToAffine relies on this to refuse `Z = p`). It
+  then checks `a · r ≡ 1 (mod m)` with `SSFBNModMulSmall`, a constant-time fault check, and
+  returns `false` if that fails. Returns `false` for `a ≡ 0`, an even `m` (treated as public),
+  `m = 1` or `gcd(a, m) ≠ 1`; `r` is written only on success. `r` may alias `a`. The working
+  arrays, the check product and the candidate inverse are wiped before return. Until R3(c) (2026-11)
+  this was a Fermat inverse, which also returned `false` for a composite `m`; safegcd returns
+  the inverse whenever it exists. P-256: 49 K instructions against Fermat's 702 K (ARMv7-A,
+  see [`SSFBNModInvCT`](#modinvct)).
 - `SSFBNModMulSmall` computes `MontMul(MontMul(a, b), R²)`: exact for any `a < R` (that is,
   any `a` at `m->len` limbs, reduced or not) when `b < m`. `m` must be odd (it asserts
   otherwise). **Constant-time.** `r` may alias `a` or `b`. Its intermediate and its Montgomery
@@ -874,7 +920,7 @@ fixed-length and O(n), so the squaring time
 depends only on `ctx->len`, never on the operand's limb values. This matches the
 constant-time guarantee `SSFBNMontMul` already provides, which is what lets the
 `SSFBNModExp` / `SSFBNModExpMont` path stay side-channel-resistant on secret exponents
-(RSA private-key CRT exponentiations, ECDSA Fermat nonce inversion). `r` may alias `a`
+(RSA private-key CRT exponentiations, the Fermat inverse `SSFBNModInv`). `r` may alias `a`
 (`SSFBNMontInit` squares in place). Like `SSFBNMontMul`, it zeroizes its `t` scratch before
 returning.
 

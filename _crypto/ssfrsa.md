@@ -135,17 +135,18 @@ comparable security.
   single faulty signature if an attacker can glitch one of the two `modexp` branches during
   sign; this is defended by the built-in verify-after-sign check (see below). The blinding
   and the fresh `r` are the reason signing requires platform entropy on every call.
-- **One step of the private-key operation is variable-time, by design.** `r⁻¹ mod n` is
-  computed with [`SSFBNModInvOdd()`](ssfbn.md#modinv) (the binary extended GCD for odd `n`),
-  whose run time depends on `r`. It does not expose the message or the CRT exponents: `r` is
-  fresh random on every call and never reused, and the exponentiations that use `dp` / `dq`
-  are constant-time and exponent-blinded. What a precise timing observer could learn is
-  information about a single call's blinding factor, which weakens base blinding for that
-  call only. The reduction of the blinded input by the secret primes (`cB mod p`,
-  `cB mod q`) is constant-time: [`SSFBNMod()`](ssfbn.md#ssfbnmod) reduces an odd modulus by
-  Montgomery reduction. Deployments where an attacker can take very fine-grained timing or
-  power measurements of individual signatures should treat RSA signing here as blinded but
-  not fully constant-time.
+- **Every step of the private-key operation on secret data is constant-time.** The
+  blinding inverse `r⁻¹ mod n` is computed with [`SSFBNModInvCT()`](ssfbn.md#modinvct), the
+  Bernstein–Yang safegcd, whose run time depends only on the width of `n`. Until R3(c)
+  (2026-11) it was the variable-time binary GCD, whose timing could reveal information about
+  one call's blinding factor. The reduction of the blinded input by the secret primes
+  (`cB mod p`, `cB mod q`) is constant-time: [`SSFBNMod()`](ssfbn.md#ssfbnmod) reduces an odd
+  modulus by Montgomery reduction. The only data-dependent timing left is in drawing the
+  blinds: [`SSFBNRandomBelow()`](ssfbn.md#ssfbnrandombelow) rejects and redraws candidates
+  that are not below `n`, and a draw that shares a factor with `n` (probability about
+  2⁻¹⁰²³ at 2048 bits) is redrawn. Both depend only on discarded random values, not on the key
+  or the message. A unit test asserts that signing never calls the variable-time inverse and
+  runs the constant-time one at the width of `n`.
 - **Key generation derives `d` in constant time.** With the fixed `e = 65537` (prime, and
   coprime to `λ(n)` by the FIPS check), `d = (1 + k · λ(n)) / 65537` for
   `k = −λ(n)⁻¹ mod 65537`: a sum of limbs for `λ(n) mod 65537` (`2³² ≡ 1`), a fixed

@@ -2352,6 +2352,7 @@ void SSFECDSAUnitTest(void)
         {
             privLen = (curves[ci] == SSF_EC_CURVE_P256) ? 32u : 48u;
             _SSFBNFullWidthCalls = 0u;
+            _SSFBNModInvCTBatches = 0u;
             SSF_ASSERT(SSFECDSAKeyGen(curves[ci], priv, privLen, pub, sizeof(pub), &pubLen));
 #if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
             SSF_ASSERT(SSFECDSASign(curves[ci], priv, privLen, hash, privLen, sig, sizeof(sig),
@@ -2361,6 +2362,8 @@ void SSFECDSAUnitTest(void)
             SSF_ASSERT(SSFECDHComputeSecret(curves[ci], priv, privLen, pub, pubLen, secret,
                                             sizeof(secret), &secretLen));
             SSF_ASSERT(_SSFBNFullWidthCalls == 0u);
+            /* The inverses (Z^-1, k^-1, s^-1) are the constant-time safegcd (R3(c) P2) */
+            SSF_ASSERT(_SSFBNModInvCTBatches > 0u);
         }
     }
 #endif /* SSF_CONFIG_BN_UNIT_TEST */

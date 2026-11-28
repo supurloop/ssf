@@ -698,13 +698,14 @@ static bool _SSFRSAPrivateOpCRT(const SSFBN_t *c, uint16_t nLimbs, const SSFBN_t
     SSFPRNGInitContext(&prng, entropy, sizeof(entropy));
     prngInited = true;
 
-    /* Message (base) blinding: pick random r in [1, n) coprime to n; rInv = r^-1 mod n. */
+    /* Message (base) blinding: pick random r in [1, n) coprime to n; rInv = r^-1 mod n, */
+    /* by the constant-time safegcd, so no step of signing depends on r's value in time   */
     for (attempts = 0u; attempts < 16u; attempts++)
     {
         if (!SSFBNRandomBelow(&r, n, &prng)) continue;
         if (SSFBNIsZero(&r)) continue;
         /* Is r coprime to n (the inverse exists)? */
-        if (SSFBNModInvOdd(&rInv, &r, n)) break;
+        if (SSFBNModInvCT(&rInv, &r, n)) break;
     }
     if (attempts >= 16u) goto cleanup;
 

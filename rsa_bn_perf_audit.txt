@@ -5,8 +5,8 @@ Scope      : run time of RSA sign / verify / keygen and the ssfbn code under the
              speedup costs in code size, RAM and security properties. Code at commit e9cd857
              (branch mqtt). Nothing here is applied to the tree; all numbers are from
              prototypes in a scratch copy.
-Status     : R5 DONE (f8b3342); R1 DONE (cfccdaa); R3(a) DONE;
-             others OPEN.
+Status     : R5 DONE (f8b3342); R1 DONE (cfccdaa); R3(a) DONE (0b3114d); R3(c) P1-P4 (see the
+             git log); others OPEN.
 
 SUMMARY
 -------
@@ -198,7 +198,7 @@ R2. UMAAL in the row kernel (ARMv7E-M: M4, M7, M33/M55 with DSP; ARMv6+ A/R)    
     back to C unless given their own syntax). Cortex-M3 (ARMv7-M, no DSP) has no UMAAL and
     uses the C path. UMAAL has fixed timing, so constant time is kept.
 
-R3. Faster blinding inverse r^-1 mod n                  (a) DONE; (b), (c) OPEN
+R3. Faster blinding inverse r^-1 mod n                  (a) DONE (0b3114d); (c) DONE (P1-P4); (b) DROPPED
     Today _SSFBNModInvBinary runs every step at the full width of n, and halving x needs a
     separate add pass plus a shift pass.
     (a) Prototyped: shrink the working length of u and v as they lose limbs, and halve x in
@@ -307,6 +307,414 @@ R3. Faster blinding inverse r^-1 mod n                  (a) DONE; (b), (c) OPEN
     (ARM) unchanged for every operation (RSA sign 21,536, PSS sign 22,344, verify 9,664,
     keygen 26,272; P-256 / P-384 keygen 4,248, sign 5,112, verify 6,368, ECDH 6,320; X25519
     2,680; Ed25519 3,728).
+
+    R3(b) / R3(c) PROPOSAL
+    Measured costs at 21712ba + R3(a). ARM instructions. Each cost is the difference made by
+    running that call twice in a scratch copy.
+      RSA-2048 sign (70.4 M):  r^-1 mod n (binary GCD, variable-time)     7.38 M  10.5%
+                               unblinding ModMulCTOdd at n width          0.64 M
+                               one SSFBNMod by p (half width)             0.22 M
+                               one ModMulCTOdd mod p (half width)         0.18 M
+      RSA-4096 sign (434.5 M): r^-1 mod n 28.59 M (6.6%); unblinding 2.45 M; Mod by p 0.81 M;
+                               half-width ModMulCTOdd 0.64 M
+      SSFBNModInvSmall (Fermat, constant-time), each call:
+                               P-256 0.70 M; P-384 1.88 M (the same for mod p and mod n)
+        ECDSA sign  = k^-1 + Z^-1 (to affine): P-256 1.40 M of 5.20 M (27%), P-384 3.75 M
+                      of 13.06 M (29%)
+        ECDSA verify = w = s^-1 + Z^-1: about 9% of verify; keygen and ECDH: one Z^-1 each
+                      (about 16% of keygen, 4.6% of ECDH)
+
+    (c) Constant-time modular inverse: Bernstein-Yang "safegcd" (divsteps)       RECOMMENDED
+      Algorithm: Bernstein and Yang, "Fast constant-time gcd computation and modular
+        inversion" (TCHES 2019). The value is held as signed 30-bit limbs in int32_t.
+        Batches of 30 divsteps run on the low bits only, and each batch builds a 2x2
+        transition matrix. The matrix is then applied to f, g (full width, then shifted down
+        30 bits) and to d, e mod m (with m^-1 mod 2^30 to keep them exact). The number of
+        divsteps is fixed by the modulus bit size: ceil((49d + 80) / 17) for d >= 46 (paper,
+        Thm 11.2); d is public. That is 5,908 divsteps (197 batches) at 2048 bits and 724 at
+        256 bits. Works for any odd m, prime or not. At the end f = +-gcd(a, m), so "no
+        inverse" is detected in constant time.
+        Reference to study, not copy: libsecp256k1's modinv32 and its
+        doc/safegcd_implementation.md (MIT). SSF is BSD-3. Write it from the paper and the
+        tutorial; if any code is adapted, keep the MIT notice.
+      API: SSFBNModInvCT(r, a, m) for odd m <= SSF_BN_MAX_MOD_LIMBS, 0 <= a < m, plus a
+        curve-width wrapper on the same core (frames sized by SSF_BN_SMALL_MAX_LIMBS),
+        following the ModInv / ModInvSmall pattern. It returns false when gcd != 1, and it
+        keeps the constant-time a * r == 1 check that the Fermat paths have (fault
+        detection).
+      Callers, in order of gain:
+        1. ECC: SSFECPointToAffine Z^-1, ECDSA sign k^-1, verify s^-1 (replaces
+           SSFBNModInvSmall).
+        2. RSA sign blinding r^-1 mod n (replaces SSFBNModInvOdd). Signing then has no
+           variable-time step, and the "one step is variable-time" caveat in ssfrsa.md goes.
+        3. Optional: RSA keygen q^-1 mod p (one call per keygen; speed does not matter, it
+           only lets the Fermat code be shared or dropped).
+      Estimates. Not prototyped. Per batch: about 750 instructions of divsteps plus about
+        40 instructions per limb for the f, g and d, e updates. The ranges allow a 2-3x
+        margin.
+        Inverse     today                    safegcd (est.)    Effect on the operation
+        P-256       0.70 M (Fermat)          50-150 K          sign -21..-25%, keygen -13..-15%,
+                                                               verify -7..-8%, ECDH -4%
+        P-384       1.88 M (Fermat)          100-300 K         sign -24..-27%, verify ~-8%
+        RSA-2048    7.38 M (binary, VT)      0.7-2.1 M         sign -7.5..-9.5%
+        RSA-4096    28.6 M (binary, VT)      2.8-8 M           sign -4.7..-5.9%
+        M0+: fewer limb products than Fermat (about 1.4 K versus 19 K at 256 bits), so the
+        gain there is at least as large.
+      Code: +1.2 to 2 KB for the core. If every caller switches, the Fermat ModInvSmall
+        (and the binary GCD, if ModInvOdd moves onto the core) can be dropped. Net about
+        +0.5 to 1.5 KB.
+      RAM: f, g, d, e as int32 arrays of ceil(bits / 30) + 1 limbs. At the 4096-bit cap that
+        is 4 x 139 x 4 = 2.2 KB, against 2 KB for the binary GCD's u, v, x1, x2; the RSA
+        sign peak should not change (verify). Curve width: 4 x 14 x 4 = 224 B, against
+        ModInvSmall's 16-entry table (768 B) plus temporaries. The ECC peak stack likely
+        drops by about 0.5 KB.
+      Risks: the most review effort of any item. The divstep bound must cover every input.
+        The paper's bound is proven; the tighter "hddivsteps" bound used by libsecp256k1 is
+        proven only for 256 bits, so use the paper's. Signed-limb carry handling and the
+        mod-m update are where bugs hide.
+      Plan (TDD, phases with gates):
+        P1  Core + test entry, no callers. Tests:
+              - against ModInvOdd (binary) on random odd m of 1..128 limbs, and against
+                Fermat on the NIST p and n and on RSA primes
+              - gcd != 1 (1- to 3-limb shared factors, a | m), a = 0, a = 1, a = m - 1,
+                m = 3
+              - all-ones and top-bit-only operands
+              - a work counter: batches == ceil(bound / 30) for every input of a given
+                width
+              - scrub hook: all working arrays wiped
+            Constant-time check outside the unit tests: under qemu, the inverse's executed
+            instruction count must be identical across random a (and across m of the same
+            width). Review the disassembly for data-dependent branches.
+            Measure per-size cost on ARM against Fermat and binary.
+            GATE: continue only if P-256 <= 150 K and RSA-2048 <= 2.5 M instructions.
+        P2  ECC callers. ECDSA, EC and ECDH unit tests unchanged; EC-O3 guard kept. Measure.
+        P3  RSA blinding. The R3 guard test becomes: no variable-time inverse calls during
+            sign, and the constant-time core ran at n width. ssfrsa.md: drop the
+            variable-time caveat.
+        P4  Optional cleanup: ModInvOdd and ModInvSmall become wrappers on the core (code
+            size). Keep the public API.
+        Each phase measured like R1 and R3(a), committed separately.
+
+      P1 RESULTS (core, no callers)                                     GATE PASSED
+        API: SSFBNModInvCT(r, a, m) in ssfbn.c / ssfbn.h, written from the paper and the
+          libsecp256k1 tutorial. Original divsteps (not hddivsteps), the paper's bound, signed
+          30-bit limbs, 30 divsteps per batch. The d / e update pre-adds m for negative
+          inputs and the final normalization follows the tutorial. A compile-time check
+          rejects compilers without two's complement arithmetic right shifts. f, g, d, e and
+          the batch matrix are wiped.
+        TDD: the tests failed to build first (no API). Then green:
+          - against ModInvOdd on random, all-ones, 2^(32n-1)+1 and small-top odd m at 1, 2,
+            3, 5, 8, 9, 12, 16, 32, 33, 64 and SSF_BN_MAX_MOD_LIMBS limbs, with a random, 1,
+            m-1, m-2, all-ones mod m and 0
+          - against Fermat on P-256 and P-384
+          - known small values; gcd of 1-3 limbs; a | m; m = 1
+          - r aliasing a; scrub hook (4 wipes, all clean); contracts
+          - fixed batch count, ceil(steps / 30), for every input of a width
+          - test-only range check: d, e stay in (-2m, m) after every batch
+          - one d / e update at its extremes: d, e in {-2m+1, -m, -1, 0, 1, m-1} against
+            matrices with |u|+|v| = |q|+|r| = 2^30 (on P-256, an all-ones and a small-top
+            modulus)
+        Mutation check: each of these failed the tests:
+          - no negation for f = -1
+          - no final add of m
+          - two thirds of the divsteps (g != 0 assert)
+          - m^-1 correct to only 24 bits
+          - no pre-add of m in the d / e update. This one passed every end-to-end test and
+            was caught only by the extreme-update test, which was added for it.
+        Constant time (qemu, ARMv7, unit tests off): the instructions executed inside the
+          inverse (SSFBNModInvCT and its helpers) are identical for random a, a = 1, a = m-1
+          and two different m, at 256 and 2048 bits. The only difference is a = 0 (no
+          inverse): the final write of r is skipped, which is the documented returned
+          result. Whole-program counts: identical across 8 inputs per (width, input class)
+          at 32, 256, 384, 2048 and 4096 bits.
+        Cost, instructions in the inverse only (driver setup subtracted):
+          Width       safegcd (CT)   Fermat (CT)        binary GCD (VT)
+          ARMv7-A Thumb-2 -Os:
+          256-bit       49.4 K       702.0 K (14.2x)    151.3 K
+          384-bit       84.7 K       1,875 K (22.1x)    297.5 K
+          2048-bit      1.253 M      -                  7.267 M (5.8x)
+          4096-bit      4.512 M      -                  28.80 M (6.4x)
+          Cortex-M0+ (ssfbn for ARMv6-M):
+          256-bit      172.8 K       2,930 K (17.0x)    273.1 K
+          384-bit      342.9 K       8,843 K (25.8x)    -
+          2048-bit     7.739 M       -                  13.97 M (1.8x)
+          4096-bit     29.99 M       -                  55.60 M (1.9x)
+          GATE: P-256 49 K <= 150 K, RSA-2048 1.25 M <= 2.5 M. Passed.
+        Projected for P2 / P3 (ARMv7): P-256 sign -25%, P-384 sign -27% (two inverses each),
+          RSA-2048 sign -8.5%, RSA-4096 sign -5.6%.
+        Code: ssfbn.o +1,516 B (M4), +1,980 B (M0+). Client image unchanged: there are no
+          callers yet, so --gc-sections drops it (M4 103,184 both; M0+ +12 B from assert line
+          numbers; LTO identical).
+        RAM: no static RAM. Stack frame 2,904 B (M4) at the 4096-bit cap, sized for
+          SSF_BN_MAX_MOD_LIMBS; for comparison ModInvBinary 2,128 B, ModInvSmall 1,216 B.
+          P2 therefore needs the curve-width entry point (frames by SSF_BN_SMALL_MAX_LIMBS,
+          about 300 B), or the ECC peak stack would grow.
+        Checks: host build 0 warnings (-Wall -Wextra -pedantic); ARM builds 0 warnings (the
+          same 3 POSIX-only files fail); BN, EC, ECDSA, RSA unit tests pass.
+
+      P2 RESULTS (ECC callers)
+        Change: SSFBNModInvSmall, used for every ECC inverse (SSFECPointToAffine Z^-1, ECDSA
+          sign k^-1, verify s^-1 and the verify-after-sign s^-1), now runs the safegcd core
+          on arrays sized by SSF_BN_SMALL_MAX_LIMBS instead of the Fermat exponentiation.
+          No caller changed. The safegcd body is now _SSFBNModInvCTCore(..., arrays, cap),
+          shared by SSFBNModInvCT (cap-width arrays) and SSFBNModInvSmall (curve-width).
+          The constant-time a * r == 1 check is kept (SSFBNModMulSmall), as fault detection.
+          The Fermat body is gone.
+        Contract:
+          - a need not be reduced. SSFECPointToAffine must refuse an unreduced Z = p (an
+            AWSPROV-G13 test), and the paper's bound covers every g < 2^d, so a >= m acts as
+            a mod m in both entry points (the P1 "a < m" precondition is dropped).
+          - A composite m with gcd(a, m) = 1 now returns the inverse. Fermat returned false
+            there. ECC moduli are prime, so callers see no difference.
+          - r is written only on success. Fermat always wrote it; every caller discards r on
+            false.
+        TDD: red first.
+          - The composite-modulus test (2^-1 mod 15 = 8) failed on Fermat.
+          - Also added: a P-256 batch count of 25, a = m (no inverse), a = m + 1 (inverse
+            1), all ones, against its residue, in both entry points; the scrub count
+            (9 wipes); ECDSA EC-O3: safegcd batches > 0 during keygen, sign, verify, ECDH.
+          - Found on the way: the a * r check must use a copy of a when r aliases a, and
+            the test-only range check is kept out of line (-Wstrict-overflow).
+          - BN, EC, ECDSA, RSA unit tests pass, including the EC-O3 full-width guard and
+            ToAffine's wipe audits. Host and ARM builds 0 warnings (same 3 POSIX-only files
+            fail on ARM).
+        Constant time: ECC inverses go from Fermat (constant-time) to safegcd (constant-time,
+          instruction counts checked in P1). Nothing else changed.
+
+        Speed: ARM instructions, before = 8275f2b (R3(a)), after = + P2, method as for R1.
+          Operation           Before          After        Delta
+          P-256 keygen       4,339,573      3,706,056     -14.60%
+          P-256 sign         5,156,065      3,889,031     -24.57%
+          P-256 verify      15,989,212     15,355,695      -3.96%
+          P-256 ECDH        15,256,236     14,622,719      -4.15%
+          P-384 keygen      10,806,444      9,051,600     -16.24%
+          P-384 sign        13,021,397      9,511,709     -26.95%
+          P-384 verify      40,906,870     39,152,026      -4.29%
+          P-384 ECDH        38,250,373     36,495,529      -4.59%
+          RSA-2048 / 4096 sign and verify (PKCS#1, PSS), RSA keygen: identical (same key)
+          X25519, Ed25519: identical
+          Verify and ECDH save one inverse each (the proposal assumed two for verify).
+        Cortex-M0+ (ssfbn compiled for ARMv6-M):
+          P-256 keygen      11,689,839      8,989,546     -23.10%
+          P-256 sign        14,843,472      9,440,198     -36.40%
+          P-256 verify      43,625,531     40,922,238      -6.20%
+          P-256 ECDH        42,216,732     39,516,850      -6.40%
+          P-384 keygen      32,924,902     24,492,256     -25.61%
+          P-384 sign        42,357,538     25,521,469     -39.75%
+          P-384 verify     123,170,687    114,773,402      -6.82%
+          P-384 ECDH       116,655,708    108,225,345      -7.23%
+          RSA-2048 sign / verify: identical
+
+        Code size: arm-none-eabi-gcc 15.2.0 -Os, client image (text + data, bytes).
+          Image                Before     After   Delta
+          Cortex-M4           103,184   104,256   +1,072
+          Cortex-M0+          112,404   113,876   +1,472
+          Cortex-M4, LTO       84,967    85,927     +960
+          Cortex-M0+, LTO      90,167    91,555   +1,388
+          ssfbn.o +1,230 B (M4), +1,682 B (M0+): the safegcd core minus the Fermat body.
+          SSFBNModInvCT itself has no caller in the image yet (P3 adds RSA).
+
+        RAM: static data / bss 96 / 1,052 (LTO 96 / 984) before and after.
+          Peak stack (ARM, painted):
+            P-256 / P-384 keygen   4,248 -> 3,640   -608 B
+            P-256 / P-384 sign     5,112 -> 4,504   -608 B
+            verify, ECDH, RSA, X25519, Ed25519: unchanged
+          Frames (M4 -Os): SSFBNModInvSmall 1,216 -> 416 B, plus 144 B for the core.
+
+      P3 RESULTS (RSA blinding)
+        Change: _SSFRSAPrivateOpCRT computes the blinding inverse r^-1 mod n with
+          SSFBNModInvCT (safegcd at n width) instead of SSFBNModInvOdd (binary GCD). The
+          coprimality test on r is the same call's returned result. One line in ssfrsa.c.
+        Docs: ssfrsa.md drops the "one step is variable-time" caveat. The only data-dependent
+          timing left in signing is in drawing the blinds (SSFBNRandomBelow rejection and the
+          redraw when gcd(r, n) != 1), which depends only on discarded random values.
+          ssfbn.md: SSFBNModInvOdd has no in-tree caller.
+        TDD: the R3 guard in ssfrsa_ut.c (2048-bit keygen, then PKCS#1 and PSS sign) failed
+          on the binary GCD first, then passed:
+          - _SSFBNModInvBinaryCalls == 0 (no variable-time inverse during sign)
+          - _SSFBNModInvCTBatches == 197 per sign (the n-width bound; a half-width prime
+            would take 99)
+          The old _SSFBNModInvBinaryMinLen check is gone with it.
+          Full unit suite passes. Host build 0 warnings; ARM builds 0 warnings (the same 3
+          POSIX-only files fail).
+        Harness: rebuilt after the scratch copy was lost (same method: arm-linux-gnueabihf-gcc
+          14 -mthumb -march=armv7-a+fp -Os, static, unit tests off, qemu-arm 10.0
+          -d in_asm,exec,nochain, xorshift entropy). New OpenSSL-made 2048 / 4096-bit keys, so
+          absolute counts differ a little from the R1 / R3(a) / P2 tables (the 2048-bit
+          before, 70.24 M, is within 0.3% of the 70.4 M there). Before = P2 (HEAD ssfrsa.c),
+          after = P2 + P3, same keys and entropy. Totals include start-up (about 12 K).
+        Check: PKCS#1 v1.5 signatures byte-identical before and after; PSS signatures also
+          identical (same entropy stream, same number of draws). All verify.
+
+        Speed: ARM instructions.
+          Operation              Before          After         Delta
+          RSA-2048 sign PKCS#1  70,241,786     64,257,543    -5,984,243   -8.52%
+          RSA-2048 sign PSS     70,334,661     64,304,035    -6,030,626   -8.57%
+          RSA-4096 sign PKCS#1 434,670,096    410,402,772   -24,267,324   -5.58%
+          RSA-4096 sign PSS    434,607,029    410,487,912   -24,119,117   -5.55%
+          The safegcd core (_SSFBNModInvCTCore) takes 1.258 M at 2048 bits and 4.499 M at
+          4096 bits, as measured in P1 (1.253 M, 4.512 M). The binary GCD's _SSFBNHalveMod,
+          _SSFBNRawShiftRight1, _SSFBNRawCmp and its share of _SSFBNRawSub / SSFBNModSub are
+          gone. Projected in P1: -8.5% / -5.6%. RSA verify, keygen and ECC do not call this
+          path and are unchanged.
+          Cortex-M0+: not re-measured. P1's ARMv6-M ratio (binary 13.97 M against safegcd
+          7.74 M at 2048 bits) gives about -6.2 M per RSA-2048 sign.
+
+        Code size: arm-none-eabi-gcc 15.2.0 -Os, client image (text + data, bytes; app.c
+          rebuilt, so absolute sizes are 15-27 B above P2's).
+          Image                Before     After   Delta
+          Cortex-M4           104,271   103,695     -576
+          Cortex-M0+          113,903   113,195     -708
+          Cortex-M4, LTO       83,348    82,948     -400
+          Cortex-M0+, LTO      88,844    88,380     -464
+          SSFBNModInvCT is now linked, and SSFBNModInvOdd / _SSFBNModInvBinary (no other
+          caller in the image) drop out. ssfbn.o is unchanged.
+
+        RAM: static data / bss unchanged. Peak stack (ARM, painted, sign alone and sign +
+          verify): RSA-2048 / 4096 PKCS#1 20,136 -> 20,136 B, PSS 20,944 -> 20,944 B. The
+          inverse's larger frame (2,904 B against 2,128 B for the binary GCD) is not on the
+          deepest path.
+
+        Constant time: signing now has no variable-time step on key- or message-dependent
+          data (P1 checked the inverse's instruction counts).
+
+      P4 RESULTS (cleanup)
+        Change: SSFBNModInvOdd and the odd-m path of SSFBNModInvExt call SSFBNModInvCT. The
+          binary GCD (_SSFBNModInvBinary, _SSFBNHalveMod, _SSFBNRawShiftRight1) and its five
+          test counters are deleted. Public API unchanged.
+          - ModInvOdd keeps its contract (odd m, a < m; a = 0 or a shared factor -> false)
+            and the same results; it is now constant-time.
+          - ModInvExt, odd m: safegcd for any a, reduced or not (an unreduced a went to
+            extended Euclid before). Even m: extended Euclid, unchanged.
+          SSFBNModInv (Fermat, prime m, RSA keygen's q^-1 mod p) is not changed: it still
+          rejects a composite m, which a test asserts, and its inverse is one call per keygen.
+        TDD: red first.
+          - New P4 test: ModInvOdd and ModInvExt with odd m (widths 1, 2, 3, 16, 64, cap;
+            random a, 2, m-2, a shared factor 3, an unreduced all-ones a, a = 0) run the
+            safegcd's fixed batch count, never the slow path, and match extended Euclid.
+            It failed at the ModInvOdd batch count with the binary GCD in place.
+          - The P1 and BN-07 tests used ModInvOdd as the reference. It is now the same code,
+            so they use a test-only export of extended Euclid (_SSFBNModInvEuclidTest), an
+            independent algorithm.
+          - The R3(a) asserts on binary-GCD internals are removed. Its shared-factor cases
+            (gcd of 2 and 3 limbs, a | m) stay.
+          - Full unit suite passes. Host build 0 warnings; ARM builds 0 warnings (the same 3
+            POSIX-only files fail).
+        Speed: no in-tree caller. RSA-2048 sign 64,257,543 -> 64,257,550 (+7, layout), PSS +8;
+          same signatures. ModInvOdd's own cost is P1's table (binary column -> safegcd).
+        Code size: ssfbn.o -624 B (M4, 17,210 -> 16,586), -756 B (M0+, 20,896 -> 20,140).
+          Client image: M4 and both LTO builds identical; M0+ +8 B (assert line literals;
+          not confirmed).
+        RAM: no static change. SSFBNModInvOdd's frame grows from 2,128 B (binary) to that of
+          SSFBNModInvCT (2,904 B, M4) at the 4096-bit cap; there is no in-tree caller.
+
+      CORRECTNESS AUDIT (P1-P4)
+        An independent review (a separate agent given the diff, not these results) and this
+        review covered:
+          - the divstep bound and its preconditions for every allowed input (odd m > 1,
+            a < 2^(32 len), unreduced a included), and the batch rounding; the reviewer
+            also brute-forced worst-case divstep counts for all odd f, g < 2^k, k = 4..13
+            (worst 11..35 against bounds 14..40)
+          - _SSFBNS30Divsteps against the paper's divstep; no signed overflow
+          - UpdateFG / UpdateDE int64 headroom (below 2^62), the m pre-add for negative d / e,
+            the md / me correction, Newton for m^-1 (3 -> 48 bits in 4 steps), d, e in
+            (-2m, m)
+          - signed limb count ceil((32 len + 2) / 30) for len 1..128, ToS30 / FromS30 at
+            the boundaries
+          - final normalization (f = +-1 test, negate, the two AddIfNeg), r->len, r aliasing a
+          - the wrappers' contracts: m = 1, a = 0, a >= m, gcd > 1, even m
+          - constant time: no branch or index on a; the only data-dependent branch is the
+            returned result
+          - the RSA coprimality loop
+          - that no test compares the core with itself (fixed in P4, above)
+        No input the API allows gives a wrong r with true, or false when an inverse exists.
+        Findings:
+          A1 FIXED. The core wiped f, g, d, e and the matrix but not ms, its copy of m. Every
+             in-tree m is public (RSA n, curve p and n), but SSFBNModInvCT / Ext / Odd are
+             public and may be given a secret prime. ms is now wiped. The scrub-count tests
+             went 4 -> 5 (ModInvCT, ModInvExt) and 9 -> 10 (ModInvSmall), red first.
+          A2 FIXED (follow-up commit). The proposal said SSFBNModInvCT would keep the
+             constant-time a * r == 1 fault check. P1 shipped without it and nothing recorded
+             the change. Only SSFBNModInvSmall had it. In tree this left no gap, because RSA
+             sign checks every signature by verifying it. Details below.
+          A3 FIXED (follow-up). Even m: SSFBNModInvCT REQUIREd odd m while SSFBNModInvSmall
+             returned false. SSFBNModInvCT now returns false too (m's parity is public), with
+             r untouched; ModInvOdd keeps its REQUIRE (odd m is its contract), ModInvExt still
+             runs Euclid. Test: even m returns false and leaves the r sentinel.
+          A4 FIXED (follow-up). (int32_t) narrowing of uint32_t values above INT32_MAX (the
+             batch matrix, delta) is implementation-defined. The compile-time check now
+             covers it alongside the arithmetic right shifts.
+          A5 FIXED (follow-up): a real, latent bug. The batch-count tests recomputed the
+             core's own formula, and that formula had Thm 11.2's two cases swapped. The paper
+             (safegcd-20190413.pdf, Thm 11.2) gives floor((49d + 80) / 17) for d < 46 and
+             floor((49d + 57) / 17) for d >= 46; the code used +80 for d >= 46 and +57 below.
+             - d >= 46: one or two divsteps too many, safe; at some widths one batch too
+               many (len 12 = P-384: 38 -> 37 batches; 39, 66, 79, ... limbs; not 8, 64
+               or the RSA widths tested).
+             - d = 32 (one-limb m): 95 divsteps where the paper needs 96. Not a live failure:
+               the batches round 95 and 96 up to the same 4 (120 divsteps).
+             Fix: one helper _SSFBNS30Steps with the cases the right way round. The test now
+             pins it to the paper's own numbers (135 at d = 46 and 738 at d = 255, both in
+             the paper; 741 at 256), plus 96 at d = 32, 134 at 45, 1110 at 384 and 5906 at
+             2048. Red first (ut:4375 with the old formula). An exhaustive search at
+             d <= 13 found the true worst case below both formulas, so testing outputs can't
+             tell them apart; only the paper's values can.
+
+      A2 FAULT CHECK (follow-up)
+        Change: SSFBNModInvCT (so also ModInvOdd and ModInvExt with odd m) and
+          SSFBNModInvSmall have the core write a local candidate x. They check
+          a * x == 1 (mod m) in constant time (ModMulCTOdd at full width, ModMulSmall at
+          curve width) and copy x to r only when the check holds. Before this, ModInvSmall
+          wrote r before its check, so a detected fault returned false with r already
+          overwritten, against its "r written only on success" contract. The local x also
+          covers r aliasing a, so ModInvSmall's copy of a is gone.
+        TDD: a test-only hook (_SSFBNModInvCTFaultTest) flips bit 0 of the core's result.
+          The test runs ModInvCT, ModInvOdd, ModInvExt and ModInvSmall on P-256, and all but
+          ModInvSmall at 64 limbs. Under the fault each must return false and leave r as it
+          was; without the fault the same call returns Euclid's inverse.
+          - Red first: ModInvCT returned true under the fault.
+          - Mutation: with ModInvSmall's check disabled, the test fails.
+          - Scrub counts: ModInvCT / ModInvExt 5 -> 10 (the check multiply's three, x, t);
+            ModInvSmall stays 10 (x replaces a's copy).
+          Full unit suite passes.
+        Speed: ARM instructions, before = P4, after = P4 + check. Same signatures.
+          Operation              Before          After         Delta
+          RSA-2048 sign PKCS#1  64,257,550     64,904,674      +647,124   +1.01%
+          RSA-2048 sign PSS     64,304,043     64,951,167      +647,124   +1.01%
+          RSA-4096 sign PKCS#1 410,402,779*   412,857,351    +2,454,572   +0.60%
+          RSA-4096 sign PSS    410,487,920*   412,942,492    +2,454,572   +0.60%
+          * P3's count plus P4's +7 / +8 (P4 was not re-traced at 4096 bits).
+          R3(c) overall against P2: RSA-2048 sign -7.60%, RSA-4096 sign -5.02%.
+          ECC: ModInvSmall only moves its copy (a's copy -> the candidate), so it is not
+          re-measured.
+        RAM: frames (M4 -Os) SSFBNModInvCT 2,784 -> 3,824 B (x and t), SSFBNModInvSmall
+          416 -> 424 B. The inverse's call below its caller (frame + check multiply) is about
+          5.4 KB. Peak stack (painted, ARM): RSA-2048 / 4096 PKCS#1 sign 20,136 -> 20,192 B,
+          PSS 20,944 -> 21,000 B (+56). The blinding inverse is now, by 56 B, the deepest
+          point of signing. README footnote 48 (call-graph figures) is not updated.
+
+    (b) Half-width blinding inverse (r^-1 mod p and mod q)                    NOT RECOMMENDED
+      Without (c) it is unsafe (above). With (c), the measured parts show it does not pay:
+        - as written (unblind m1 and m2 before the recombination): saves the full unblinding
+          multiply (0.64 M) and half of a constant-time inverse (0.35-1.05 M at 2048 bits).
+          It adds r mod p and r mod q (2 x 0.22 M) and two half-width unblinding multiplies
+          (2 x 0.18 M). Net -0.2 to -0.8 M, -0.3 to -1.2% of RSA-2048 sign. It also makes
+          the recombination qInv * (m1 - m2) run on unblinded values every call, so the step
+          that touches the secret qInv loses its per-call randomization.
+        - variant (b'): keep the recombination blinded and build r^-1 mod n from the two
+          half-width inverses with a Garner step (one half-width multiply plus a multiply
+          and an add). Net about -0.3 to +0.3 M: no gain.
+      Drop (b), or revisit only if (c)'s measured RSA-2048 inverse comes in above about 3 M.
+
+    Alternatives considered and rejected:
+      - Fermat r^(p-2) mod p per prime: constant-time with existing code, but each one costs
+        about as much as one CRT exponentiation (about 0.45 x sign), so sign would be about
+        +90%.
+      - A persistent blinding pair (r, r^-1) squared on each use (as OpenSSL does): no
+        inverse per call, but it needs state across calls, and SSFRSA is stateless.
+      - Pornin's optimized binary GCD (eprint 2020/972): constant-time, with a similar
+        estimated cost. Safegcd is preferred: its iteration bound is proven for every size,
+        it is widely deployed, and there is a tutorial to review against.
 
 R4. Fused constant-time table select in _SSFBNModExpMontCore                          OPEN
     Change: 16 masks computed once per window, then one pass over the limbs ORs in the

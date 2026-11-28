@@ -96,17 +96,14 @@ uint32_t _SSFBNSlowPathCalls = 0u;
 /* Test-only count of SSFBNMod's variable-time shift-and-subtract reductions */
 uint32_t _SSFBNModShiftCalls = 0u;
 
-/* Test-only counts of the binary-GCD inverse's u / v operations and the limbs they touch */
-uint32_t _SSFBNModInvUVSteps = 0u;
-uint32_t _SSFBNModInvUVLimbs = 0u;
+/* Test-only count of SSFBNModInvCT's 30-divstep batches (fixed by the modulus width) */
+uint32_t _SSFBNModInvCTBatches = 0u;
 
-/* Test-only counts of _SSFBNHalveMod calls and the passes over x they make */
-uint32_t _SSFBNHalveModCalls = 0u;
-uint32_t _SSFBNHalveModPasses = 0u;
+/* Test-only count of SSFBNModInvCT batches that left d or e outside (-2m, m) */
+uint32_t _SSFBNModInvCTRangeErrs = 0u;
 
-/* Test-only count of binary-GCD inverses and the narrowest modulus one ran on (in limbs) */
-uint32_t _SSFBNModInvBinaryCalls = 0u;
-uint16_t _SSFBNModInvBinaryMinLen = 0xFFFFu;
+/* Test-only: when true the safegcd core flips bit 0 of its result (a simulated fault) */
+bool _SSFBNModInvCTFaultTest = false;
 #define _SSF_BN_COUNT(c) do { (c)++; } while (0)
 #define _SSF_BN_COUNT_ADD(c, n) do { (c) += (n); } while (0)
 #else
@@ -1944,161 +1941,19 @@ static bool _SSFBNModInvExtEuclid(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m
     return true;
 }
 
-/* --------------------------------------------------------------------------------------------- */
-/* x = x / 2 mod m for odd m and x < m: (x + (m if x is odd)) >> 1 in one pass over the limbs.  */
-/* --------------------------------------------------------------------------------------------- */
-static void _SSFBNHalveMod(SSFBN_t *x, const SSFBN_t *m)
-{
-    SSFBNLimb_t mask;
-    SSFBNLimb_t prev;
-    SSFBNDLimb_t acc;
-    uint32_t i;
-    uint32_t n;
-
-    SSF_REQUIRE(x != NULL);
-    SSF_REQUIRE(m != NULL);
-    SSF_REQUIRE(x->len == m->len);
-    SSF_REQUIRE(x->len >= 1u);
-
-    _SSF_BN_COUNT(_SSFBNHalveModCalls);
-    _SSF_BN_COUNT(_SSFBNHalveModPasses);
-
-    /* All ones when x is odd: x + m is then even (m is odd) and below 2m, one bit above x */
-    mask = (SSFBNLimb_t)0u - (x->limbs[0] & 1u);
-    n = x->len;
-    acc = (SSFBNDLimb_t)x->limbs[0] + (SSFBNDLimb_t)(m->limbs[0] & mask);
-    prev = (SSFBNLimb_t)acc;
-    acc >>= SSF_BN_LIMB_BITS;
-    for (i = 1u; i < n; i++)
-    {
-        acc += (SSFBNDLimb_t)x->limbs[i] + (SSFBNDLimb_t)(m->limbs[i] & mask);
-        x->limbs[i - 1u] = (SSFBNLimb_t)((prev >> 1) |
-                                         ((SSFBNLimb_t)acc << (SSF_BN_LIMB_BITS - 1u)));
-        prev = (SSFBNLimb_t)acc;
-        acc >>= SSF_BN_LIMB_BITS;
-    }
-    /* acc now holds the carry bit of x + m, which becomes the top bit */
-    x->limbs[n - 1u] = (SSFBNLimb_t)((prev >> 1) |
-                                     ((SSFBNLimb_t)acc << (SSF_BN_LIMB_BITS - 1u)));
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* Shifts the n-limb value a right by one bit in place (n >= 1).                                 */
-/* --------------------------------------------------------------------------------------------- */
-static void _SSFBNRawShiftRight1(SSFBNLimb_t *a, uint16_t n)
-{
-    uint16_t i;
-
-    SSF_REQUIRE(a != NULL);
-    SSF_REQUIRE(n >= 1u);
-
-    for (i = 0u; (uint16_t)(i + 1u) < n; i++)
-    {
-        a[i] = (SSFBNLimb_t)((a[i] >> 1) | (a[i + 1u] << (SSF_BN_LIMB_BITS - 1u)));
-    }
-    a[n - 1u] >>= 1;
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* If gcd(a, m) == 1 writes r = a^(-1) mod m by binary extended GCD (odd m, 0 < a < m).          */
-/* --------------------------------------------------------------------------------------------- */
-static bool _SSFBNModInvBinary(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
-{
-    SSFBN_DEFINE(u, SSF_BN_MAX_MOD_LIMBS);
-    SSFBN_DEFINE(v, SSF_BN_MAX_MOD_LIMBS);
-    SSFBN_DEFINE(x1, SSF_BN_MAX_MOD_LIMBS);
-    SSFBN_DEFINE(x2, SSF_BN_MAX_MOD_LIMBS);
-    uint32_t passes = 0u;
-    uint16_t len;
-    int8_t cmp;
-    bool ok;
-
-    SSF_REQUIRE(r != NULL);
-    SSF_REQUIRE(a != NULL);
-    SSF_REQUIRE(m != NULL);
-    SSF_REQUIRE(m->len >= 1u);
-    SSF_REQUIRE(m->len <= SSF_BN_MAX_MOD_LIMBS);
-    SSF_REQUIRE((m->limbs[0] & 1u) != 0u);
-
 #if SSF_CONFIG_BN_UNIT_TEST == 1
-    _SSFBNModInvBinaryCalls++;
-    if (m->len < _SSFBNModInvBinaryMinLen) _SSFBNModInvBinaryMinLen = m->len;
-#endif /* SSF_CONFIG_BN_UNIT_TEST */
+/* --------------------------------------------------------------------------------------------- */
+/* Test-only: extended Euclid, an inverse oracle independent of safegcd (any m).                 */
+/* --------------------------------------------------------------------------------------------- */
+bool _SSFBNModInvEuclidTest(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
+{
+    SSF_REQUIRE((r != NULL) && (a != NULL) && (m != NULL));
+    SSF_REQUIRE((a->len == m->len) && (m->len >= 1u) && (m->len <= SSF_BN_MAX_MOD_LIMBS));
+    SSF_REQUIRE(m->len <= r->cap);
 
-    /* Invariants: x1 * a == u and x2 * a == v (mod m); u + v shrinks every pass, v stays odd */
-    SSFBNCopy(&u, a);
-    SSFBNCopy(&v, m);
-    SSFBNSetOne(&x1, m->len);
-    SSFBNSetZero(&x2, m->len);
-
-    /* u and v never grow, so their limbs at and above len stay zero once len drops */
-    len = m->len;
-    for (;;)
-    {
-        /* Each pass halves at least once after it, and u + v has at most 64 * len bits to lose */
-        passes++;
-        SSF_ASSERT(passes <= (((2u * (uint32_t)m->len) * SSF_BN_LIMB_BITS) + 1u));
-
-        /* Drop top limbs that are zero in both u and v */
-        while ((len > 1u) && (u.limbs[len - 1u] == 0u) && (v.limbs[len - 1u] == 0u)) len--;
-
-        /* u is never zero here (a > 0, and u -= v below never runs with u == v): this ends */
-        while ((u.limbs[0] & 1u) == 0u)
-        {
-            _SSFBNRawShiftRight1(u.limbs, len);
-            _SSF_BN_COUNT(_SSFBNModInvUVSteps);
-            _SSF_BN_COUNT_ADD(_SSFBNModInvUVLimbs, len);
-            _SSFBNHalveMod(&x1, m);
-        }
-        while ((v.limbs[0] & 1u) == 0u)
-        {
-            _SSFBNRawShiftRight1(v.limbs, len);
-            _SSF_BN_COUNT(_SSFBNModInvUVSteps);
-            _SSF_BN_COUNT_ADD(_SSFBNModInvUVLimbs, len);
-            _SSFBNHalveMod(&x2, m);
-        }
-
-        /* The compare and the subtract below */
-        _SSF_BN_COUNT_ADD(_SSFBNModInvUVSteps, 2u);
-        _SSF_BN_COUNT_ADD(_SSFBNModInvUVLimbs, 2u * (uint32_t)len);
-        cmp = _SSFBNRawCmp(u.limbs, v.limbs, len);
-
-        /* Is u == v? */
-        if (cmp == 0)
-        {
-            /* Yes, u -= v would make u zero: v = gcd(a, m) and x2 * a == v (mod m) */
-            break;
-        }
-        /* Is u > v? */
-        if (cmp > 0)
-        {
-            /* Yes, u -= v keeps u > 0 */
-            (void)_SSFBNRawSub(u.limbs, u.limbs, v.limbs, len);
-            SSFBNModSub(&x1, &x1, &x2, m);
-        }
-        else
-        {
-            /* No, v -= u keeps v > 0 */
-            (void)_SSFBNRawSub(v.limbs, v.limbs, u.limbs, len);
-            SSFBNModSub(&x2, &x2, &x1, m);
-        }
-    }
-
-    /* v = gcd(a, m): an inverse exists exactly when it is 1 */
-    ok = SSFBNIsOne(&v);
-    if (ok) SSFBNCopy(r, &x2);
-
-    /* Zeroize: a may be a secret (the RSA blinding factor) */
-    SSFBNZeroize(&u);
-    _SSF_BN_SCRUB_HOOK(u.limbs, (size_t)u.cap * sizeof(SSFBNLimb_t));
-    SSFBNZeroize(&v);
-    _SSF_BN_SCRUB_HOOK(v.limbs, (size_t)v.cap * sizeof(SSFBNLimb_t));
-    SSFBNZeroize(&x1);
-    _SSF_BN_SCRUB_HOOK(x1.limbs, (size_t)x1.cap * sizeof(SSFBNLimb_t));
-    SSFBNZeroize(&x2);
-    _SSF_BN_SCRUB_HOOK(x2.limbs, (size_t)x2.cap * sizeof(SSFBNLimb_t));
-    return ok;
+    return _SSFBNModInvExtEuclid(r, a, m);
 }
+#endif /* SSF_CONFIG_BN_UNIT_TEST */
 
 /* --------------------------------------------------------------------------------------------- */
 /* If a^(-1) mod m exists then writes r, returns true, else false.                               */
@@ -2118,18 +1973,18 @@ bool SSFBNModInvExt(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
 
     _SSF_BN_COUNT(_SSFBNFullWidthCalls);
 
-    /* Is m odd with 0 < a < m, the RSA blinding inverse's case (n is odd, r < n)? */
-    if (((m->limbs[0] & 1u) != 0u) && (!SSFBNIsZero(a)) && (SSFBNCmp(a, m) < 0))
+    /* Is m odd? */
+    if ((m->limbs[0] & 1u) != 0u)
     {
-        /* Yes, use the faster binary extended GCD */
-        return _SSFBNModInvBinary(r, a, m);
+        /* Yes, the constant-time safegcd (faster than Euclid; any a, reduced or not) */
+        return SSFBNModInvCT(r, a, m);
     }
-    /* No, extended Euclid handles even m (RSA keygen's lambda) and unreduced a */
+    /* No, extended Euclid handles even m (RSA keygen's lambda) */
     return _SSFBNModInvExtEuclid(r, a, m);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* If gcd(a, m) == 1 writes r = a^(-1) mod m (odd m, a < m), returns true, else false.           */
+/* If gcd(a, m) == 1 writes r = a^(-1) mod m (odd m, a < m) by safegcd, returns true.            */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFBNModInvOdd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
 {
@@ -2148,9 +2003,526 @@ bool SSFBNModInvOdd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
 
     _SSF_BN_COUNT(_SSFBNFullWidthCalls);
 
-    /* Is a zero (never invertible)? */
-    if (SSFBNIsZero(a)) return false;
-    return _SSFBNModInvBinary(r, a, m);
+    /* The constant-time safegcd; a = 0 and a sharing a factor with m return false */
+    return SSFBNModInvCT(r, a, m);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Constant-time modular inverse: Bernstein-Yang safegcd ("Fast constant-time gcd computation    */
+/* and modular inversion", TCHES 2019), with signed 30-bit limbs as described in libsecp256k1's  */
+/* doc/safegcd_implementation.md. Written from the paper and that description.                   */
+/* --------------------------------------------------------------------------------------------- */
+#define _SSF_BN_S30_BITS (30u)
+#define _SSF_BN_S30_MASK (0x3FFFFFFFul)
+
+/* Signed 30-bit limbs for n 32-bit limbs: at least 32n + 2 bits, so the top limb keeps a sign */
+#define _SSF_BN_S30_LIMBS(n) ((((32u * (uint32_t)(n)) + 2u) + 29u) / 30u)
+#define _SSF_BN_S30_MAX_LIMBS _SSF_BN_S30_LIMBS(SSF_BN_MAX_MOD_LIMBS)
+
+/* The signed-limb code needs two's complement, arithmetic right shifts of negative values, */
+/* and modular narrowing of uint32_t values above INT32_MAX to int32_t (all implementation-  */
+/* defined; every target compiler does all three)                                            */
+typedef char _SSFBNS30ArithShiftCheck_t[((((int32_t)-2) >> 1) == (int32_t)-1) &&
+                                        ((((int64_t)-2) >> 1) == (int64_t)-1) &&
+                                        (((int32_t)0xFFFFFFFEu) == (int32_t)-2) &&
+                                        (((int32_t)0x80000000u) == INT32_MIN) ? 1 : -1];
+
+/* 2x2 transition matrix of 30 divsteps: 2^30 * (f', g') = (u * f + v * g, q * f + r * g) */
+typedef struct
+{
+    int32_t u;
+    int32_t v;
+    int32_t q;
+    int32_t r;
+} _SSFBNS30Trans_t;
+
+/* --------------------------------------------------------------------------------------------- */
+/* Runs 30 divsteps on the low bits of f (odd) and g, sets t, returns the new delta.             */
+/* --------------------------------------------------------------------------------------------- */
+static int32_t _SSFBNS30Divsteps(int32_t delta, uint32_t f0, uint32_t g0, _SSFBNS30Trans_t *t)
+{
+    uint32_t u = 1u;
+    uint32_t v = 0u;
+    uint32_t q = 0u;
+    uint32_t r = 1u;
+    uint32_t f = f0;
+    uint32_t g = g0;
+    uint32_t d = (uint32_t)delta;
+    uint32_t c1;
+    uint32_t c2;
+    uint32_t x;
+    uint32_t i;
+
+    /* No argument checks by design: called per batch by SSFBNModInvCT only, with its locals. */
+
+    /* Each step is divstep(delta, f, g) of the paper, branch-free; |delta| stays below 2^31 */
+    for (i = 0u; i < _SSF_BN_S30_BITS; i++)
+    {
+        /* c1 all ones when delta > 0 and g is odd: then (f, g) = (g, -f) and delta = -delta */
+        c1 = (0u - ((0u - d) >> 31)) & (0u - (g & 1u));
+        x = (f ^ g) & c1;
+        f ^= x;
+        g ^= x;
+        g = (g ^ c1) - c1;
+        x = (u ^ q) & c1;
+        u ^= x;
+        q ^= x;
+        q = (q ^ c1) - c1;
+        x = (v ^ r) & c1;
+        v ^= x;
+        r ^= x;
+        r = (r ^ c1) - c1;
+        d = (d ^ c1) - c1;
+
+        /* c2 all ones when g is odd (always after a swap): g += f, and its row adds f's row */
+        c2 = 0u - (g & 1u);
+        g += f & c2;
+        q += u & c2;
+        r += v & c2;
+
+        /* g is now even: halve it, and double f's row to keep the common scale 2^i */
+        d++;
+        g >>= 1;
+        u <<= 1;
+        v <<= 1;
+    }
+    /* |u| + |v| <= 2^30 and |q| + |r| <= 2^30: each fits an int32_t */
+    t->u = (int32_t)u;
+    t->v = (int32_t)v;
+    t->q = (int32_t)q;
+    t->r = (int32_t)r;
+    return (int32_t)d;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* (f, g) = t * (f, g) / 2^30 over n signed 30-bit limbs (the low 30 bits cancel exactly).       */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFBNS30UpdateFG(int32_t *f, int32_t *g, uint16_t n, const _SSFBNS30Trans_t *t)
+{
+    const int64_t u = t->u;
+    const int64_t v = t->v;
+    const int64_t q = t->q;
+    const int64_t r = t->r;
+    int64_t cf;
+    int64_t cg;
+    uint16_t i;
+
+    /* No argument checks by design: called per batch by SSFBNModInvCT only, with its locals. */
+
+    /* Limbs below the top are in [0, 2^30) and |u| + |v| <= 2^30: each sum fits 62 bits */
+    cf = (u * f[0]) + (v * g[0]);
+    cg = (q * f[0]) + (r * g[0]);
+    cf >>= _SSF_BN_S30_BITS;
+    cg >>= _SSF_BN_S30_BITS;
+    for (i = 1u; i < n; i++)
+    {
+        cf += (u * f[i]) + (v * g[i]);
+        cg += (q * f[i]) + (r * g[i]);
+        f[i - 1u] = (int32_t)((uint32_t)cf & _SSF_BN_S30_MASK);
+        g[i - 1u] = (int32_t)((uint32_t)cg & _SSF_BN_S30_MASK);
+        cf >>= _SSF_BN_S30_BITS;
+        cg >>= _SSF_BN_S30_BITS;
+    }
+    f[n - 1u] = (int32_t)cf;
+    g[n - 1u] = (int32_t)cg;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* (d, e) = (t * (d, e) + (md, me) * m) / 2^30 with md, me making it exact; d, e in (-2m, m).    */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFBNS30UpdateDE(int32_t *d, int32_t *e, uint16_t n, const _SSFBNS30Trans_t *t,
+                              const int32_t *m, uint32_t mInv30)
+{
+    const int64_t u = t->u;
+    const int64_t v = t->v;
+    const int64_t q = t->q;
+    const int64_t r = t->r;
+    int32_t sd;
+    int32_t se;
+    int32_t md;
+    int32_t me;
+    int64_t cd;
+    int64_t ce;
+    uint16_t i;
+
+    /* No argument checks by design: called per batch by SSFBNModInvCT only, with its locals. */
+
+    /* Add m once per negative input, so the result stays in (-2m, m) (safegcd doc, sec. 7) */
+    sd = d[n - 1u] >> 31;
+    se = e[n - 1u] >> 31;
+    md = (t->u & sd) + (t->v & se);
+    me = (t->q & sd) + (t->r & se);
+    cd = (u * d[0]) + (v * e[0]);
+    ce = (q * d[0]) + (r * e[0]);
+
+    /* Adjust md, me so the low 30 bits of cd + md * m and ce + me * m are zero */
+    md -= (int32_t)(((mInv30 * (uint32_t)cd) + (uint32_t)md) & _SSF_BN_S30_MASK);
+    me -= (int32_t)(((mInv30 * (uint32_t)ce) + (uint32_t)me) & _SSF_BN_S30_MASK);
+    cd += (int64_t)m[0] * md;
+    ce += (int64_t)m[0] * me;
+    cd >>= _SSF_BN_S30_BITS;
+    ce >>= _SSF_BN_S30_BITS;
+    for (i = 1u; i < n; i++)
+    {
+        cd += (u * d[i]) + (v * e[i]) + ((int64_t)m[i] * md);
+        ce += (q * d[i]) + (r * e[i]) + ((int64_t)m[i] * me);
+        d[i - 1u] = (int32_t)((uint32_t)cd & _SSF_BN_S30_MASK);
+        e[i - 1u] = (int32_t)((uint32_t)ce & _SSF_BN_S30_MASK);
+        cd >>= _SSF_BN_S30_BITS;
+        ce >>= _SSF_BN_S30_BITS;
+    }
+    d[n - 1u] = (int32_t)cd;
+    e[n - 1u] = (int32_t)ce;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Propagates carries so limbs 0..n-2 are in [0, 2^30) and the top limb holds the sign.          */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFBNS30Carry(int32_t *x, uint16_t n)
+{
+    uint16_t i;
+
+    for (i = 0u; (uint16_t)(i + 1u) < n; i++)
+    {
+        x[i + 1u] += x[i] >> _SSF_BN_S30_BITS;
+        x[i] = (int32_t)((uint32_t)x[i] & _SSF_BN_S30_MASK);
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Adds m to x when x is negative (mask from the sign of the top limb), then carries.            */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFBNS30AddIfNeg(int32_t *x, const int32_t *m, uint16_t n)
+{
+    int32_t neg = x[n - 1u] >> 31;
+    uint16_t i;
+
+    for (i = 0u; i < n; i++) x[i] += m[i] & neg;
+    _SSFBNS30Carry(x, n);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Writes the n32 32-bit limbs of a as n signed 30-bit limbs (a >= 0; n * 30 >= 32 * n32).       */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFBNToS30(int32_t *o, uint16_t n, const SSFBNLimb_t *a, uint16_t n32)
+{
+    uint64_t acc = 0u;
+    uint32_t bits = 0u;
+    uint16_t i;
+    uint16_t j = 0u;
+
+    for (i = 0u; i < n; i++)
+    {
+        /* Fewer than 30 bits buffered and input left (lengths are public)? */
+        if ((bits < _SSF_BN_S30_BITS) && (j < n32))
+        {
+            /* Yes, load the next 32-bit limb above them */
+            acc |= (uint64_t)a[j] << bits;
+            j++;
+            bits += SSF_BN_LIMB_BITS;
+        }
+        /* No */
+        o[i] = (int32_t)((uint32_t)acc & _SSF_BN_S30_MASK);
+        acc >>= _SSF_BN_S30_BITS;
+        bits = (bits > _SSF_BN_S30_BITS) ? (bits - _SSF_BN_S30_BITS) : 0u;
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Writes the n signed 30-bit limbs of x (normalized, 0 <= x < 2^(32 * n32)) as n32 limbs.       */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFBNFromS30(SSFBNLimb_t *o, uint16_t n32, const int32_t *x, uint16_t n)
+{
+    uint64_t acc = 0u;
+    uint32_t bits = 0u;
+    uint16_t i;
+    uint16_t j = 0u;
+
+    for (i = 0u; i < n32; i++)
+    {
+        /* Load 30-bit limbs until 32 bits are buffered or the input ends (public lengths) */
+        while ((bits < SSF_BN_LIMB_BITS) && (j < n))
+        {
+            acc |= (uint64_t)(uint32_t)x[j] << bits;
+            j++;
+            bits += _SSF_BN_S30_BITS;
+        }
+        o[i] = (SSFBNLimb_t)acc;
+        acc >>= SSF_BN_LIMB_BITS;
+        bits = (bits > SSF_BN_LIMB_BITS) ? (bits - SSF_BN_LIMB_BITS) : 0u;
+    }
+}
+
+#if SSF_CONFIG_BN_UNIT_TEST == 1
+/* --------------------------------------------------------------------------------------------- */
+/* Test-only: returns true when x * k + y * j > 0 (x, y in signed 30-bit limbs, k, j small).     */
+/* --------------------------------------------------------------------------------------------- */
+/* Not inlined: constant k, j would let -Wstrict-overflow fold the test-only arithmetic */
+SSF_NOINLINE
+static bool _SSFBNS30IsPos(const int32_t *x, int32_t k, const int32_t *y, int32_t j, uint16_t n)
+{
+    int64_t acc = 0;
+    bool lowNonZero = false;
+    uint16_t i;
+
+    for (i = 0u; i < n; i++)
+    {
+        acc += ((int64_t)x[i] * k) + ((int64_t)y[i] * j);
+        /* Below the top limb? */
+        if ((uint16_t)(i + 1u) < n)
+        {
+            /* Yes, keep the low 30 bits (non-negative) aside and carry the rest */
+            lowNonZero = lowNonZero || (((uint32_t)acc & _SSF_BN_S30_MASK) != 0u);
+            acc >>= _SSF_BN_S30_BITS;
+        }
+        /* No */
+    }
+    return (acc > 0) || ((acc == 0) && lowNonZero);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Test-only: counts a range error when d or e is outside (-2m, m).                              */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFBNS30CheckRange(const int32_t *d, const int32_t *e, const int32_t *m, uint16_t n)
+{
+    /* Is d + 2m > 0, m - d > 0, e + 2m > 0 and m - e > 0? */
+    if (!(_SSFBNS30IsPos(d, 1, m, 2, n) && _SSFBNS30IsPos(m, 1, d, -1, n) &&
+          _SSFBNS30IsPos(e, 1, m, 2, n) && _SSFBNS30IsPos(m, 1, e, -1, n)))
+    {
+        /* No */
+        _SSFBNModInvCTRangeErrs++;
+    }
+    /* Yes */
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Test-only: one d, e update from d = kd * m + cd, e = ke * m + ce; returns its range errors.   */
+/* --------------------------------------------------------------------------------------------- */
+uint32_t _SSFBNModInvCTUpdateDETest(const SSFBN_t *m, int32_t kd, int32_t cd, int32_t ke,
+                                    int32_t ce, const int32_t uvqr[4])
+{
+    int32_t ms[_SSF_BN_S30_MAX_LIMBS];
+    int32_t d[_SSF_BN_S30_MAX_LIMBS];
+    int32_t e[_SSF_BN_S30_MAX_LIMBS];
+    _SSFBNS30Trans_t t;
+    uint32_t mInv30;
+    uint32_t before;
+    uint16_t n;
+    uint16_t i;
+
+    SSF_REQUIRE(m != NULL);
+    SSF_REQUIRE(uvqr != NULL);
+    SSF_REQUIRE((m->len >= 1u) && (m->len <= SSF_BN_MAX_MOD_LIMBS));
+    SSF_REQUIRE((m->limbs[0] & 1u) != 0u);
+
+    n = (uint16_t)_SSF_BN_S30_LIMBS(m->len);
+    mInv30 = m->limbs[0];
+    for (i = 0u; i < 4u; i++) mInv30 *= 2u - (m->limbs[0] * mInv30);
+    mInv30 &= _SSF_BN_S30_MASK;
+    _SSFBNToS30(ms, n, m->limbs, m->len);
+    for (i = 0u; i < n; i++)
+    {
+        d[i] = kd * ms[i];
+        e[i] = ke * ms[i];
+    }
+    d[0] += cd;
+    e[0] += ce;
+    _SSFBNS30Carry(d, n);
+    _SSFBNS30Carry(e, n);
+    t.u = uvqr[0];
+    t.v = uvqr[1];
+    t.q = uvqr[2];
+    t.r = uvqr[3];
+
+    /* The inputs must be in range themselves */
+    before = _SSFBNModInvCTRangeErrs;
+    _SSFBNS30CheckRange(d, e, ms, n);
+    SSF_REQUIRE(_SSFBNModInvCTRangeErrs == before);
+    _SSFBNS30UpdateDE(d, e, n, &t, ms, mInv30);
+    _SSFBNS30CheckRange(d, e, ms, n);
+    return _SSFBNModInvCTRangeErrs - before;
+}
+#endif /* SSF_CONFIG_BN_UNIT_TEST */
+
+/* --------------------------------------------------------------------------------------------- */
+/* Divsteps that bring g to zero when f^2 + 4g^2 <= 5 * 2^(2 * bits): Bernstein-Yang Thm 11.2,   */
+/* floor((49d + 80) / 17) for d < 46 and floor((49d + 57) / 17) for d >= 46 (741 at 256 bits).    */
+/* Holds for odd f = m and any g = a below 2^bits, a >= m included.                              */
+/* --------------------------------------------------------------------------------------------- */
+static uint32_t _SSFBNS30Steps(uint32_t bits)
+{
+    return (bits < 46u) ? (((49u * bits) + 80u) / 17u) : (((49u * bits) + 57u) / 17u);
+}
+
+#if SSF_CONFIG_BN_UNIT_TEST == 1
+/* --------------------------------------------------------------------------------------------- */
+/* Test-only: the safegcd divstep count for a bits-wide modulus.                                 */
+/* --------------------------------------------------------------------------------------------- */
+uint32_t _SSFBNModInvCTStepsTest(uint32_t bits)
+{
+    return _SSFBNS30Steps(bits);
+}
+#endif /* SSF_CONFIG_BN_UNIT_TEST */
+
+/* --------------------------------------------------------------------------------------------- */
+/* safegcd: r = a^(-1) mod m if gcd(a, m) == 1; f, g, d, e, ms hold cap signed 30-bit limbs.     */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFBNModInvCTCore(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m, int32_t *f,
+                               int32_t *g, int32_t *d, int32_t *e, int32_t *ms, uint16_t cap)
+{
+    _SSFBNS30Trans_t t;
+    uint32_t mInv30;
+    uint32_t steps;
+    uint32_t batch;
+    uint32_t bits;
+    uint32_t zf;
+    uint32_t zg;
+    int32_t delta = 1;
+    int32_t sf;
+    uint16_t n;
+    uint16_t i;
+    bool ok;
+
+    SSF_REQUIRE(f != NULL);
+    SSF_REQUIRE(g != NULL);
+    SSF_REQUIRE(d != NULL);
+    SSF_REQUIRE(e != NULL);
+    SSF_REQUIRE(ms != NULL);
+    SSF_REQUIRE(_SSF_BN_S30_LIMBS(m->len) <= cap);
+
+    /* Is m one, where every value is 0 (m is public)? */
+    if (SSFBNIsOne(m)) return false;
+    /* No */
+
+    bits = SSF_BN_LIMB_BITS * (uint32_t)m->len;
+    steps = _SSFBNS30Steps(bits);
+    n = (uint16_t)_SSF_BN_S30_LIMBS(m->len);
+
+    /* m^-1 mod 2^32 by Newton (m * m == 1 mod 8; each step doubles the correct bits) */
+    mInv30 = m->limbs[0];
+    for (i = 0u; i < 4u; i++) mInv30 *= 2u - (m->limbs[0] * mInv30);
+    mInv30 &= _SSF_BN_S30_MASK;
+
+    /* f = m, g = a, d = 0, e = 1: invariants f == d * a and g == e * a (mod m) */
+    _SSFBNToS30(ms, n, m->limbs, m->len);
+    _SSFBNToS30(g, n, a->limbs, a->len);
+    memcpy(f, ms, (size_t)n * sizeof(int32_t));
+    memset(d, 0, (size_t)n * sizeof(int32_t));
+    memset(e, 0, (size_t)n * sizeof(int32_t));
+    e[0] = 1;
+
+    /* A fixed number of batches, set by m's width alone: the run time does not depend on a */
+    for (batch = 0u; batch < ((steps + (_SSF_BN_S30_BITS - 1u)) / _SSF_BN_S30_BITS); batch++)
+    {
+        _SSF_BN_COUNT(_SSFBNModInvCTBatches);
+        delta = _SSFBNS30Divsteps(delta, (uint32_t)f[0], (uint32_t)g[0], &t);
+        _SSFBNS30UpdateDE(d, e, n, &t, ms, mInv30);
+        _SSFBNS30UpdateFG(f, g, n, &t);
+#if SSF_CONFIG_BN_UNIT_TEST == 1
+        _SSFBNS30CheckRange(d, e, ms, n);
+#endif /* SSF_CONFIG_BN_UNIT_TEST */
+    }
+
+    /* g == 0 now and f == +-gcd(a, m); an inverse exists when f is 1 or -1 */
+    sf = f[n - 1u] >> 31;
+    zg = 0u;
+    zf = (uint32_t)f[0] ^ (((uint32_t)sf & _SSF_BN_S30_MASK) | (~(uint32_t)sf & 1u));
+    for (i = 0u; i < n; i++) zg |= (uint32_t)g[i];
+    for (i = 1u; (uint16_t)(i + 1u) < n; i++)
+    {
+        zf |= (uint32_t)f[i] ^ ((uint32_t)sf & _SSF_BN_S30_MASK);
+    }
+    zf |= (uint32_t)(f[n - 1u] ^ sf);
+    SSF_ASSERT(zg == 0u);
+    ok = (zf == 0u);
+
+    /* r = d * f mod m: d in (-2m, m) -> (-m, m), negate when f = -1, then into [0, m) */
+    _SSFBNS30AddIfNeg(d, ms, n);
+    for (i = 0u; i < n; i++) d[i] = (d[i] ^ sf) - sf;
+    _SSFBNS30Carry(d, n);
+    _SSFBNS30AddIfNeg(d, ms, n);
+
+#if SSF_CONFIG_BN_UNIT_TEST == 1
+    /* Test-only fault injection: the a * r == 1 check in the callers must catch it */
+    if (_SSFBNModInvCTFaultTest) d[0] ^= 1;
+#endif /* SSF_CONFIG_BN_UNIT_TEST */
+
+    /* Is a invertible (the answer is returned, so this branch leaks nothing more)? */
+    if (ok)
+    {
+        /* Yes, r = d */
+        _SSFBNFromS30(r->limbs, m->len, d, n);
+        r->len = m->len;
+    }
+    /* No */
+
+    /* Zeroize: a may be secret (an ECDSA nonce, a Z coordinate, the RSA blinding factor) */
+    SSFCryptSecureZero(f, (size_t)cap * sizeof(int32_t));
+    _SSF_BN_SCRUB_HOOK(f, (size_t)cap * sizeof(int32_t));
+    SSFCryptSecureZero(g, (size_t)cap * sizeof(int32_t));
+    _SSF_BN_SCRUB_HOOK(g, (size_t)cap * sizeof(int32_t));
+    SSFCryptSecureZero(d, (size_t)cap * sizeof(int32_t));
+    _SSF_BN_SCRUB_HOOK(d, (size_t)cap * sizeof(int32_t));
+    SSFCryptSecureZero(e, (size_t)cap * sizeof(int32_t));
+    _SSF_BN_SCRUB_HOOK(e, (size_t)cap * sizeof(int32_t));
+    /* m is public in every in-tree caller, but the public entry points accept a secret prime */
+    SSFCryptSecureZero(ms, (size_t)cap * sizeof(int32_t));
+    _SSF_BN_SCRUB_HOOK(ms, (size_t)cap * sizeof(int32_t));
+    SSFCryptSecureZero(&t, sizeof(t));
+    return ok;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* If gcd(a, m) == 1 writes r = a^(-1) mod m (odd m > 1, a < 2^(32 * m->len)), returns true;   */
+/* false for even m.                                                                             */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFBNModInvCT(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
+{
+    int32_t f[_SSF_BN_S30_MAX_LIMBS];
+    int32_t g[_SSF_BN_S30_MAX_LIMBS];
+    int32_t d[_SSF_BN_S30_MAX_LIMBS];
+    int32_t e[_SSF_BN_S30_MAX_LIMBS];
+    int32_t ms[_SSF_BN_S30_MAX_LIMBS];
+    SSFBN_DEFINE(x, SSF_BN_MAX_MOD_LIMBS); /* the candidate inverse, copied to r once checked */
+    SSFBN_DEFINE(t, SSF_BN_MAX_MOD_LIMBS); /* a * x mod m */
+    bool ok;
+
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(r->limbs != NULL);
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(a->limbs != NULL);
+    SSF_REQUIRE(m != NULL);
+    SSF_REQUIRE(m->limbs != NULL);
+    SSF_REQUIRE(a->len == m->len);
+    SSF_REQUIRE(m->len >= 1u);
+    SSF_REQUIRE(m->len <= r->cap);
+    SSF_REQUIRE(m->len <= SSF_BN_MAX_MOD_LIMBS);
+
+    /* Is m even (safegcd needs an odd modulus)? */
+    if (SSFBNIsEven(m))
+    {
+        /* Yes, m's parity is public (as in SSFBNModInvSmall); SSFBNModInvExt handles even m */
+        return false;
+    }
+    /* No */
+
+    ok = _SSFBNModInvCTCore(&x, a, m, f, g, d, e, ms, (uint16_t)_SSF_BN_S30_MAX_LIMBS);
+    /* Was an inverse found? */
+    if (ok)
+    {
+        /* Yes, check a * x == 1 (mod m) in constant time (x < m), to catch a fault in the */
+        /* computation; r is written only when it holds (a is still intact if r aliases a) */
+        SSFBNModMulCTOdd(&t, a, &x, m);
+        ok = SSFBNIsOne(&t);
+        if (ok) SSFBNCopy(r, &x);
+    }
+    /* No */
+
+    SSFBNZeroize(&x);
+    _SSF_BN_SCRUB_HOOK(x.limbs, (size_t)x.cap * sizeof(SSFBNLimb_t));
+    SSFBNZeroize(&t);
+    _SSF_BN_SCRUB_HOOK(t.limbs, (size_t)t.cap * sizeof(SSFBNLimb_t));
+    return ok;
 }
 
 #if SSF_BN_CONFIG_MAX_BITS >= 512
@@ -2612,19 +2984,17 @@ bool SSFBNModInv(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* If a^(-1) mod m exists for prime m of <= SSF_BN_SMALL_MAX_LIMBS limbs, sets r, returns true.  */
+/* If a^(-1) mod m exists (m of at most SSF_BN_SMALL_MAX_LIMBS limbs) then sets r, returns true. */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFBNModInvSmall(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
 {
-    SSFBNMONT_DEFINE(ctx, SSF_BN_SMALL_MAX_LIMBS);
-    SSFBNLimb_t tableStorage[16][SSF_BN_SMALL_MAX_LIMBS];
-    SSFBN_t table[16];
-    SSFBN_DEFINE(e, SSF_BN_SMALL_MAX_LIMBS);
-    SSFBN_DEFINE(acc, SSF_BN_SMALL_MAX_LIMBS);
-    SSFBN_DEFINE(aR, SSF_BN_SMALL_MAX_LIMBS);
-    uint16_t i;
-    int32_t bit;
-    uint32_t w;
+    int32_t f[_SSF_BN_S30_LIMBS(SSF_BN_SMALL_MAX_LIMBS)];
+    int32_t g[_SSF_BN_S30_LIMBS(SSF_BN_SMALL_MAX_LIMBS)];
+    int32_t d[_SSF_BN_S30_LIMBS(SSF_BN_SMALL_MAX_LIMBS)];
+    int32_t e[_SSF_BN_S30_LIMBS(SSF_BN_SMALL_MAX_LIMBS)];
+    int32_t ms[_SSF_BN_S30_LIMBS(SSF_BN_SMALL_MAX_LIMBS)];
+    SSFBN_DEFINE(t, SSF_BN_SMALL_MAX_LIMBS);
+    SSFBN_DEFINE(x, SSF_BN_SMALL_MAX_LIMBS); /* the candidate inverse, copied to r once checked */
     bool ok;
 
     SSF_REQUIRE(r != NULL);
@@ -2638,85 +3008,31 @@ bool SSFBNModInvSmall(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
     SSF_REQUIRE(a->len == m->len);
     SSF_REQUIRE(m->len <= r->cap);
 
-    /* Is a zero, which has no inverse? */
-    if (SSFBNIsZero(a))
-    {
-        /* Yes */
-        return false;
-    }
-    /* No, is m even (no Fermat inverse, and Montgomery needs an odd modulus)? */
+    /* Is m even (safegcd needs an odd modulus)? */
     if (SSFBNIsEven(m))
     {
         /* Yes, m is public in every caller, so this branch leaks nothing secret */
         return false;
     }
-    /* No, is m one, which has no Fermat exponent m - 2 (rejected as SSFBNModInv rejects it)? */
-    if (SSFBNIsOne(m))
+    /* No, constant-time safegcd at curve width (a = 0 and m = 1 return false) */
+    ok = _SSFBNModInvCTCore(&x, a, m, f, g, d, e, ms,
+                            (uint16_t)_SSF_BN_S30_LIMBS(SSF_BN_SMALL_MAX_LIMBS));
+    /* Was an inverse found? */
+    if (ok)
     {
-        /* Yes */
-        return false;
+        /* Yes, check a * x == 1 (mod m) in constant time, to catch a fault in the computation; */
+        /* r is written only when it holds (a is still intact if r aliases a)                 */
+        SSFBNModMulSmall(&t, a, &x, m);
+        ok = SSFBNIsOne(&t);
+        if (ok) SSFBNCopy(r, &x);
+        SSFBNZeroize(&t);
+        _SSF_BN_SCRUB_HOOK(t.limbs, (size_t)t.cap * sizeof(SSFBNLimb_t));
     }
     /* No */
 
-    /* r = a^(m - 2) mod m in Montgomery form at curve width, not the BN cap */
-    SSFBNMontInit(&ctx, m);
-    for (i = 0u; i < 16u; i++)
-    {
-/* Disable false positive Visual Studio Code Analysis warning */
-#ifdef _WIN32
-#pragma warning(push)
-#pragma warning(disable:6001)
-#endif
-        table[i].limbs = tableStorage[i];
-#ifdef _WIN32
-#pragma warning(pop)
-#endif
-        table[i].cap = SSF_BN_SMALL_MAX_LIMBS;
-        table[i].len = m->len;
-    }
-
-    /* table[w] = a^w in Montgomery form; table[0] is 1 (R mod m) */
-    SSFBNMontConvertIn(&aR, a, &ctx);
-    SSFBNSetOne(&e, m->len);
-    SSFBNMontConvertIn(&table[0], &e, &ctx);
-    SSFBNCopy(&table[1], &aR);
-    for (i = 2u; i < 16u; i++)
-    {
-        SSFBNMontMul(&table[i], &table[i - 1u], &aR, &ctx);
-    }
-
-    /* 4-bit windows over public m - 2: squares and table reads depend only on m (CT for a) */
-    (void)SSFBNSubUint32(&e, m, 2u);
-    SSFBNCopy(&acc, &table[0]);
-    for (bit = (int32_t)(((uint32_t)m->len * SSF_BN_LIMB_BITS) - 4u); bit >= 0; bit -= 4)
-    {
-        w = (uint32_t)((e.limbs[(uint32_t)bit / SSF_BN_LIMB_BITS] >>
-                        ((uint32_t)bit % SSF_BN_LIMB_BITS)) & 0xFu);
-        SSFBNMontSquare(&acc, &acc, &ctx);
-        SSFBNMontSquare(&acc, &acc, &ctx);
-        SSFBNMontSquare(&acc, &acc, &ctx);
-        SSFBNMontSquare(&acc, &acc, &ctx);
-        SSFBNMontMul(&acc, &acc, &table[w], &ctx);
-    }
-
-    /* a * r == 1 (mod m), checked in Montgomery form as aR * rR * R^-1 == R mod m */
-    SSFBNMontMul(&e, &aR, &acc, &ctx);
-    ok = (SSFBNCmp(&e, &table[0]) == 0);
-    SSFBNMontConvertOut(r, &acc, &ctx);
-
-    /* Zeroize everything derived from a, and the context in case m is a secret prime */
-    SSFCryptSecureZero(tableStorage, sizeof(tableStorage));
-    _SSF_BN_SCRUB_HOOK(tableStorage, sizeof(tableStorage));
-    SSFBNZeroize(&acc);
-    _SSF_BN_SCRUB_HOOK(acc.limbs, (size_t)acc.cap * sizeof(SSFBNLimb_t));
-    SSFBNZeroize(&aR);
-    _SSF_BN_SCRUB_HOOK(aR.limbs, (size_t)aR.cap * sizeof(SSFBNLimb_t));
-    SSFBNZeroize(&e);
-    _SSF_BN_SCRUB_HOOK(e.limbs, (size_t)e.cap * sizeof(SSFBNLimb_t));
-    SSFBNZeroize(&ctx.mod);
-    _SSF_BN_SCRUB_HOOK(ctx.mod.limbs, (size_t)ctx.mod.cap * sizeof(SSFBNLimb_t));
-    SSFBNZeroize(&ctx.rr);
-    _SSF_BN_SCRUB_HOOK(ctx.rr.limbs, (size_t)ctx.rr.cap * sizeof(SSFBNLimb_t));
+    /* x is the inverse of a, which may be secret (an ECDSA nonce, a Z coordinate) */
+    SSFBNZeroize(&x);
+    _SSF_BN_SCRUB_HOOK(x.limbs, (size_t)x.cap * sizeof(SSFBNLimb_t));
     return ok;
 }
 

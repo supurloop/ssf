@@ -36,6 +36,7 @@
 #include "ssfpem.h"
 #include "ssfjson.h"
 #include "ssfsm.h"
+#include "ssfcrc32.h"
 #include "ssfawsprov.h"
 
 /* --------------------------------------------------------------------------------------------- */
@@ -1725,5 +1726,259 @@ void SSFAWSProvEvent(void *ctx, SSFMQTTCEvent_t event, SSFMQTTCReason_t reason)
     /* Posted also after a stop: IDLE and the stopped guards ignore it */
     if (eid != SSF_SM_EVENT_MAX) SSFSMPutEvent(SSF_SM_AWSPROV, eid);
     if (_awsprov.appEventFn != NULL) _awsprov.appEventFn(_awsprov.appEventCtx, event, reason);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Operational credentials                                                                       */
+/* --------------------------------------------------------------------------------------------- */
+#define SSF_AWSPROV_CRED_MAGIC      "AWSC"
+#define SSF_AWSPROV_CRED_MAGIC_LEN  (4u)
+#define SSF_AWSPROV_CRED_CURVE_P256 (1u)
+#define SSF_AWSPROV_CRED_CURVE_P384 (2u)
+#define SSF_AWSPROV_CRED_ID_LEN     (SSF_AWSPROV_CERT_ID_SIZE - 1u)
+#define SSF_AWSPROV_CRED_CRC_LEN    (4u)
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true with the key type of a built curve, else false.                                  */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFAWSProvCurveKeyType(SSFECCurve_t curve, SSFPKeyType_t *typeOut)
+{
+    SSF_REQUIRE((curve > SSF_EC_CURVE_MIN) && (curve < SSF_EC_CURVE_MAX));
+    SSF_REQUIRE(typeOut != NULL);
+
+#if SSF_EC_CONFIG_ENABLE_P256 == 1
+    if (curve == SSF_EC_CURVE_P256) { *typeOut = SSF_PKEY_TYPE_P256; return true; }
+#endif /* SSF_EC_CONFIG_ENABLE_P256 */
+#if SSF_EC_CONFIG_ENABLE_P384 == 1
+    if (curve == SSF_EC_CURVE_P384) { *typeOut = SSF_PKEY_TYPE_P384; return true; }
+#endif /* SSF_EC_CONFIG_ENABLE_P384 */
+    return false;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if cred's key builds from priv and its certDer parses for that key, else false.  */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFAWSProvCredFinish(SSFAWSProvCred_t *cred, SSFECCurve_t curve,
+                                  const uint8_t *priv, size_t privLen)
+{
+    SSFPKeyType_t type;
+
+    SSF_REQUIRE(cred != NULL);
+    SSF_REQUIRE(priv != NULL);
+
+    if (_SSFAWSProvCurveKeyType(curve, &type) == false) return false;
+    if (SSFPKeyFromECPriv(type, priv, privLen, &cred->key) == false) return false;
+    if (SSFX509Parse(cred->certDer, (uint32_t)cred->certDerLen, &cred->cert) == false)
+    { return false; }
+    return _SSFAWSProvCertKeyIs(&cred->cert, curve, cred->key.pub, cred->key.pubLen);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if name[0..nameLen) and id[0..64) are a valid thingName and certificateId.       */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFAWSProvCredNamesAreValid(const char *name, size_t nameLen, const char *id)
+{
+    SSF_REQUIRE(name != NULL);
+    SSF_REQUIRE(id != NULL);
+
+    return ((nameLen > 0u) && (nameLen < SSF_AWSPROV_CONFIG_THING_NAME_SIZE) &&
+            _SSFAWSProvIsThingName(name, nameLen) &&
+            _SSFAWSProvIsLowerHex(id, SSF_AWSPROV_CRED_ID_LEN));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if credOut holds the DONE result's certificate and names with the device key.    */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFAWSProvCredFromResult(const SSFAWSProvResult_t *result, SSFECCurve_t curve,
+                              const uint8_t *priv, size_t privLen, SSFAWSProvCred_t *credOut)
+{
+    const SSFAWSProvCsrAccepted_t *acc;
+    size_t nameLen;
+
+    SSF_REQUIRE(result != NULL);
+    SSF_REQUIRE(result->certOpt != NULL);                   /* A DONE result */
+    SSF_REQUIRE(result->thingNameOpt != NULL);
+    SSF_REQUIRE(((curve == SSF_EC_CURVE_P256) && (privLen == 32u)) ||
+                ((curve == SSF_EC_CURVE_P384) && (privLen == 48u)));
+    SSF_REQUIRE(priv != NULL);
+    SSF_REQUIRE(credOut != NULL);
+    SSF_REQUIRE(_SSFAWSProvIsDisjoint(priv, privLen, credOut, sizeof(*credOut)));
+    SSF_REQUIRE(_SSFAWSProvIsDisjoint(result->certOpt, sizeof(*result->certOpt), credOut,
+                                      sizeof(*credOut)));
+
+    acc = result->certOpt;
+    memset(credOut, 0, sizeof(*credOut));
+    /* The same field rules Decode applies, so what is kept here decodes at the next boot */
+    nameLen = 0;
+    while ((nameLen < sizeof(credOut->thingName)) && (result->thingNameOpt[nameLen] != 0))
+    { nameLen++; }
+    if ((_SSFAWSProvCredNamesAreValid(result->thingNameOpt, nameLen,
+                                      acc->certificateId) == false) ||
+        (acc->certificateId[SSF_AWSPROV_CRED_ID_LEN] != 0) ||
+        (acc->certDerLen > sizeof(credOut->certDer))) return false;     /* Empty: parse refuses */
+    memcpy(credOut->certDer, acc->certDer, acc->certDerLen);
+    credOut->certDerLen = acc->certDerLen;
+    memcpy(credOut->thingName, result->thingNameOpt, nameLen + 1u);
+    memcpy(credOut->certificateId, acc->certificateId, sizeof(credOut->certificateId));
+    /* Is the certificate for this key? */
+    if (_SSFAWSProvCredFinish(credOut, curve, priv, privLen) == false)
+    {
+        /* No */
+        SSFAWSProvCredWipe(credOut);
+        return false;
+    }
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the v1 blob of cred is in out[0..*outLen), else false with out zeroed.        */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFAWSProvCredEncode(const SSFAWSProvCred_t *cred, uint8_t *out, size_t outSize,
+                          size_t *outLen)
+{
+    size_t nameLen;
+    size_t n;
+    uint32_t crc;
+
+    SSF_REQUIRE(cred != NULL);
+    SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE(outLen != NULL);
+    SSF_REQUIRE((cred->key.type == SSF_PKEY_TYPE_P256) || (cred->key.type == SSF_PKEY_TYPE_P384));
+    SSF_REQUIRE((cred->certDerLen > 0u) && (cred->certDerLen <= sizeof(cred->certDer)));
+    SSF_REQUIRE(_SSFAWSProvIsDisjoint(cred, sizeof(*cred), out, outSize));
+    SSF_REQUIRE(_SSFAWSProvIsDisjoint(outLen, sizeof(*outLen), out, outSize));
+
+    *outLen = 0;
+    nameLen = strlen(cred->thingName);
+    SSF_ASSERT((nameLen > 0u) && (nameLen < sizeof(cred->thingName)));
+    n = SSF_AWSPROV_CRED_MAGIC_LEN + 3u + cred->key.privLen + 2u + cred->certDerLen + 1u +
+        nameLen + SSF_AWSPROV_CRED_ID_LEN + SSF_AWSPROV_CRED_CRC_LEN;
+    SSF_ASSERT(n <= SSF_AWSPROV_CRED_BLOB_MAX_SIZE);
+    if (n > outSize) { memset(out, 0, outSize); return false; }
+
+    n = 0;
+    memcpy(&out[n], SSF_AWSPROV_CRED_MAGIC, SSF_AWSPROV_CRED_MAGIC_LEN);
+    n += SSF_AWSPROV_CRED_MAGIC_LEN;
+    out[n++] = SSF_AWSPROV_CRED_BLOB_VERSION;
+    out[n++] = (cred->key.type == SSF_PKEY_TYPE_P256) ? SSF_AWSPROV_CRED_CURVE_P256 :
+               SSF_AWSPROV_CRED_CURVE_P384;
+    out[n++] = (uint8_t)cred->key.privLen;
+    memcpy(&out[n], cred->key.priv, cred->key.privLen);
+    n += cred->key.privLen;
+    out[n++] = (uint8_t)(cred->certDerLen >> 8);
+    out[n++] = (uint8_t)cred->certDerLen;
+    memcpy(&out[n], cred->certDer, cred->certDerLen);
+    n += cred->certDerLen;
+    out[n++] = (uint8_t)nameLen;
+    memcpy(&out[n], cred->thingName, nameLen);
+    n += nameLen;
+    memcpy(&out[n], cred->certificateId, SSF_AWSPROV_CRED_ID_LEN);
+    n += SSF_AWSPROV_CRED_ID_LEN;
+    crc = SSFCRC32(out, (uint32_t)n, SSF_CRC32_INITIAL);
+    out[n++] = (uint8_t)(crc >> 24);
+    out[n++] = (uint8_t)(crc >> 16);
+    out[n++] = (uint8_t)(crc >> 8);
+    out[n++] = (uint8_t)crc;
+    *outLen = n;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if every field of blob is valid and credOut holds it, else false (zeroed).       */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFAWSProvCredParse(const uint8_t *blob, size_t blobLen, SSFAWSProvCred_t *cred)
+{
+    SSFECCurve_t curve;
+    const uint8_t *priv;
+    size_t privLen;
+    size_t nameLen;
+    size_t n;
+    uint32_t crc;
+
+    SSF_REQUIRE(blob != NULL);
+    SSF_REQUIRE(cred != NULL);
+
+    /* Long enough for every fixed field, and the CRC matches? */
+    if (blobLen < (SSF_AWSPROV_CRED_MAGIC_LEN + 3u + 2u + 1u + SSF_AWSPROV_CRED_ID_LEN +
+                   SSF_AWSPROV_CRED_CRC_LEN)) return false;
+    n = blobLen - SSF_AWSPROV_CRED_CRC_LEN;
+    crc = SSFCRC32(blob, (uint32_t)n, SSF_CRC32_INITIAL);
+    if ((blob[n] != (uint8_t)(crc >> 24)) || (blob[n + 1u] != (uint8_t)(crc >> 16)) ||
+        (blob[n + 2u] != (uint8_t)(crc >> 8)) || (blob[n + 3u] != (uint8_t)crc)) return false;
+
+    /* Header */
+    if ((memcmp(blob, SSF_AWSPROV_CRED_MAGIC, SSF_AWSPROV_CRED_MAGIC_LEN) != 0) ||
+        (blob[4] != SSF_AWSPROV_CRED_BLOB_VERSION)) return false;
+    if (blob[5] == SSF_AWSPROV_CRED_CURVE_P256) { curve = SSF_EC_CURVE_P256; privLen = 32u; }
+    else if (blob[5] == SSF_AWSPROV_CRED_CURVE_P384) { curve = SSF_EC_CURVE_P384; privLen = 48u; }
+    else return false;
+    if (blob[6] != privLen) return false;
+    n = SSF_AWSPROV_CRED_MAGIC_LEN + 3u;
+
+    /* The variable fields must fit exactly, with nothing after them; the minimum length above */
+    /* already covers the scalar and certLen */
+    priv = &blob[n];
+    n += privLen;
+    cred->certDerLen = (((size_t)blob[n]) << 8) | blob[n + 1u];
+    n += 2u;
+    if ((cred->certDerLen > sizeof(cred->certDer)) ||
+        ((blobLen - n) < (cred->certDerLen + 1u))) return false;
+    memcpy(cred->certDer, &blob[n], cred->certDerLen);    /* Empty: SSFX509Parse refuses it */
+    n += cred->certDerLen;
+    nameLen = blob[n++];
+    if (((blobLen - n) != (nameLen + SSF_AWSPROV_CRED_ID_LEN + SSF_AWSPROV_CRED_CRC_LEN)) ||
+        (_SSFAWSProvCredNamesAreValid((const char *)&blob[n], nameLen,
+                                      (const char *)&blob[n + nameLen]) == false)) return false;
+    memcpy(cred->thingName, &blob[n], nameLen);
+    n += nameLen;
+    memcpy(cred->certificateId, &blob[n], SSF_AWSPROV_CRED_ID_LEN);
+
+    /* The key, and a certificate for it */
+    return _SSFAWSProvCredFinish(cred, curve, priv, privLen);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the blob is valid and credOut holds it, else false with credOut zeroed.       */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFAWSProvCredDecode(const uint8_t *blob, size_t blobLen, SSFAWSProvCred_t *credOut)
+{
+    SSF_REQUIRE(blob != NULL);
+    SSF_REQUIRE(credOut != NULL);
+    SSF_REQUIRE(_SSFAWSProvIsDisjoint(blob, blobLen, credOut, sizeof(*credOut)));
+
+    memset(credOut, 0, sizeof(*credOut));
+    if (blobLen > SSF_AWSPROV_CRED_BLOB_MAX_SIZE) return false;
+    /* Valid? */
+    if (_SSFAWSProvCredParse(blob, blobLen, credOut) == false)
+    {
+        /* No */
+        SSFAWSProvCredWipe(credOut);
+        return false;
+    }
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the session now uses cred's certificate and key for mutual TLS, else false.   */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFAWSProvApplyTLS(SSFTLSCSession_t *session, SSFAWSProvCred_t *cred)
+{
+    SSF_REQUIRE(session != NULL);
+    SSF_REQUIRE(cred != NULL);
+
+    cred->chain[0] = cred->certDer;
+    cred->chainLen[0] = (uint32_t)cred->certDerLen;
+    return SSFTLSCSetClientCert(session, cred->chain, cred->chainLen, 1u, &cred->key);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Zeroes the credentials, private key included.                                                 */
+/* --------------------------------------------------------------------------------------------- */
+void SSFAWSProvCredWipe(SSFAWSProvCred_t *cred)
+{
+    SSF_REQUIRE(cred != NULL);
+
+    SSFPKeyWipe(&cred->key);
+    memset(cred, 0, sizeof(*cred));
 }
 #endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN */

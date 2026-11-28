@@ -34,6 +34,8 @@
 #include "ssfsm.h"
 #include "ssfnet.h"
 #include "ssfmqttpkt.h"
+#include "ssfcrc32.h"
+#include "ssfcfg.h"
 #include "ssfjson.h"
 #include "ssfpem.h"
 #include "ssfawsprov.h"
@@ -3085,6 +3087,519 @@ static void _SSFAWSProvUTSmDbc(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Operational credentials (M08)                                                                 */
+/* --------------------------------------------------------------------------------------------- */
+#define SSF_AWSPROV_UT_BLOB_SIZE (SSF_AWSPROV_CRED_BLOB_MAX_SIZE + 8u)
+#define SSF_AWSPROV_UT_CFG_ID    (0u)
+
+static SSFAWSProvCred_t _utCred;
+static SSFAWSProvCred_t _utCred2;
+static uint8_t _utBlob[SSF_AWSPROV_UT_BLOB_SIZE];
+static size_t _utBlobLen;
+static uint8_t _utBlobExp[SSF_AWSPROV_UT_BLOB_SIZE];
+static size_t _utBlobExpLen;
+static uint8_t _utKey2[sizeof(_utAWSProvP256Priv)];
+static bool _utCredOk;
+static bool _utCredOtherOk;
+static SSFTLSCSession_t _utTls;
+static uint32_t _utRxCount;
+
+/* --------------------------------------------------------------------------------------------- */
+/* Writes the CRC32 of b[0..len-4) big-endian into its last 4 bytes.                             */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTBlobCrc(uint8_t *b, size_t len)
+{
+    uint32_t crc;
+
+    SSF_REQUIRE((b != NULL) && (len >= 4u));
+
+    crc = SSFCRC32(b, (uint32_t)(len - 4u), SSF_CRC32_INITIAL);
+    b[len - 4u] = (uint8_t)(crc >> 24);
+    b[len - 3u] = (uint8_t)(crc >> 16);
+    b[len - 2u] = (uint8_t)(crc >> 8);
+    b[len - 1u] = (uint8_t)crc;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Builds a v1 blob field by field (independent of the encoder) and returns its length.          */
+/* --------------------------------------------------------------------------------------------- */
+static size_t _SSFAWSProvUTBlobBuild(uint8_t *b, size_t size, uint8_t curveByte,
+                                     const uint8_t *priv, size_t privLen, const uint8_t *der,
+                                     size_t derLen, const char *name, const char *id)
+{
+    size_t n = 0;
+    size_t nameLen;
+
+    SSF_REQUIRE((b != NULL) && (priv != NULL) && (der != NULL) && (name != NULL) &&
+                (id != NULL));
+
+    nameLen = strlen(name);
+    SSF_ASSERT((4u + 3u + privLen + 2u + derLen + 1u + nameLen + 64u + 4u) <= size);
+    memcpy(&b[n], "AWSC", 4u); n += 4u;
+    b[n++] = 1u;
+    b[n++] = curveByte;
+    b[n++] = (uint8_t)privLen;
+    memcpy(&b[n], priv, privLen); n += privLen;
+    b[n++] = (uint8_t)(derLen >> 8);
+    b[n++] = (uint8_t)derLen;
+    memcpy(&b[n], der, derLen); n += derLen;
+    b[n++] = (uint8_t)nameLen;
+    memcpy(&b[n], name, nameLen); n += nameLen;
+    SSF_ASSERT(strlen(id) == 64u);
+    memcpy(&b[n], id, 64u); n += 64u;
+    n += 4u;
+    _SSFAWSProvUTBlobCrc(b, n);
+    return n;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Asserts cred holds the fixture identity for priv/pub/der and name.                            */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTCredExpect(const SSFAWSProvCred_t *cred, SSFPKeyType_t type,
+                                    const uint8_t *priv, size_t privLen, const uint8_t *der,
+                                    size_t derLen, const char *name)
+{
+    SSF_REQUIRE((cred != NULL) && (priv != NULL) && (der != NULL) && (name != NULL));
+
+    SSF_ASSERT(cred->key.type == type);
+    SSF_ASSERT((cred->key.privLen == privLen) && (memcmp(cred->key.priv, priv, privLen) == 0));
+    SSF_ASSERT(cred->key.pubLen == ((type == SSF_PKEY_TYPE_P256) ? 65u : 97u));
+    SSF_ASSERT((cred->certDerLen == derLen) && (memcmp(cred->certDer, der, derLen) == 0));
+    SSF_ASSERT(cred->cert.notAfter == SSF_AWSPROV_UT_CERT_NOT_AFTER);
+    SSF_ASSERT((cred->cert.pubKeyLen == cred->key.pubLen) &&
+               (memcmp(cred->cert.pubKey, cred->key.pub, cred->key.pubLen) == 0));
+    SSF_ASSERT(strcmp(cred->thingName, name) == 0);
+    SSF_ASSERT(strcmp(cred->certificateId, _utAWSProvCertId) == 0);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Asserts blob[0..len) is refused and leaves the output all zero.                               */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTDecodeRefused(const uint8_t *blob, size_t len)
+{
+    memset(&_utCred2, 0x5A, sizeof(_utCred2));
+    SSF_ASSERT(SSFAWSProvCredDecode(blob, len, &_utCred2) == false);
+    SSF_ASSERT(_SSFAWSProvUTIsZero(&_utCred2, sizeof(_utCred2)));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Checks a DONE result with each field Decode refuses: CredFromResult refuses it too.           */
+/* --------------------------------------------------------------------------------------------- */
+static SSFAWSProvCsrAccepted_t _utAcc2;
+static uint8_t _utKey48[48];
+
+static void _SSFAWSProvUTFromResultRefused(const SSFAWSProvResult_t *r)
+{
+    static char longName[SSF_AWSPROV_CONFIG_THING_NAME_SIZE + 1u];
+    static const char *const badNames[] = { "", "a b", "a/b", "a.b", "\xC3\xA9" };
+    SSFAWSProvResult_t res;
+    size_t i;
+
+    SSF_REQUIRE(r != NULL);
+
+#define SSF_AWSPROV_UT_FR_REFUSED() \
+    memset(&_utCred2, 0x5A, sizeof(_utCred2)); \
+    SSF_ASSERT(SSFAWSProvCredFromResult(&res, SSF_EC_CURVE_P256, _utAWSProvP256Priv, \
+                                        sizeof(_utAWSProvP256Priv), &_utCred2) == false); \
+    SSF_ASSERT(_SSFAWSProvUTIsZero(&_utCred2, sizeof(_utCred2)))
+
+    memcpy(&res, r, sizeof(res));
+    for (i = 0; i < (sizeof(badNames) / sizeof(badNames[0])); i++)
+    {
+        res.thingNameOpt = badNames[i];
+        SSF_AWSPROV_UT_FR_REFUSED();
+    }
+    memset(longName, 'n', sizeof(longName) - 1u);
+    res.thingNameOpt = longName;                    /* THING_NAME_SIZE characters, unterminated */
+    SSF_AWSPROV_UT_FR_REFUSED();                    /* within it */
+    res.thingNameOpt = r->thingNameOpt;
+
+    /* The certificate fields, on a copy (CredFromResult reads only certDer, its length, id) */
+    memcpy(&_utAcc2, r->certOpt, sizeof(_utAcc2));
+    res.certOpt = &_utAcc2;
+    _utAcc2.certificateId[0] = 'A';
+    SSF_AWSPROV_UT_FR_REFUSED();
+    _utAcc2.certificateId[0] = r->certOpt->certificateId[0];
+    _utAcc2.certificateId[63] = 0;
+    SSF_AWSPROV_UT_FR_REFUSED();
+    _utAcc2.certificateId[63] = r->certOpt->certificateId[63];
+    _utAcc2.certificateId[64] = 'x';
+    SSF_AWSPROV_UT_FR_REFUSED();
+    _utAcc2.certificateId[64] = 0;
+    _utAcc2.certDerLen = 0;
+    SSF_AWSPROV_UT_FR_REFUSED();
+    _utAcc2.certDerLen = r->certOpt->certDerLen;
+    _utAcc2.certDer[0] = 0x31u;                     /* doesn't parse */
+    SSF_AWSPROV_UT_FR_REFUSED();
+    memset(&_utAcc2, 0, sizeof(_utAcc2));
+#undef SSF_AWSPROV_UT_FR_REFUSED
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Done callback that keeps the credentials, and checks another key is refused.                  */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTDoneCred(void *ctx, bool isDone, const SSFAWSProvResult_t *r)
+{
+    _SSFAWSProvUTDoneFn(ctx, isDone, r);
+    SSF_ASSERT(isDone);
+    memset(&_utCred2, 0x5A, sizeof(_utCred2));
+    _utCredOtherOk = SSFAWSProvCredFromResult(r, SSF_EC_CURVE_P256, _utKey2, sizeof(_utKey2),
+                                              &_utCred2);
+    SSF_ASSERT(_SSFAWSProvUTIsZero(&_utCred2, sizeof(_utCred2)));
+#if SSF_EC_CONFIG_ENABLE_P384 == 0
+    /* A curve that isn't built */
+    SSF_ASSERT(SSFAWSProvCredFromResult(r, SSF_EC_CURVE_P384, _utKey48, sizeof(_utKey48),
+                                        &_utCred2) == false);
+    SSF_ASSERT(_SSFAWSProvUTIsZero(&_utCred2, sizeof(_utCred2)));
+#endif /* SSF_EC_CONFIG_ENABLE_P384 */
+    /* The fields Decode would refuse are refused here too */
+    _SSFAWSProvUTFromResultRefused(r);
+    _utCredOk = SSFAWSProvCredFromResult(r, SSF_EC_CURVE_P256, _utAWSProvP256Priv,
+                                         sizeof(_utAWSProvP256Priv), &_utCred);
+    SSF_ASSERT(_utCredOk);
+    SSF_ASSERT(SSFAWSProvCredEncode(&_utCred, _utBlob, sizeof(_utBlob), &_utBlobLen));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Rx callback for the operational connection.                                                   */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFAWSProvUTOpRx(void *ctx, const SSFMQTTCRxPublish_t *rx)
+{
+    SSF_ASSERT(ctx == &_utRxCount);
+    SSF_ASSERT(rx != NULL);
+    _utRxCount++;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Each field of a good blob made invalid, with its CRC recomputed: refused.                     */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTCredFields(void)
+{
+    static uint8_t b[SSF_AWSPROV_UT_BLOB_SIZE];
+    static uint8_t der[sizeof(_utAWSProvP256CertDer)];
+    static char name[SSF_AWSPROV_CONFIG_THING_NAME_SIZE + 1u];
+    static char id[sizeof(_utAWSProvCertId)];
+    const size_t pl = sizeof(_utAWSProvP256Priv);
+    const size_t dl = sizeof(_utAWSProvP256CertDer);
+    const size_t offCertLen = 7u + pl;
+    const size_t offDer = offCertLen + 2u;
+    const size_t offNameLen = offDer + dl;
+    const size_t offName = offNameLen + 1u;
+    const size_t offId = offName + 7u;              /* "thing-1" */
+    size_t n;
+
+#define SSF_AWSPROV_UT_GOOD() \
+    n = _SSFAWSProvUTBlobBuild(b, sizeof(b), 1u, _utAWSProvP256Priv, pl, \
+                               _utAWSProvP256CertDer, dl, "thing-1", _utAWSProvCertId)
+#define SSF_AWSPROV_UT_PATCH(off, v) \
+    SSF_AWSPROV_UT_GOOD(); b[off] = (uint8_t)(v); _SSFAWSProvUTBlobCrc(b, n); \
+    _SSFAWSProvUTDecodeRefused(b, n)
+#define SSF_AWSPROV_UT_PATCH2(off, v) \
+    SSF_AWSPROV_UT_GOOD(); b[off] = (uint8_t)((v) >> 8); b[(off) + 1u] = (uint8_t)(v); \
+    _SSFAWSProvUTBlobCrc(b, n); _SSFAWSProvUTDecodeRefused(b, n)
+
+    /* The good blob decodes */
+    SSF_AWSPROV_UT_GOOD();
+    SSF_ASSERT(n == (offId + 64u + 4u));
+    SSF_ASSERT(SSFAWSProvCredDecode(b, n, &_utCred2));
+    SSFAWSProvCredWipe(&_utCred2);
+
+    SSF_AWSPROV_UT_PATCH(0u, 'X');                  /* magic */
+    SSF_AWSPROV_UT_PATCH(3u, 'c');
+    SSF_AWSPROV_UT_PATCH(4u, 0u);                   /* version */
+    SSF_AWSPROV_UT_PATCH(4u, 2u);
+    SSF_AWSPROV_UT_PATCH(5u, 0u);                   /* curve */
+    SSF_AWSPROV_UT_PATCH(5u, 3u);
+    SSF_AWSPROV_UT_PATCH(5u, 2u);                   /* P-384 with a 32-byte scalar */
+    SSF_AWSPROV_UT_PATCH(6u, pl - 1u);              /* privLen */
+    SSF_AWSPROV_UT_PATCH(6u, pl + 1u);
+    SSF_AWSPROV_UT_PATCH(6u, 0u);
+    SSF_AWSPROV_UT_PATCH(6u, 0xFFu);
+    SSF_AWSPROV_UT_PATCH(7u, 0u);                   /* a different scalar: not the cert's key */
+    SSF_AWSPROV_UT_PATCH2(offCertLen, dl - 1u);     /* certLen */
+    SSF_AWSPROV_UT_PATCH2(offCertLen, dl + 1u);
+    SSF_AWSPROV_UT_PATCH2(offCertLen, SSF_AWSPROV_CONFIG_CERT_DER_SIZE + 1u);
+    SSF_AWSPROV_UT_PATCH2(offCertLen, 0xFFFFu);
+    SSF_AWSPROV_UT_PATCH(offDer, 0x31u);            /* certificate structure damaged; */
+    SSF_AWSPROV_UT_PATCH(offDer + 3u, 0x00u);       /* (Decode checks the structure and the */
+                                                    /* key, not the CA signature) */
+    SSF_AWSPROV_UT_PATCH(offNameLen, 6u);           /* nameLen */
+    SSF_AWSPROV_UT_PATCH(offNameLen, 8u);
+    SSF_AWSPROV_UT_PATCH(offNameLen, 0u);
+    SSF_AWSPROV_UT_PATCH(offName, ' ');             /* thingName characters */
+    SSF_AWSPROV_UT_PATCH(offName, '/');
+    SSF_AWSPROV_UT_PATCH(offName, 0u);
+    SSF_AWSPROV_UT_PATCH(offName + 6u, 0x80u);
+    SSF_AWSPROV_UT_PATCH(offId, 'A');               /* certificateId: lowercase hex only */
+    SSF_AWSPROV_UT_PATCH(offId + 63u, 'g');
+    SSF_AWSPROV_UT_PATCH(offId, 0u);
+
+    /* An all-zero certificate length and an empty certificate */
+    n = 7u + pl;
+    memcpy(b, "AWSC\x01\x01", 6u);
+    b[6] = (uint8_t)pl;
+    memcpy(&b[7], _utAWSProvP256Priv, pl);
+    b[n++] = 0; b[n++] = 0;
+    b[n++] = 1u; b[n++] = 'a';
+    memcpy(&b[n], _utAWSProvCertId, 64u); n += 64u;
+    n += 4u;
+    _SSFAWSProvUTBlobCrc(b, n);
+    _SSFAWSProvUTDecodeRefused(b, n);
+
+    /* Every length below the fixed fields, with a valid CRC and a plausible header: refused */
+    memcpy(b, "AWSC\x01\x01\x20", 7u);
+    memset(&b[7], 0, sizeof(b) - 7u);
+    for (n = 4u; n < (4u + 3u + 2u + 1u + 64u + 4u); n++)
+    {
+        uint8_t *exact;
+
+        if (n > 4u) memcpy(b, "AWSC\x01\x01\x20", ((n - 4u) < 7u) ? (n - 4u) : 7u);
+        _SSFAWSProvUTBlobCrc(b, n);
+        /* In a heap block of exactly n bytes, so ASan sees any read past the blob */
+        exact = (uint8_t *)SSF_MALLOC(n);
+        SSF_ASSERT(exact != NULL);
+        memcpy(exact, b, n);
+        _SSFAWSProvUTDecodeRefused(exact, n);
+        SSF_FREE(exact);
+    }
+
+    /* An empty thingName, correctly sized (nameLen 0, no name bytes) */
+    n = _SSFAWSProvUTBlobBuild(b, sizeof(b), 1u, _utAWSProvP256Priv, pl, _utAWSProvP256CertDer,
+                               dl, "", _utAWSProvCertId);
+    SSF_ASSERT(n == (offName + 64u + 4u));
+    _SSFAWSProvUTDecodeRefused(b, n);
+
+    /* The longest thingName (THING_NAME_SIZE - 1) is allowed, one more is not */
+    memset(name, 'n', SSF_AWSPROV_CONFIG_THING_NAME_SIZE - 1u);
+    name[SSF_AWSPROV_CONFIG_THING_NAME_SIZE - 1u] = 0;
+    n = _SSFAWSProvUTBlobBuild(b, sizeof(b), 1u, _utAWSProvP256Priv, pl, _utAWSProvP256CertDer,
+                               dl, name, _utAWSProvCertId);
+    SSF_ASSERT(SSFAWSProvCredDecode(b, n, &_utCred2));
+    SSF_ASSERT(strlen(_utCred2.thingName) == (SSF_AWSPROV_CONFIG_THING_NAME_SIZE - 1u));
+    SSFAWSProvCredWipe(&_utCred2);
+    name[SSF_AWSPROV_CONFIG_THING_NAME_SIZE - 1u] = 'n';
+    name[SSF_AWSPROV_CONFIG_THING_NAME_SIZE] = 0;
+    n = _SSFAWSProvUTBlobBuild(b, sizeof(b), 1u, _utAWSProvP256Priv, pl, _utAWSProvP256CertDer,
+                               dl, name, _utAWSProvCertId);
+    _SSFAWSProvUTDecodeRefused(b, n);
+    (void)der;
+    (void)id;
+#undef SSF_AWSPROV_UT_PATCH2
+#undef SSF_AWSPROV_UT_PATCH
+#undef SSF_AWSPROV_UT_GOOD
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Checks the operational credentials: from DONE, the blob, TLS, the second connection.          */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTCred(void)
+{
+    static SSFAWSProvCsrAccepted_t acc;
+    static uint8_t cfg[SSF_AWSPROV_UT_BLOB_SIZE];
+    static uint8_t cfgBack[SSF_AWSPROV_UT_BLOB_SIZE];
+    uint8_t pub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+    SSFAWSProvResult_t res;
+    SSFMQTTCOpts_t op;
+    uint16_t cfgLen;
+    size_t pubLen;
+    size_t len;
+    size_t i;
+
+    memcpy(_utKey2, _utAWSProvP256Priv, sizeof(_utKey2));
+    _utKey2[sizeof(_utKey2) - 1u] ^= 1u;
+
+    /* Provision on the mock broker; doneFn keeps the credentials and encodes them */
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    SSFAWSProvStart(&_utWork, &_utOpts, _SSFAWSProvUTDoneCred, &_utDone, NULL, NULL);
+    _SSFAWSProvUTPumpUntilStopped();
+    SSF_ASSERT((_utDone.count == 1u) && _utDone.isDone && _utCredOk);
+    SSF_ASSERT(_utCredOtherOk == false);
+    SSF_ASSERT(_SSFAWSProvUTIsZero(&_utWork, sizeof(_utWork)));
+    _SSFAWSProvUTCredExpect(&_utCred, SSF_PKEY_TYPE_P256, _utAWSProvP256Priv,
+                            sizeof(_utAWSProvP256Priv), _utAWSProvP256CertDer,
+                            sizeof(_utAWSProvP256CertDer), "thing-1");
+
+    /* The encoder writes the layout exactly */
+    _utBlobExpLen = _SSFAWSProvUTBlobBuild(_utBlobExp, sizeof(_utBlobExp), 1u,
+                                           _utAWSProvP256Priv, sizeof(_utAWSProvP256Priv),
+                                           _utAWSProvP256CertDer, sizeof(_utAWSProvP256CertDer),
+                                           "thing-1", _utAWSProvCertId);
+    SSF_ASSERT((_utBlobLen == _utBlobExpLen) && (memcmp(_utBlob, _utBlobExp, _utBlobLen) == 0));
+    SSF_ASSERT(_utBlobLen <= SSF_AWSPROV_CRED_BLOB_MAX_SIZE);
+
+    /* Exact output size passes, one short fails with the output zeroed */
+    memset(cfg, 0x5A, sizeof(cfg));
+    SSF_ASSERT(SSFAWSProvCredEncode(&_utCred, cfg, _utBlobLen, &len) && (len == _utBlobLen));
+    len = 1u;
+    memset(cfg, 0x5A, sizeof(cfg));
+    SSF_ASSERT(SSFAWSProvCredEncode(&_utCred, cfg, _utBlobLen - 1u, &len) == false);
+    SSF_ASSERT((len == 0) && _SSFAWSProvUTIsZero(cfg, _utBlobLen - 1u) &&
+               (cfg[_utBlobLen - 1u] == 0x5Au));
+
+    /* Store it in ssfcfg (one record), wipe every copy, read it back, decode */
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    SSFCfgInit();                                /* Only built with thread support */
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
+    SSF_ASSERT(SSFCfgWrite(_utBlob, (uint16_t)_utBlobLen, SSF_AWSPROV_UT_CFG_ID, 1));
+    memset(_utBlob, 0, sizeof(_utBlob));
+    SSFAWSProvCredWipe(&_utCred);
+    SSF_ASSERT(_SSFAWSProvUTIsZero(&_utCred, sizeof(_utCred)));
+    cfgLen = 0;
+    SSF_ASSERT(SSFCfgRead(cfgBack, &cfgLen, sizeof(cfgBack), SSF_AWSPROV_UT_CFG_ID) == 1);
+    SSF_ASSERT(cfgLen == _utBlobExpLen);
+    SSF_ASSERT(SSFAWSProvCredDecode(cfgBack, cfgLen, &_utCred));
+    _SSFAWSProvUTCredExpect(&_utCred, SSF_PKEY_TYPE_P256, _utAWSProvP256Priv,
+                            sizeof(_utAWSProvP256Priv), _utAWSProvP256CertDer,
+                            sizeof(_utAWSProvP256CertDer), "thing-1");
+    /* The largest blob fits one record too */
+    memset(cfg, 0xA5, sizeof(cfg));
+    SSF_ASSERT(SSFCfgWrite(cfg, (uint16_t)SSF_AWSPROV_CRED_BLOB_MAX_SIZE, SSF_AWSPROV_UT_CFG_ID,
+                           2));
+    memset(cfgBack, 0, sizeof(cfgBack));
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    SSFCfgDeInit();
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
+
+    /* Every byte flipped, every truncation and one extra byte: refused */
+    for (i = 0; i < _utBlobExpLen; i++)
+    {
+        _utBlobExp[i] ^= 0x01u;
+        _SSFAWSProvUTDecodeRefused(_utBlobExp, _utBlobExpLen);
+        _utBlobExp[i] ^= 0x81u;
+        _SSFAWSProvUTDecodeRefused(_utBlobExp, _utBlobExpLen);
+        _utBlobExp[i] ^= 0x80u;
+    }
+    for (i = 0; i < _utBlobExpLen; i++) _SSFAWSProvUTDecodeRefused(_utBlobExp, i);
+    memset(&_utBlobExp[_utBlobExpLen], 0, sizeof(_utBlobExp) - _utBlobExpLen);
+    _SSFAWSProvUTDecodeRefused(_utBlobExp, SSF_AWSPROV_CRED_BLOB_MAX_SIZE + 1u);
+    _utBlobExp[_utBlobExpLen] = 0;
+    _SSFAWSProvUTDecodeRefused(_utBlobExp, _utBlobExpLen + 1u);
+    SSF_ASSERT(SSFAWSProvCredDecode(_utBlobExp, _utBlobExpLen, &_utCred2));
+    SSFAWSProvCredWipe(&_utCred2);
+    _SSFAWSProvUTCredFields();
+
+    /* TLS: the session holds the chain and key; a key that no longer matches is refused */
+    SSFTLSCInit(&_utTls, &_utBk.transport, NULL);
+    SSF_ASSERT(SSFAWSProvApplyTLS(&_utTls, &_utCred));
+    SSF_ASSERT((_utTls.clientChainCount == 1u) && (_utTls.clientKey == &_utCred.key));
+    SSF_ASSERT(_utTls.clientChainDer[0] == _utCred.certDer);
+    SSF_ASSERT(_utTls.clientChainLens[0] == (uint32_t)_utCred.certDerLen);
+    _utCred.key.pub[10] ^= 1u;
+    SSF_ASSERT(SSFAWSProvApplyTLS(&_utTls, &_utCred) == false);
+    _utCred.key.pub[10] ^= 1u;
+    /* A wiped credential is refused */
+    SSF_ASSERT(SSFAWSProvCredDecode(_utBlobExp, _utBlobExpLen, &_utCred2));
+    SSFAWSProvCredWipe(&_utCred2);
+    SSF_ASSERT(SSFAWSProvApplyTLS(&_utTls, &_utCred2) == false);
+    /* Cleared from the session before the credentials go away */
+    SSF_ASSERT(SSFTLSCSetClientCert(&_utTls, NULL, NULL, 0, NULL));
+    SSF_ASSERT(_utTls.clientChainCount == 0);
+    SSFTLSCDeInit(&_utTls);
+
+    /* The operational connection: re-Init with app callbacks, clientId = thingName */
+    SSFAWSProvDeInit();
+    SSFMQTTCDeInit();
+    SSFMQTTCInit(&_utBk.transport, 4u, SSF_AWSPROV_UT_TX_BLOCK, SSF_AWSPROV_UT_RX_BLOCK,
+                 _SSFAWSProvUTOpRx, &_utRxCount, NULL, NULL);
+    memcpy(&op, &_utOpts.mqtt, sizeof(op));
+    op.clientId = _utCred.thingName;
+    SSFMQTTCStart(&op);
+    while (_utBk.connectCount < 2u) _SSFAWSProvUTPump();
+    _SSFAWSProvUTPump();
+    SSF_ASSERT(strcmp(_utBk.clientId, "thing-1") == 0);
+    SSF_ASSERT(SSFMQTTCIsReady());
+    SSFMQTTCStop();
+    while (SSFMQTTCGetState() != SSF_MQTTC_STATE_STOPPED) _SSFAWSProvUTPump();
+    SSFMQTTCDeInit();
+    SSFSMDeInit();
+    SSFAWSProvCredWipe(&_utCred);
+    SSF_ASSERT(_SSFAWSProvUTIsZero(&_utCred, sizeof(_utCred)));
+
+#if SSF_EC_CONFIG_ENABLE_P384 == 1
+    /* P-384: credentials from a result built around a parsed accepted response */
+    len = _SSFAWSProvUTAccGood(_utAWSProvP384CertPem);
+    SSF_ASSERT(SSFECDSAPubKeyFromPrivKey(SSF_EC_CURVE_P384, _utAWSProvP384Priv,
+                                         sizeof(_utAWSProvP384Priv), pub, sizeof(pub),
+                                         &pubLen));
+    SSF_ASSERT(SSFAWSProvParseCsrAccepted((const uint8_t *)_utJson, len, _utRx, sizeof(_utRx),
+                                          SSF_EC_CURVE_P384, pub, pubLen, &acc));
+    memset(&res, 0, sizeof(res));
+    res.reason = SSF_AWSPROV_REASON_NONE;
+    res.errorCode = "";
+    res.errorMessage = "";
+    res.certOpt = &acc;
+    res.thingNameOpt = "thing:384_x-y";
+    res.deviceConfigOpt = "{}";
+    res.deviceConfigLen = 2u;
+    SSF_ASSERT(SSFAWSProvCredFromResult(&res, SSF_EC_CURVE_P256, _utAWSProvP256Priv,
+                                        sizeof(_utAWSProvP256Priv), &_utCred) == false);
+    SSF_ASSERT(_SSFAWSProvUTIsZero(&_utCred, sizeof(_utCred)));
+    SSF_ASSERT(SSFAWSProvCredFromResult(&res, SSF_EC_CURVE_P384, _utAWSProvP384Priv,
+                                        sizeof(_utAWSProvP384Priv), &_utCred));
+    SSF_ASSERT(SSFAWSProvCredEncode(&_utCred, _utBlob, sizeof(_utBlob), &_utBlobLen));
+    _utBlobExpLen = _SSFAWSProvUTBlobBuild(_utBlobExp, sizeof(_utBlobExp), 2u,
+                                           _utAWSProvP384Priv, sizeof(_utAWSProvP384Priv),
+                                           _utAWSProvP384CertDer, sizeof(_utAWSProvP384CertDer),
+                                           "thing:384_x-y", _utAWSProvCertId);
+    SSF_ASSERT((_utBlobLen == _utBlobExpLen) && (memcmp(_utBlob, _utBlobExp, _utBlobLen) == 0));
+    SSFAWSProvCredWipe(&_utCred);
+    SSF_ASSERT(SSFAWSProvCredDecode(_utBlob, _utBlobLen, &_utCred));
+    _SSFAWSProvUTCredExpect(&_utCred, SSF_PKEY_TYPE_P384, _utAWSProvP384Priv,
+                            sizeof(_utAWSProvP384Priv), _utAWSProvP384CertDer,
+                            sizeof(_utAWSProvP384CertDer), "thing:384_x-y");
+    /* A P-256 scalar against the P-384 certificate */
+    _utBlobExpLen = _SSFAWSProvUTBlobBuild(_utBlobExp, sizeof(_utBlobExp), 1u,
+                                           _utAWSProvP256Priv, sizeof(_utAWSProvP256Priv),
+                                           _utAWSProvP384CertDer, sizeof(_utAWSProvP384CertDer),
+                                           "t", _utAWSProvCertId);
+    _SSFAWSProvUTDecodeRefused(_utBlobExp, _utBlobExpLen);
+    SSFAWSProvCredWipe(&_utCred);
+    memset(&acc, 0, sizeof(acc));
+#else
+    (void)acc; (void)res; (void)pub; (void)pubLen;
+#endif /* SSF_EC_CONFIG_ENABLE_P384 */
+
+    /* DBC */
+    memset(&res, 0, sizeof(res));
+    res.errorCode = "";
+    res.errorMessage = "";
+    SSF_ASSERT_TEST((void)SSFAWSProvCredFromResult(NULL, SSF_EC_CURVE_P256, _utAWSProvP256Priv,
+                                                   32u, &_utCred));
+    SSF_ASSERT_TEST((void)SSFAWSProvCredFromResult(&res, SSF_EC_CURVE_P256, _utAWSProvP256Priv,
+                                                   32u, &_utCred));     /* not a DONE result */
+    res.certOpt = &acc;
+    res.thingNameOpt = "t";
+    SSF_ASSERT_TEST((void)SSFAWSProvCredFromResult(&res, SSF_EC_CURVE_P256, NULL, 32u,
+                                                   &_utCred));
+    SSF_ASSERT_TEST((void)SSFAWSProvCredFromResult(&res, SSF_EC_CURVE_P256, _utAWSProvP256Priv,
+                                                   32u, NULL));
+    SSF_ASSERT_TEST((void)SSFAWSProvCredFromResult(&res, SSF_EC_CURVE_MAX, _utAWSProvP256Priv,
+                                                   32u, &_utCred));
+    SSF_ASSERT_TEST((void)SSFAWSProvCredFromResult(&res, SSF_EC_CURVE_P256, _utKey48, 48u,
+                                                   &_utCred));          /* size for the curve */
+    SSF_ASSERT_TEST((void)SSFAWSProvCredFromResult(&res, SSF_EC_CURVE_P384, _utKey48, 32u,
+                                                   &_utCred));
+    SSF_ASSERT_TEST((void)SSFAWSProvCredFromResult(&res, SSF_EC_CURVE_P256,
+                                                   _utCred.key.priv, 32u, &_utCred));
+    res.certOpt = (const SSFAWSProvCsrAccepted_t *)(const void *)&_utCred;
+    SSF_ASSERT_TEST((void)SSFAWSProvCredFromResult(&res, SSF_EC_CURVE_P256, _utAWSProvP256Priv,
+                                                   32u, &_utCred));
+    SSF_ASSERT_TEST((void)SSFAWSProvCredEncode(NULL, _utBlob, sizeof(_utBlob), &len));
+    SSF_ASSERT_TEST((void)SSFAWSProvCredEncode(&_utCred, NULL, sizeof(_utBlob), &len));
+    SSF_ASSERT_TEST((void)SSFAWSProvCredEncode(&_utCred, _utBlob, sizeof(_utBlob), NULL));
+    SSF_ASSERT_TEST((void)SSFAWSProvCredEncode(&_utCred, _utBlob, sizeof(_utBlob), &len));
+                                                                       /* not a credential */
+    SSF_ASSERT_TEST((void)SSFAWSProvCredEncode(&_utCred, (uint8_t *)&_utCred, 16u, &len));
+    SSF_ASSERT_TEST((void)SSFAWSProvCredDecode(NULL, 1u, &_utCred));
+    SSF_ASSERT_TEST((void)SSFAWSProvCredDecode(_utBlob, 1u, NULL));
+    SSF_ASSERT_TEST((void)SSFAWSProvCredDecode((const uint8_t *)&_utCred, 16u, &_utCred));
+    SSF_ASSERT_TEST((void)SSFAWSProvApplyTLS(NULL, &_utCred));
+    SSF_ASSERT_TEST((void)SSFAWSProvApplyTLS(&_utTls, NULL));
+    SSF_ASSERT_TEST(SSFAWSProvCredWipe(NULL));
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Checks the provisioning state machine.                                                        */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFAWSProvUTStateMachine(void)
@@ -3108,6 +3623,7 @@ static void _SSFAWSProvUTStateMachine(void)
     _SSFAWSProvUTSmLate();
     for (i = 0; i < SSF_AWSPROV_UT_STOP_COUNT; i++) _SSFAWSProvUTSmStopAt(i);
     _SSFAWSProvUTSmDbc();
+    _SSFAWSProvUTCred();
 }
 #endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN, SSF_EC_CONFIG_ENABLE_P256, SSF_AWSPROV_UT_ACC_FULL */
 

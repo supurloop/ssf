@@ -23,7 +23,8 @@ Status     : G01 done (commit 9041eba, 2026-11-26). G02 done (commit d510ab3, 20
              G13 done (commit 7697f67, 2026-11-27). M01 done (commit bbd7bfa, 2026-11-27).
              M02 done (commit 43537e7, 2026-11-27). M03 done (commit 178f16f, 2026-11-27).
              M04 done (commit e1a6af3, 2026-11-27). M05 done (commit a6483eb, 2026-11-27).
-             M06 done (commit 8cf1ffb, 2026-11-27). M07 done (2026-11-27).
+             M06 done (commit 8cf1ffb, 2026-11-27). M07 done (commit e5c9c24, 2026-11-27).
+             M08 done (2026-11-27).
              Everything else is plan only.
 
 Layout
@@ -1735,18 +1736,163 @@ AWSPROV-M07  Provisioning state machine over ssfmqttc
       skip them.
 
 AWSPROV-M08  Handing the credentials to the operational connection
-  Change : On DONE the callback gets {curve, priv scalar, certificate DER, thingName,
-           deviceConfiguration span}. Helpers:
-             SSFAWSProvApplyTLS(session, cred, key) -> SSFPKeyFromECPriv (G02) +
-               SSFTLSCSetClientCert
-             a versioned, CRC-checked persistence blob layout (scalar + cert DER + thingName,
-               < 1.5 KB) that fits one ssfcfg record (SSF_CFG_MAX_STORAGE_SIZE 4096).
-           The app then calls SSFMQTTCStop, DeInit, re-Inits with its own callbacks, and Starts
-           with clientId = thingName.
-  Test   : Blob round trip; corrupted CRC, wrong version, truncated blob fail; ApplyTLS with a
-           matching and a mismatched certificate; end-to-end in the unit test: provision on the
-           mock broker, then reconnect with the new identity and see CONNECT carry thingName.
-  Done   : ./ssf passes.
+  Found in the code (2026-11-27)
+    - M07 never holds the private key: the app passes it to Start and keeps it. So DONE can't
+      hand back "curve, priv scalar" as the old plan said; it hands the certificate (DER,
+      parsed, certificateId), thingName and deviceConfiguration (SSFAWSProvResult_t, valid
+      only during doneFn). The app supplies the key again when it keeps the credentials.
+    - SSFTLSCSetClientCert(session, chainDer[], chainLens[], count, &SSFPKey_t) keeps the
+      POINTERS, "caller memory kept across connections", and already refuses a certificate
+      that doesn't match the key. So the credentials need one caller-owned object that holds
+      the key, the DER and the one-entry chain arrays, alive for as long as the session.
+    - SSFPKeyFromECPriv(type, priv, len, &key) (G02) derives pub; SSFPKeyWipe zeroes it.
+    - ssfcfg already keeps a version and a CRC16 per record (SSFCfgWrite/Read), with
+      SSF_MAX_CFG_DATA_SIZE = 4096 - header per dataId. An app may use other storage, so the
+      blob carries its own magic, version and CRC32 (ssfcrc32), independent of ssfcfg.
+    - AWS device certificates are issued by the account's AWS CA; the server needs no chain
+      from the device, so the chain is the one certificate.
+    - _SSFAWSProvCertKeyIs (M04) already checks a parsed certificate against a public key.
+    - The mock broker (M07) can run a second connection after provisioning, so the
+      end-to-end test can see CONNECT carry clientId = thingName.
+
+  Decisions (need approval)
+    D1 Private key in the blob.
+       A (recommended, as first planned) yes: one self-contained identity record. The whole
+         blob is then a secret: the docs say so and every copy the module makes is wiped.
+       B no: the blob is public (certificate, names); the app stores the key its own way
+         (protected flash, secure element) and passes it to Decode.
+    D2 deviceConfiguration in the blob.
+       A (recommended) no: it is template output for the app to act on at DONE, not part of
+         the TLS identity; the app keeps what it needs.
+       B yes: up to SSF_AWSPROV_CONFIG_DEVICE_CONFIG_SIZE (512) more bytes.
+    D3 Parsed certificate kept in the credentials object.
+       A (recommended) yes: notAfter etc. for rotation without re-parsing; about 0.9 KB more
+         (about 2.9 KB total on M4 at defaults).
+       B no: about 2.0 KB; Decode parses into a caller scratch SSFX509Cert_t to check the key.
+
+  Change (_net/ssfawsprov.h/.c), as D1-D3 A
+    - typedef struct {
+          SSFPKey_t key;                                     P-256 / P-384, pub derived
+          uint8_t certDer[SSF_AWSPROV_CONFIG_CERT_DER_SIZE];
+          size_t certDerLen;
+          SSFX509Cert_t cert;                                points into certDer
+          char thingName[SSF_AWSPROV_CONFIG_THING_NAME_SIZE];
+          char certificateId[SSF_AWSPROV_CERT_ID_SIZE];
+          const uint8_t *chain[1];                           for SSFTLSCSetClientCert
+          uint32_t chainLen[1];
+      } SSFAWSProvCred_t;   not copyable (points into itself), like SSFAWSProvCsrAccepted_t
+    - bool SSFAWSProvCredFromResult(const SSFAWSProvResult_t *result, SSFECCurve_t curve,
+                                    const uint8_t *priv, size_t privLen,
+                                    SSFAWSProvCred_t *credOut)
+      For doneFn with isDone true: copies the certificate and names, builds the key, and
+      checks the certificate is for that key. false (credOut zeroed) on a mismatch.
+    - Blob layout v1, all lengths big-endian, no struct images:
+        "AWSC" magic | version 1 | curve (1 P-256, 2 P-384) | privLen 1 | priv |
+        certLen 2 | certDer | nameLen 1 | thingName | certificateId 64 | CRC32 4 (over all
+        before it). Max SSF_AWSPROV_CRED_BLOB_MAX_SIZE = 4+1+1+1+48+2+CERT_DER_SIZE+1+128+64+4
+        (1790 B at defaults), a header constant; the unit test checks it fits
+        SSF_MAX_CFG_DATA_SIZE.
+    - bool SSFAWSProvCredEncode(const SSFAWSProvCred_t *cred, uint8_t *out, size_t outSize,
+                                size_t *outLen)   out zeroed, *outLen 0 on false
+    - bool SSFAWSProvCredDecode(const uint8_t *blob, size_t blobLen, SSFAWSProvCred_t *credOut)
+      Checks magic, version, CRC, every length (privLen for the curve, certLen 1..CERT_DER,
+      nameLen 1..THING_NAME_SIZE - 1), thingName charset (M05 rule), certificateId 64
+      lowercase hex, exact total length (no trailing bytes), then the key builds and the
+      certificate parses and matches it. credOut zeroed on false.
+    - bool SSFAWSProvApplyTLS(SSFTLSCSession_t *session, SSFAWSProvCred_t *cred)
+      Sets cred->chain/chainLen and calls SSFTLSCSetClientCert. cred must outlive the
+      session's use of it (documented).
+    - void SSFAWSProvCredWipe(SSFAWSProvCred_t *cred)   SSFPKeyWipe + memset.
+    - The app flow (M09 documents it): in doneFn, CredFromResult, Encode, store; then wait for
+      ssfmqttc STOPPED, SSFAWSProvDeInit, SSFMQTTCDeInit, wipe the claim session;
+      SSFAWSProvApplyTLS on the operational session; SSFMQTTCInit with the app's callbacks;
+      Start with clientId = cred.thingName. Each boot: read the blob, Decode, ApplyTLS.
+    - Not built without signing or with neither curve, like M07 (#if guards).
+  Test (TDD: tests first, red, then the code)
+    - CredFromResult from a real M07 DONE on the mock broker; a different key -> false and
+      zeroed.
+    - Round trip P-256 and P-384: Encode, Decode, every field equal; Encode byte-exact against
+      a hand-built blob (layout fixed).
+    - Every byte of the blob flipped in turn -> Decode false; every truncation and one extra
+      byte -> false; bad magic, version 0 and 2, curve 0 and 3, privLen off by one, certLen 0
+      and over CERT_DER_SIZE, nameLen 0 and 129, a bad name character, an uppercase
+      certificateId - each with a correct CRC (recomputed) -> false; a certificate that
+      doesn't parse, or for another key, with a correct CRC -> false. credOut zero after each.
+    - Encode: exact outSize passes, one short fails (out zeroed).
+    - ApplyTLS on an SSFTLSCInit session: true and the session holds the chain and key;
+      after the key is altered (mismatch) -> false.
+    - End to end: provision on the mock broker, keep the credentials in doneFn, encode,
+      wipe, decode, re-Init ssfmqttc with test callbacks, Start with clientId = thingName:
+      the second CONNECT carries "thing-1".
+    - No key bytes left: the work set, the blob copy the test wiped, and the cred after
+      CredWipe are all zero.
+    - DBC for each function (NULLs, overlaps of blob and cred, cred inside out).
+    - The unit test checks SSF_AWSPROV_CRED_BLOB_MAX_SIZE <= SSF_MAX_CFG_DATA_SIZE.
+  Audit
+    - Mutants, gcov 100% of the new lines, size and stack, ASan, features.sh, ARM, XC32,
+      XC16. Independent review (fresh agent, code only).
+  Approved: D1-D3 option A, as planned, 2026-11-27.
+  Done
+    - ./ssf passes; ASan build clean. One commit.
+
+  Result (2026-11-27)
+    - TDD: header and tests first; red at link (the M08 functions missing); then the code.
+      The tests' first run found a wrong test (a damaged byte inside the certificate's serial
+      parses: Decode checks the structure and the key, not the CA signature, so the test now
+      damages the outer SEQUENCE).
+    - As planned, with these details:
+        FromResult applies Decode's field rules (thingName 1..THING_NAME_SIZE-1 of
+          [a-zA-Z0-9:_-], certificateId 64 lowercase hex, certificate parses and is for the
+          key), so a credential that encodes always decodes at the next boot; REQUIRE
+          privLen 32 for P-256 and 48 for P-384.
+        Decode refuses blobLen > SSF_AWSPROV_CRED_BLOB_MAX_SIZE up front (no hashing of junk).
+        #error SSF_AWSPROV_CONFIG_CERT_DER_SIZE <= 65000, so the blob size stays within 16
+          bits on 16-bit targets.
+        The header says to clear the session's client certificate (or DeInit it) before a
+          Wipe, a new Decode into the same credentials, or freeing them.
+        certificateId is not checked against the certificate: AWS's definition (likely the
+          SHA-256 of the DER) is unverified and the M04 fixture id is synthetic. V02 can
+          settle it with real captures.
+    - Independent review (fresh agent, code only):
+        bug, fixed: an empty thingName decoded. I had removed the nameLen == 0 check after
+          a mutant survived, believing the name check refused length 0; it doesn't (zero
+          iterations, true), and the nameLen 0 test case was refused by the length check
+          instead. The check is back in a shared field validator, and the test now builds a
+          correctly sized empty-name blob.
+        fixed: FromResult's looser checks (above); privLen REQUIRE; the clear-before-wipe rule
+          documented and tested (ApplyTLS refuses a wiped credential; SetClientCert(NULL)
+          clears the session); Decode's upper bound; the 16-bit size cap; wrong test comments
+          and single-byte certLen patches (now both bytes).
+        Not changed: a struct copy's parsed cert points into the original (documented as not
+          copyable).
+    - Tests: credentials from a real M07 DONE on the mock broker; another key refused; every
+      field FromResult must refuse; byte-exact encode against an independent builder (P-256,
+      P-384); every byte flipped two ways, every truncation, one extra byte, over the maximum;
+      every short length 4..77 with a valid CRC, in an exact-size heap block (so ASan sees a
+      read past the end); each field invalid with the CRC recomputed (magic, version, curve,
+      privLen, the key, certLen both bytes, the certificate structure, nameLen, thingName
+      characters, empty and longest thingName, certificateId); encode exact fit and one
+      short; an ssfcfg write and read of the blob, and of a maximum-size blob; ApplyTLS
+      (chain and key in the session, mismatch and wiped refused, cleared); the operational
+      connection's CONNECT carries clientId "thing-1"; every copy wiped; DBC.
+    - Mutants: 28 + 18 run on M08. All killed except:
+        equivalent: ignoring SSFPKeyFromECPriv's result (an unbuilt key has no pub, so the
+          certificate check fails anyway); Decode's upper bound (> or >=, or none: the exact
+          length check refuses the same blobs);
+        removed as redundant: the CurveInfo curve byte output (unused), the scalar-room
+          check (the minimum length covers it), certLen 0 in FromResult and Decode (the X.509
+          parse refuses an empty certificate);
+        safety checks the functional tests can't see: the minimum length (killed under ASan
+          by the exact-size heap test: heap-buffer-overflow in _SSFAWSProvCredParse) and the
+          certLen maximum (an overflow inside the credentials struct, which ASan can't see;
+          for M10's fuzzer).
+    - gcov: every M08 line runs except the not-built-curve return (only a row with a curve
+      off reaches it; the p384off row runs that test). Module 99.7% of 907 lines.
+    - Size (-Os, M08 functions): M4 1240 B, M0+ 1428 B, XC32 2036 B. SSFAWSProvCred_t
+      2808 B on M4; blob at most 1790 B (fits one ssfcfg record). Largest frame 40 B.
+    - ./ssf 64/64, ASan 64/64. ARM M4/M0+ 0 warnings (the 3 pre-existing failed files);
+      XC32 and XC16 0 warnings (ssfcfg's Init/DeInit exist only with thread support, so the
+      test guards them). features.sh all rows pass.
 
 AWSPROV-M09  Documentation: _net/ssfawsprov.md
   Content: Flow diagram; API; sizing (rxBlockSize >= ~3 KB, txBlockSize >= ~1.5 KB, JSON limit,

@@ -40,6 +40,8 @@ extern "C" {
 #include "ssfec.h"
 #include "ssfecdsa.h"
 #include "ssfx509.h"
+#include "ssfpkey.h"
+#include "ssftlsc.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Defines                                                                                       */
@@ -87,6 +89,18 @@ extern "C" {
 #if SSF_JSON_CONFIG_MAX_IN_LEN < (SSF_AWSPROV_CONFIG_REG_REQ_SIZE - 1u)
 #error SSF_JSON_CONFIG_MAX_IN_LEN must be at least SSF_AWSPROV_CONFIG_REG_REQ_SIZE - 1.
 #endif
+
+#if SSF_AWSPROV_CONFIG_CERT_DER_SIZE > 65000u
+#error SSF_AWSPROV_CONFIG_CERT_DER_SIZE must be at most 65000 (blob size within 16 bits).
+#endif
+
+/* Credentials blob v1: "AWSC", version, curve, privLen, priv, certLen (2, big-endian), */
+/* certDer, nameLen, thingName, certificateId (64), CRC32 (4, big-endian) of all before */
+#define SSF_AWSPROV_CRED_BLOB_VERSION  (1u)
+#define SSF_AWSPROV_CRED_BLOB_MAX_SIZE (4u + 1u + 1u + 1u + SSF_PKEY_MAX_PRIV_SIZE + 2u + \
+                                        SSF_AWSPROV_CONFIG_CERT_DER_SIZE + 1u + \
+                                        (SSF_AWSPROV_CONFIG_THING_NAME_SIZE - 1u) + \
+                                        (SSF_AWSPROV_CERT_ID_SIZE - 1u) + 4u)
 
 /* Rejected-response errorCode and errorMessage sizes kept for the result, with NUL */
 #define SSF_AWSPROV_ERROR_CODE_SIZE    (64u)
@@ -188,6 +202,23 @@ typedef struct
 /* Done callback; isDone is reason == NONE. Runs on the app thread. */
 typedef void (*SSFAWSProvDoneFn_t)(void *ctx, bool isDone, const SSFAWSProvResult_t *result);
 
+/* Operational credentials: the device key, the issued certificate and its names. Holds the */
+/* private key, so wipe it with SSFAWSProvCredWipe. Not copyable: cert and chain point into */
+/* certDer. After SSFAWSProvApplyTLS the session points into it: clear the session's client */
+/* certificate (SSFTLSCSetClientCert(s, NULL, NULL, 0, NULL)) or SSFTLSCDeInit it before a  */
+/* Wipe, a new Decode into it, or freeing it. */
+typedef struct
+{
+    SSFPKey_t key;
+    uint8_t certDer[SSF_AWSPROV_CONFIG_CERT_DER_SIZE];
+    size_t certDerLen;
+    SSFX509Cert_t cert;
+    char thingName[SSF_AWSPROV_CONFIG_THING_NAME_SIZE];
+    char certificateId[SSF_AWSPROV_CERT_ID_SIZE];
+    const uint8_t *chain[1];
+    uint32_t chainLen[1];
+} SSFAWSProvCred_t;
+
 /* Caller-owned work set for one provisioning run; fields are not part of the API */
 typedef struct
 {
@@ -263,6 +294,20 @@ void SSFAWSProvStop(void);
 bool SSFAWSProvIsStarted(void);
 bool SSFAWSProvRxPublish(void *ctx, const SSFMQTTCRxPublish_t *rxPublish);
 void SSFAWSProvEvent(void *ctx, SSFMQTTCEvent_t event, SSFMQTTCReason_t reason);
+
+/* Credentials: from a DONE result (in doneFn) and the device key (32 bytes for P-256, 48 for  */
+/* P-384); false if they don't match or a field fails Decode's rules                          */
+bool SSFAWSProvCredFromResult(const SSFAWSProvResult_t *result, SSFECCurve_t curve,
+                              const uint8_t *priv, size_t privLen, SSFAWSProvCred_t *credOut);
+/* The blob holds the private key: store it as a secret. out zeroed on false. */
+bool SSFAWSProvCredEncode(const SSFAWSProvCred_t *cred, uint8_t *out, size_t outSize,
+                          size_t *outLen);
+/* Checks the CRC, each field's format, that the certificate parses and is for the key (not   */
+/* its CA signature, nor certificateId against the certificate); credOut zeroed on false     */
+bool SSFAWSProvCredDecode(const uint8_t *blob, size_t blobLen, SSFAWSProvCred_t *credOut);
+/* Sets cred as the session's client certificate and key; cred must outlive that use */
+bool SSFAWSProvApplyTLS(SSFTLSCSession_t *session, SSFAWSProvCred_t *cred);
+void SSFAWSProvCredWipe(SSFAWSProvCred_t *cred);
 #endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN */
 
 /* --------------------------------------------------------------------------------------------- */

@@ -105,6 +105,9 @@ uint32_t _SSFBNModInvCTRangeErrs = 0u;
 
 /* Test-only: when true the safegcd core flips bit 0 of its result (a simulated fault) */
 bool _SSFBNModInvCTFaultTest = false;
+
+/* Test-only count of table limbs _SSFBNModExpSelect read (2^K * len per call) */
+uint32_t _SSFBNModExpSelectReads = 0u;
 #define _SSF_BN_COUNT(c) do { (c)++; } while (0)
 #define _SSF_BN_COUNT_ADD(c, n) do { (c) += (n); } while (0)
 #else
@@ -3460,6 +3463,47 @@ void SSFBNMontConvertOut(SSFBN_t *a, const SSFBN_t *aR, const SSFBNMont_t *ctx)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* dst[j] = tbl[w * cap + j] for j < len: every one of the 2^K entries is read for every limb,  */
+/* in the same order whatever w is, and the mask is arithmetic (no compare to branch on).       */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFBNModExpSelect(SSFBNLimb_t *dst, const SSFBNLimb_t *tbl, uint16_t cap,
+                               uint16_t len, uint32_t w)
+{
+    const SSFBNLimb_t *p;
+    SSFBNLimb_t acc;
+    uint32_t i;
+    uint16_t j;
+
+    /* No argument checks by design: once per window, on _SSFBNModExpMontCore's own store. */
+
+    for (j = 0u; j < len; j++)
+    {
+        p = &tbl[j];
+        acc = 0u;
+        /* Two entries per pass (2^K >= 2); (i ^ w) - 1 has its top bit set iff i == w */
+        for (i = 0u; i < SSF_BN_MODEXP_TBL_N; i += 2u)
+        {
+            acc |= (p[0] & (0u - (((i ^ w) - 1u) >> 31))) |
+                   (p[cap] & (0u - ((((i + 1u) ^ w) - 1u) >> 31)));
+            p += 2u * (uint32_t)cap;
+            _SSF_BN_COUNT_ADD(_SSFBNModExpSelectReads, 2u);
+        }
+        dst[j] = acc;
+    }
+}
+
+#if SSF_CONFIG_BN_UNIT_TEST == 1
+/* --------------------------------------------------------------------------------------------- */
+/* Test-only entry to _SSFBNModExpSelect.                                                        */
+/* --------------------------------------------------------------------------------------------- */
+void _SSFBNModExpSelectTest(SSFBNLimb_t *dst, const SSFBNLimb_t *tbl, uint16_t cap, uint16_t len,
+                            uint32_t w)
+{
+    _SSFBNModExpSelect(dst, tbl, cap, len, w);
+}
+#endif /* SSF_CONFIG_BN_UNIT_TEST */
+
+/* --------------------------------------------------------------------------------------------- */
 /* r = a^e mod ctx->mod, constant-time fixed-window over caller storage that is wiped after.     */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFBNModExpMontCore(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e,
@@ -3474,7 +3518,6 @@ static void _SSFBNModExpMontCore(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e,
     uint32_t k;
     uint32_t bp;
     uint32_t bitOffset;
-    int32_t i;
 
     _SSF_BN_COUNT(_SSFBNFullWidthCalls);
 
@@ -3514,9 +3557,9 @@ static void _SSFBNModExpMontCore(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e,
         SSFBNMontMul(&table[w], &table[w - 1u], &table[1], ctx);
     }
 
-    /* Init result = Mont(1); seed picked with table[0] so its len matches for CondCopy. */
+    /* Init result = Mont(1); picked is fully overwritten by each window's select. */
     SSFBNCopy(&result, &table[0]);
-    SSFBNCopy(&picked, &table[0]);
+    picked.len = ctx->len;
 
     /* nWindows = ceil(max(e->len, ctx->len) * 32 / k); bits past e->len read as 0 */
     {
@@ -3541,11 +3584,8 @@ static void _SSFBNModExpMontCore(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e,
             w = (w << 1) | (uint32_t)SSFBNGetBit(e, bp);
         }
 
-        /* CT table lookup: scan all entries with a masked copy; address/timing independent of w. */
-        for (i = 0; i < (int32_t)SSF_BN_MODEXP_TBL_N; i++)
-        {
-            SSFBNCondCopy(&picked, &table[i], (SSFBNLimb_t)((uint32_t)i == w));
-        }
+        /* CT table lookup: one fused pass reads every entry; address/timing independent of w. */
+        _SSFBNModExpSelect(picked.limbs, store, cap, ctx->len, w);
 
         /* result = result * picked (= aM^w). */
         SSFBNMontMul(&result, &result, &picked, ctx);

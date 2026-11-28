@@ -1,0 +1,62 @@
+SSF CONSTANT-TIME HELPERS: SECRET-DEPENDENT BRANCHES IN COMPILED CODE (ARMv6-M)
+===============================================================================
+Audit date : 2026-11-27
+Scope      : constant-time select / swap helpers in _crypto, as compiled (not as written).
+             Code at commit c0d17b7 (branch mqtt). arm-none-eabi-gcc 15.2, -mthumb -Os.
+Status     : C1 OPEN (found during RSA-PERF R4 step 0; tracked here, separately from R4).
+
+FINDING
+-------
+C1. Mask-select helpers compile to a branch on the secret flag on Cortex-M0 / M0+ / M23 OPEN
+    The C is correct mask arithmetic:
+      SSFBNCondCopy    dst = (src & mask) | (dst & ~mask),  mask = -(sel != 0)
+      SSFBNCondSwap    d = (a ^ b) & mask; a ^= d; b ^= d
+      SSFFE25519CSwap  the same, with mask = -(swap & 1)
+    GCC sees that mask is 0 or all ones and, on ARMv6-M (no IT instruction, so no
+    conditional move), emits a real branch on the flag inside the per-limb loop. In the
+    disassembly of SSFBNCondCopy (M0+ -Os):
+        ldr   r1, [r4, r3]   ; dst[i]
+        ands  r1, r2
+        cmp   r6, r7         ; r6 = (sel != 0)
+        beq.n skip           ; sel == 0: skip the src load and the orr
+        ldr   r7, [r5, r3]   ; src[i]
+        orrs  r1, r7
+      skip:
+        str   r1, [r4, r3]
+    SSFBNCondSwap and SSFFE25519CSwap: "cmp r2, #0; beq" on the swap flag, per limb.
+    The selected and unselected cases run different instruction counts, so the timing
+    gives the flag away.
+
+    Per core (-Os):
+      Cortex-M0 / M0+ / M23 (ARMv6-M, v8-M Baseline): BRANCH: not constant time.
+      Cortex-M3 / M4 (ARMv7-M / v7E-M): IT-block conditional moves (it eq; moveq). The
+        loads always run, and a skipped IT instruction still takes its cycle, so these are
+        constant time as compiled. (M7 / M33 not yet checked.)
+
+    Secrets exposed on ARMv6-M:
+      - RSA private key: _SSFBNModExpMontCore picks one of 2^K table entries per K-bit
+        exponent window with SSFBNCondCopy(sel = (i == w)). That gives away the windows of
+        the CRT exponents. (RSA-PERF R4 replaces this select with a branch-free fused loop
+        and removes this case; the helpers below stay.)
+      - X25519: Montgomery ladder, SSFFE25519CSwap on secret scalar bits (ssfx25519.c:227,
+        228, 255, 256).
+      - Ed25519: _SSFEd25519GeCSwap -> SSFFE25519CSwap in the scalar multiply
+        (ssfed25519.c:508); secret where the scalar is (signing).
+      - ECC: ssfec point-add fix-ups (ssfec.c:334-348, 447-461), SSFBNCondCopy with flags
+        derived from intermediate points (degenerate cases of a secret-scalar multiply).
+
+    Why tests miss it: the results are right either way. Only the compiled code is wrong,
+    and only on cores the host and qemu-arm (armv7-a) suites do not build for.
+
+    Proposed fix (not started):
+      1. A value barrier on each mask before use: on GCC / Clang,
+         __asm__("" : "+r"(mask)), which hides the value from the optimizer so it cannot
+         prove the mask is 0 or all ones; elsewhere a volatile read. One macro in ssfport.h
+         next to SSF_OPTIMIZER_BARRIER (which takes a pointer, not a value).
+      2. Find every helper of this kind in _crypto (select, swap, cmov, conditional add /
+         sub with a mask, table lookups) and apply it.
+      3. A check script: build _crypto for cortex-m0plus, m3, m4, m33 at -Os and -O2, and
+         fail if a listed constant-time function has a conditional branch or IT block
+         outside its loop control. TDD: the script is red on c0d17b7 for M0+.
+      4. Measure the cost: a barrier can stop some instruction scheduling; expect a small
+         effect, in instructions only.

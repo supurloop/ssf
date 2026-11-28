@@ -331,6 +331,13 @@ uint32_t _SSFBNModUint16Test(const SSFBN_t *a, uint32_t d);
 /* Test-only: SSFBNGenPrime's trial division; true if no odd prime 3..1613 divides p. */
 bool _SSFBNTrialDivPassTest(const SSFBN_t *p);
 
+/* Test-only: dst[j] = tbl[w * cap + j] for j < len, the ModExp table select (all 2^K read). */
+void _SSFBNModExpSelectTest(SSFBNLimb_t *dst, const SSFBNLimb_t *tbl, uint16_t cap, uint16_t len,
+                            uint32_t w);
+
+/* Test-only count of table limbs _SSFBNModExpSelect read (2^K * len per call). */
+extern uint32_t _SSFBNModExpSelectReads;
+
 /* Test-only: the _SSFBNMulAddRow body built: 0 portable C, 1 ARM UMAAL (SSF_BN_CONFIG_ASM). */
 uint32_t _SSFBNRowKernelId(void);
 

@@ -153,6 +153,8 @@ other big-integer libraries.
   asserts; every caller passes limb arrays and lengths it has already checked. It is also the
   only place ssfbn uses inline assembly (one ARM `UMAAL` per limb, see
   [`SSF_BN_CONFIG_ASM`](#ssf-bn-config-asm)).
+  `_SSFBNModExpSelect` (the fused table select) runs once per exponent window on
+  `_SSFBNModExpMontCore`'s own table storage and carries no parameter asserts.
   `_SSFBNS30Divsteps`, `_SSFBNS30UpdateFG` and `_SSFBNS30UpdateDE` run once per 30-divstep
   batch of [`SSFBNModInvCT()`](#modinvct), on its own local arrays, and carry no parameter
   asserts.
@@ -986,8 +988,9 @@ void SSFBNModExpHalf(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN
    (converted in place), `table[i] = table[i-1] · table[1]` for `i = 2..15`. Besides the
    table, the only working values are the running result and the scan's `picked` entry.
 3. For each 4-bit window of `e` from MSB to LSB: square the running result four times,
-   decode the window value `w`, fetch `table[w]` via a constant-time scan that walks all
-   16 entries with `SSFBNCondCopy`, and multiply.
+   decode the window value `w`, fetch `table[w]` with one fused pass that reads every
+   entry for every limb, keeping `table[w]`'s through an arithmetic mask (no comparison for
+   the compiler to turn into a branch), and multiply.
 4. Convert out of Montgomery form.
 
 The table-scan address pattern and per-window timing are independent of the secret
@@ -1161,10 +1164,9 @@ void SSFBNCondCopy(SSFBN_t *dst, const SSFBN_t *src, SSFBNLimb_t sel);
 ```
 Constant-time conditional primitives. **Every limb** of both operands is touched regardless
 of the control input, so the branch direction does not leak via cache or timing. `swap` and
-`sel` are treated as "nonzero → perform the operation". `SSFBNCondCopy` is the workhorse
-behind the constant-time table scan inside [`SSFBNModExp`](#modexp), and is available for
-callers building their own constant-time point / scalar selection logic (ECDH, scalar
-multiplication). Both operands must have the same `len`.
+`sel` are treated as "nonzero → perform the operation". `SSFBNCondCopy` is available for
+callers building their own constant-time point / scalar selection logic (ssfec uses it in
+point addition); [`SSFBNModExp`](#modexp)'s table select has its own fused loop. Both operands must have the same `len`.
 
 <a id="ssfbnzeroize"></a>
 ```c

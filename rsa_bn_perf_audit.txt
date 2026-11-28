@@ -5,7 +5,7 @@ Scope      : run time of RSA sign / verify / keygen and the ssfbn code under the
              speedup costs in code size, RAM and security properties. Code at commit e9cd857
              (branch mqtt). Nothing here is applied to the tree; all numbers are from
              prototypes in a scratch copy.
-Status     : R5 DONE (f8b3342); R1 DONE (cfccdaa); R3(a) DONE (0b3114d); R3(c) P1-P4 and R2 (see the
+Status     : R5 DONE (f8b3342); R1 DONE (cfccdaa); R3(a) DONE (0b3114d); R3(c) P1-P4, R2 and R4 (see the
              git log); others OPEN.
 
 SUMMARY
@@ -803,13 +803,123 @@ R3. Faster blinding inverse r^-1 mod n                  (a) DONE (0b3114d); (c) 
         estimated cost. Safegcd is preferred: its iteration bound is proven for every size,
         it is widely deployed, and there is a tutorial to review against.
 
-R4. Fused constant-time table select in _SSFBNModExpMontCore                          OPEN
+R4. Fused constant-time table select in _SSFBNModExpMontCore                          DONE
     Change: 16 masks computed once per window, then one pass over the limbs ORs in the
     selected entry, instead of 16 SSFBNCondCopy calls.
     Measured: sign -0.6% (2048) / -0.3% (4096). Code +64 B (M4) / +80 B (M0+). RAM: +56 B
     peak stack on sign and keygen (the 16-word mask array); computing the mask in the loop
     instead avoids that at a small speed cost. Constant time: unchanged (every entry read).
     Low value; do it only alongside R1/R2.
+
+    R4 IMPLEMENTATION PLAN (after R2)
+    Why now: on the R2 base, SSFBNCondCopy is 3,237,888 of 50,263,203 instructions of an
+    RSA-2048 sign (6.4%, per-function qemu-arm profile). Multiply and square got faster
+    while the select did not, so its share grew. MulAddRow 34.6 M, MontSquare 7.1 M,
+    MontMul 1.1 M.
+    Today, per window: 16 SSFBNCondCopy calls. Each runs 5 REQUIREs and a loop of
+    load src, load dst, and, bic, orr, store over len limbs. At 32 limbs that is about
+    3.3 K instructions per window; RSA-2048 sign runs about 1,000 windows.
+    Change: one static helper, called once per window in place of the 16 calls:
+        static void _SSFBNModExpSelect(SSFBNLimb_t *dst, const SSFBNLimb_t *tbl,
+                                       uint16_t cap, uint16_t len, uint32_t w);
+      dst[j] = tbl[w * cap + j] for j < len (entries contiguous at stride cap in the core's
+      store). Every entry is read for every limb, in the same order whatever w is.
+      Mask: m_i = 0 - (((i ^ w) - 1) >> 31), all ones iff i == w (i ^ w < 2^31). The
+      constant time no longer depends on the compiler: today's (i == w) happens to compile
+      branch-free (negs / adcs on M0+ and M4), but C does not promise it.
+    Variants, prototyped and measured before the TDD (step 0):
+      V1  limb-outer, entry-inner, masks in a TBL_N-word array computed once per window.
+          About 64 instructions per limb (16 loads, 16 mask loads, 16 and, 16 orr).
+          Estimate -1.2 M (-2.5%) on RSA-2048 sign. RAM: TBL_N words (K = 4: 64 B; the
+          old prototype measured +56 B peak). K = 8 would be 1 KB.
+      V2  entry-outer, limb-inner, mask in a register per entry: dst is cleared, then
+          dst |= tbl_i & m_i. No call or REQUIRE overhead, but dst is read-modify-write.
+          Estimate about -0.7 M (-1.3%). RAM none.
+      V3  limb-outer, mask recomputed per (entry, limb): 3 more ALU per term, no array.
+          Between V1 and V2. RAM none.
+      Pick: the fastest on armv7-a with UMAAL (the R2 build), then check M0+. A variant
+      within about 0.3% of V1 that needs no RAM wins (no stack growth, no scaling with
+      SSF_BN_MODEXP_WIN_K).
+    Side effect: the select now overwrites picked entirely each window, so seeding picked
+    from table[0] (SSFBNCopy) is only needed for its len. Set the len instead.
+    DBC: _SSFBNModExpSelect has no checks by design (once per window, on the core's own
+    store). Add a "No argument checks by design" comment and an ssfbn.md DBC-exception
+    entry. SSFBNCondCopy stays: it is public API, and ssfec's point-add fix-ups use it.
+    Scope: _SSFBNModExpMontCore only. That covers SSFBNModExp, SSFBNModExpMont and
+    SSFBNModExpHalf, so RSA sign and keygen's Miller-Rabin both gain. ModExpPub
+    (variable-time, public) is untouched.
+    Steps (TDD):
+      0. Prototype V1 / V2 / V3 in a scratch tree; qemu-arm instruction counts for
+         RSA-2048 / 4096 sign; pick one.
+         DONE. ARM instructions (qemu-arm, armv7-a Thumb-2 -Os, R2 base). All variants give
+         the same signatures as HEAD.
+           Variant                               RSA-2048 sign       RSA-4096 sign      RAM
+           HEAD (16 x SSFBNCondCopy)              50,263,169          303,842,870
+           V1  limb-outer, mask array          -560,216 (-1.11%)  -1,763,416 (-0.58%)  64 B
+           V1u V1, entry loop unrolled by 2    -555,838 (-1.11%)  -1,754,942 (-0.58%)  64 B
+           V2  entry-outer                      -66,298 (-0.13%)     +40,198 (+0.01%)  0
+           V3  limb-outer, mask per term       -361,658 (-0.72%)    -871,098 (-0.29%)  0
+           V3u V3, entry loop unrolled by 2    -779,426 (-1.55%)  -2,493,090 (-0.82%)  0
+         Chosen: V3u (fastest, no RAM). The entry loop steps by 2; safe since TBL_N =
+         2^K >= 2.
+         The estimates were too high: HEAD's CondCopy loop was already about 6.5
+         instructions per limb. The win is the call and REQUIRE overhead plus V3u's 4.5
+         per entry-limb.
+         Codegen (standalone, -Os): the only conditional branches are loop control, on
+         M0+ and M4. Every entry is loaded, and the mask compiles to eor / sub / asr #31 /
+         and.
+         Found on the way: HEAD's SSFBNCondCopy branches on sel on Cortex-M0+ (no IT
+         instruction), so the window select is not constant time there. SSFBNCondSwap and
+         SSFFE25519CSwap have the same issue. Tracked separately in ct_branch_audit.txt
+         (C1). R4 with V3u removes the RSA ModExp case.
+      1. Red: test-only _SSFBNModExpSelectTest (ssfbn.h) and ssfbn_ut.c tests against a
+         direct copy:
+           - every w in 0..TBL_N-1; len 1, 2, 3, odd and even, up to cap
+           - distinct random entries, so the wrong entry is caught
+           - dst prefilled with garbage, every limb below len overwritten
+           - dst limbs from len to cap untouched; table unchanged
+           - a test-only read counter equal to TBL_N * len per call whatever w is (every
+             entry read: the constant-time structure, not just the result)
+         Build fails: the entry point does not exist.
+      2. Green: the helper; the new tests pass.
+      3. Switch _SSFBNModExpMontCore to it. The existing ModExp / ModExpMont / ModExpHalf
+         tests, RSA KATs, keygen and the BN-family suites must pass unchanged. Rebuild the
+         host suite once with SSF_BN_MODEXP_WIN_K = 3 and once with 5 (the two profiles),
+         and do an ARM warning build at 1 and 8 (the limits).
+      4. Measure, before = HEAD (c0d17b7), after = R4: RSA-2048 / 4096 sign (PKCS#1, PSS)
+         and verify (should be 0: ModExpPub), a SSFBNCondCopy count of 0 in the ModExp
+         profile, ssfbn.o and client image size (M4, M0+; LTO on / off), painted peak
+         stack (V1: expect +64 B; V2 / V3: 0). Keygen via the cost model only (one
+         Miller-Rabin exponentiation traced).
+         DONE. ARM instructions (qemu-arm, armv7-a Thumb-2 -Os), before = HEAD (c0d17b7),
+         after = R4 (V3u). Same signatures for every operation.
+           Operation                  Before          After           Delta
+           RSA-2048 sign PKCS#1      50,263,173      49,500,405       -762,768   -1.52%
+           RSA-2048 sign PSS         50,309,665      49,546,897       -762,768   -1.52%
+           RSA-4096 sign PKCS#1     303,842,874     301,416,026     -2,426,848   -0.80%
+           RSA-4096 sign PSS        303,928,019     301,501,171     -2,426,848   -0.80%
+           RSA-2048 / 4096 verify    unchanged (+7 instructions; ModExpPub is untouched)
+           1024-bit SSFBNModExp      20,710,769      20,351,826       -358,943   -1.73%
+             (one Miller-Rabin round of an RSA-2048 keygen candidate; keygen is about 91%
+             Miller-Rabin, so keygen about -1.6%)
+         SSFBNCondCopy no longer runs in ModExp (HEAD: 3.24 M of RSA-2048 sign).
+         Code, client image (text + data), before -> after:
+           M4  -Os          103,775 -> 103,807   (+32)    ssfbn.o 16,652 -> 16,696 (+44)
+           M4  -Os LTO       82,980 ->  83,044   (+64)
+           M0+ -Os          113,307 -> 113,355   (+48)    ssfbn.o 20,228 -> 20,280 (+52)
+           M0+ -Os LTO       88,480 ->  88,536   (+56)
+           (SSFBNCondCopy stays linked: public, used by ssfec.)
+         RAM: static none. Painted peak stack identical (RSA-2048 / 4096 PKCS#1 20,200 B,
+         PSS 21,008 B, P-256 4,968 B).
+         Window sizes: host suite 64/64 at K = 3 and K = 5; ssfbn.c builds clean
+         (-Wall -Wextra) for M0+ and M4 at K = 1 and K = 8.
+      5. Docs: ssfbn.md ModExp constant-time text (one fused select per window) and the
+         DBC exception. Results here.
+         DONE: ssfbn.md ModExp step 3 (the fused select), the CondCopy text (no longer
+         the ModExp workhorse), and the DBC exception entry for _SSFBNModExpSelect.
+      6. Only if asked: full suites, commit.
+    Constant time: unchanged in kind: every entry read every window, in the same order;
+    masks are arithmetic. The read counter in step 1 checks it structurally.
 
 R5. MontInit: more doublings, fewer squarings for R^2 mod m                    DONE (f8b3342)
     MontInit doubles 2^(bitLen-1) up to 2^(w+j) and then squares s times (w = j * 2^s).

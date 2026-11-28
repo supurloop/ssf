@@ -25,7 +25,8 @@ Status     : G01 done (commit 9041eba, 2026-11-26). G02 done (commit d510ab3, 20
              M04 done (commit e1a6af3, 2026-11-27). M05 done (commit a6483eb, 2026-11-27).
              M06 done (commit 8cf1ffb, 2026-11-27). M07 done (commit e5c9c24, 2026-11-27).
              M08 done (commit 657b056, 2026-11-27).
-             M09 done (2026-11-27).
+             M09 done (commit 9d0ceea, 2026-11-27).
+             M10 done (2026-11-27).
              Everything else is plan only.
 
 Layout
@@ -2020,11 +2021,112 @@ AWSPROV-M09  Documentation: _net/ssfawsprov.md
     - ./ssf 64/64 and ASan 64/64, 0 warnings. features.sh all rows pass on the final code.
 
 AWSPROV-M10  Fuzz targets
-  Change : tools/fuzz/fuzz_awsprov_parse.c over SSFAWSProvParseCsrAccepted, ParseRejected and
-           ParseRegisterAccepted, with seeds from the unit-test fixtures and V02 captures.
-  Test   : Runs clean under ASan/UBSan for the time run.sh uses for other targets.
-  Done   : tools/fuzz/README.md lists it.
+  Found in the code (2026-11-27)
+    - tools/fuzz: libFuzzer harnesses (aes_ctr, ecdsa_verify, utf8) built by run.sh inside a
+      gcc:latest container (clang + libssl-dev installed per run), ASan + UBSan, 60 s per
+      target by default, seed directories tools/fuzz/seed_<name>/, crashes in
+      build/fuzz/<name>/. README.md lists the targets and a smoke-results table.
+    - run.sh compiles every SSF source except _net, with no -I_net. ssfawsprov.c calls
+      ssfmqttc, ssftlsc and ssfsm, so the target needs _net in its sources and include path.
+    - Here docker is podman (rootless) and clang is not installed on the host; the gcc
+      image isn't cached (the first run pulls it and apt-installs clang). On this Fedora
+      host a rootless bind mount may need the SELinux :Z label.
+    - SSF_REQUIRE failures exit through SSFPortAssert, which libFuzzer reports as a crash. A
+      harness must therefore pass only arguments the contract allows, so any crash is a real
+      finding (memory error, UB, a violated SSF_ASSERT, or a failed property check).
+    - The inputs that reach a device from outside: the three response parsers (from MQTT)
+      and SSFAWSProvCredDecode (from flash at every boot). SSFAWSProvBuildRegisterRequest
+      takes the token those parsers return, and checks with ssfjson that the token cannot
+      change the request's structure; that check can be fuzzed too.
+    - M08 left one bounds check only a fuzzer or review can watch: Decode's certLen maximum
+      guards an overflow inside SSFAWSProvCred_t, which ASan can't see. A round-trip
+      property (anything Decode accepts must encode back to the same bytes) catches an
+      accepted blob that decoded wrongly, though not a refused one.
+    - Seeds: the unit test fixtures (ssfawsprov_ut_fix.h: the P-256 and P-384 keys and
+      certificates, the token, the certificate id) can build every valid input. V02 captures
+      don't exist yet.
 
+  Decisions (need approval)
+    D1 Harness layout.
+       A (recommended) one harness tools/fuzz/fuzz_awsprov.c. The first input byte picks the
+         function (0 CSR accepted, 1 RegisterThing accepted, 2 rejected, 3 credentials
+         decode, 4 RegisterThing build with a fuzzed token), the rest is its input. One
+         run.sh entry, one seed directory. This is the stub's one-file plan.
+       B five harnesses, one per function: separate corpora and coverage, five entries.
+    D2 run.sh change.
+       A (recommended) add _net to the sources and -I_net to the includes for every target.
+         The other targets just link more unused code; their behavior is unchanged.
+       B add _net only for the awsprov target (a per-target source list).
+    D3 Campaign length.
+       A (recommended) the 60 s smoke run every target gets, plus one 30-minute campaign,
+         recorded in the README smoke table (inputs, exec/s, coverage, findings).
+       B the 60 s smoke run only.
+
+  Change, as D1-D3 A
+    - tools/fuzz/fuzz_awsprov.c. At start it derives the fixture P-256 public key (once).
+      Oracles beyond "no crash":
+        CSR accepted: on false, the output struct and rxBuf are all zero. On true,
+          certificateId is 64 lowercase hex and terminated; tokenLen == strlen(token) <
+          TOKEN_SIZE; certDerLen <= CERT_DER_SIZE; SSFX509Parse(certDer) succeeds again; the
+          certificate's public key equals the fixture key; rxBuf is all zero.
+        RegisterThing accepted: on false, every output is zero. On true, thingName is
+          1..THING_NAME_SIZE-1 of [a-zA-Z0-9:_-]; deviceConfig is terminated, of length
+          cfgLen, starts with '{', ends with '}', and is valid JSON (SSFJsonIsValid).
+        Rejected: on true, statusCode is 100..599 and both strings are printable ASCII and
+          terminated. On false, everything is zero.
+        Credentials decode: on false, cred is all zero. On true, SSFAWSProvCredEncode
+          reproduces the input byte for byte, and the key's public point equals the
+          certificate's.
+        RegisterThing build (token = the input as escaped JSON text, plus fixed parameters):
+          on true, the output is valid JSON whose certificateOwnershipToken span is exactly
+          the token. On false, the output is "" with length 0.
+      Inputs go to the functions in a heap block of exactly their length, so ASan sees an
+      over-read.
+    - tools/fuzz/seed_awsprov/: seeds built from the fixtures by a small generator (one file
+      per valid input of each function, plus a few near misses), committed as files; the
+      generator stays in the scratch area and is described in the README.
+    - run.sh: the awsprov target; _net in sources and includes (D2); the :Z mount label if
+      this host needs it, without breaking the documented macOS path.
+    - tools/fuzz/README.md: the target and its oracles, the seed directory, the smoke and
+      campaign rows.
+    - awsprov_plan.txt status. (V02 captures join the seeds when they exist.)
+  Test
+    - The harness self-checks before any campaign: every seed passes, and each oracle trips
+      when its condition is broken (a temporarily mutated copy of each oracle's target in a
+      scratch build: e.g. Decode skipping the CRC, a parser not zeroing on failure).
+    - ./tools/fuzz/run.sh awsprov 60, then 1800 s: 0 crashes, 0 sanitizer reports; the
+      other three targets still build and run their 60 s.
+    - ./ssf still passes (no library code changes are expected; any finding is fixed with a
+      unit test first).
+  Approved: D1-D3 option A, as planned, 2026-11-27.
+  Done
+    - README lists it with results. One commit.
+
+  Result (2026-11-27)
+    - tools/fuzz/fuzz_awsprov.c: selector byte (% 5) to CSR accepted, RegisterThing
+      accepted, rejected, credentials decode, RegisterThing build; inputs in exact-size heap
+      blocks; the oracles as planned (the build oracle checks the whole request byte for byte,
+      {"certificateOwnershipToken":"<input>","parameters":{"k":"v"}}, plus SSFJsonIsValid);
+      -DFUZZ_AWSPROV_TRACE prints each outcome for seed checks.
+    - tools/fuzz/seed_awsprov/: 20 seeds from the unit-test fixtures (valid inputs and near
+      misses for each function); every one takes its intended path (traced).
+    - Oracle self-check (scratch, a gcc ASan replay driver): 9 deliberate breaks of
+      ssfawsprov.c each abort on their seed; the unmodified code replays all seeds clean.
+      Two seeds were added for it: a control character before any NUL in a rejected
+      message, and a valid name with a bad deviceConfiguration.
+    - run.sh: the awsprov target; _net in the sources and includes for every target (D2);
+      the image fully qualified (docker.io/library/gcc:latest, FUZZ_IMAGE overrides),
+      because podman refuses the short name without a TTY; the :z mount label when SELinux
+      is enforcing.
+    - Runs: awsprov 60 s 1.31 M inputs and 30 min 27.5 M inputs (15-22 k exec/s), aes_ctr,
+      ecdsa_verify and utf8 60 s each: 0 crashes, 0 sanitizer reports, 0 oracle aborts.
+    - Found while seeding (not a bug): a response nested deeper than
+      SSF_JSON_CONFIG_MAX_IN_DEPTH (4) is unparseable, so a template's deviceConfiguration
+      may nest two levels; ssfawsprov.md now says so.
+    - Limits, as planned: Decode's certLen maximum guards an overflow inside the struct that
+      neither ASan nor the round-trip oracle sees on a refused blob; the review and the unit
+      test's oversize-certLen cases are its only checks. V02 captures should join the seeds.
+    - ./ssf 64/64, doccheck clean; no library code changed.
 
 =====================================================================================================
 4. LIVE VALIDATION AGAINST AWS (needs an AWS test account; not part of ./ssf)

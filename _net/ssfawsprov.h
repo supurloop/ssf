@@ -84,6 +84,13 @@ extern "C" {
 #if SSF_MQTTC_CONFIG_MAX_SUBSCRIPTIONS < SSF_AWSPROV_SUB_COUNT
 #error SSF_MQTTC_CONFIG_MAX_SUBSCRIPTIONS must be at least SSF_AWSPROV_SUB_COUNT.
 #endif
+#if SSF_JSON_CONFIG_MAX_IN_LEN < (SSF_AWSPROV_CONFIG_REG_REQ_SIZE - 1u)
+#error SSF_JSON_CONFIG_MAX_IN_LEN must be at least SSF_AWSPROV_CONFIG_REG_REQ_SIZE - 1.
+#endif
+
+/* Rejected-response errorCode and errorMessage sizes kept for the result, with NUL */
+#define SSF_AWSPROV_ERROR_CODE_SIZE    (64u)
+#define SSF_AWSPROV_ERROR_MESSAGE_SIZE (128u)
 
 /* --------------------------------------------------------------------------------------------- */
 /* Typedefs                                                                                      */
@@ -115,6 +122,100 @@ typedef struct
     SSFCStrIn_t valueStr;
 } SSFAWSProvParam_t;
 
+/* Why provisioning ended; NONE means it succeeded */
+typedef enum
+{
+    SSF_AWSPROV_REASON_MIN = -1,
+    SSF_AWSPROV_REASON_NONE,              /* DONE: certificate and thing registered */
+    SSF_AWSPROV_REASON_BUILD,             /* A request could not be built: template name, */
+                                          /* CSR or RegisterThing request too large */
+    SSF_AWSPROV_REASON_REJECTED,          /* AWS rejected with a fatal statusCode */
+    SSF_AWSPROV_REASON_ATTEMPTS,          /* maxAttempts reached on timeouts, retryable */
+                                          /* rejects or connect failures */
+    SSF_AWSPROV_REASON_BAD_RESPONSE,      /* maxAttempts reached, last response unparseable */
+    SSF_AWSPROV_REASON_TX_REFUSED,        /* maxAttempts reached, last request refused by */
+                                          /* SSFMQTTCTxPublish (txBlockSize or pool) */
+    SSF_AWSPROV_REASON_DEADLINE,          /* deadline passed */
+    SSF_AWSPROV_REASON_SUBSCRIBE_REFUSED, /* A response filter was refused (claim policy) */
+    SSF_AWSPROV_REASON_CONNECT_REFUSED,   /* CONNACK 1, 2, 4 or 5 */
+    SSF_AWSPROV_REASON_MAX
+} SSFAWSProvReason_t;
+
+/* Start options; everything pointed to must stay valid until the done callback or Stop */
+typedef struct
+{
+    SSFMQTTCOpts_t mqtt;                  /* Claim connection; subsOpt, subCount and willOpt */
+                                          /* must be NULL/0 (the module sets the filters) */
+    SSFCStrIn_t templateName;             /* Provisioning template, 1..36 of [0-9A-Za-z_-] */
+    SSFECCurve_t curve;                   /* Device key; used only inside Start */
+    const uint8_t *privKey;
+    size_t privKeyLen;
+    const SSFX509GenName_t *subjectOpt;   /* CSR subject; NULL => empty */
+    const SSFAWSProvParam_t *paramsOpt;   /* RegisterThing parameters; NULL => none */
+    size_t paramCount;
+    /* Each timeout is at most 2^62 ticks */
+    SSFPortTick_t responseTimeout;        /* > 0. Request sent through response received */
+    SSFPortTick_t retryMinWait;           /* > 0. First backoff; doubles per retry */
+    SSFPortTick_t retryMaxWait;           /* >= retryMinWait. Backoff cap; jitter [w/2, w] */
+    SSFPortTick_t deadline;               /* From Start; 0 => none */
+    SSFPortTick_t tokenLifetime;          /* > 0. Older token at a RegisterThing send => */
+                                          /* back to CreateCertificateFromCsr */
+    uint32_t maxAttempts;                 /* Tries per step for the whole run (sends, connect */
+                                          /* failures); 0 => none. maxAttempts or deadline > 0 */
+} SSFAWSProvOpts_t;
+
+/* Recommended bounds (D4) */
+#define SSF_AWSPROV_DEFAULT_RESPONSE_TIMEOUT (SSF_TICKS_PER_SEC * 10u)
+#define SSF_AWSPROV_DEFAULT_RETRY_MIN_WAIT   (SSF_TICKS_PER_SEC)
+#define SSF_AWSPROV_DEFAULT_RETRY_MAX_WAIT   (SSF_TICKS_PER_SEC * 60u)
+#define SSF_AWSPROV_DEFAULT_TOKEN_LIFETIME   (SSF_TICKS_PER_SEC * 55u * 60u)
+#define SSF_AWSPROV_DEFAULT_MAX_ATTEMPTS     (8u)
+#define SSF_AWSPROV_TRUSTED_USER_DEADLINE    (SSF_TICKS_PER_SEC * 5u * 60u)
+
+/* Outcome; every pointer is valid only during the done callback */
+typedef struct
+{
+    SSFAWSProvReason_t reason;
+    uint16_t statusCode;                  /* Last rejected statusCode, else 0 */
+    SSFCStrIn_t errorCode;                /* Last rejected errorCode, else "" */
+    SSFCStrIn_t errorMessage;             /* Last rejected errorMessage, else "" */
+    const SSFAWSProvCsrAccepted_t *certOpt; /* DONE only: certificate, id and token */
+    SSFCStrIn_t thingNameOpt;             /* DONE only */
+    SSFCStrIn_t deviceConfigOpt;          /* DONE only: object text, at least "{}" */
+    size_t deviceConfigLen;
+} SSFAWSProvResult_t;
+
+/* Done callback; isDone is reason == NONE. Runs on the app thread. */
+typedef void (*SSFAWSProvDoneFn_t)(void *ctx, bool isDone, const SSFAWSProvResult_t *result);
+
+/* Caller-owned work set for one provisioning run; fields are not part of the API */
+typedef struct
+{
+    SSFAWSProvOpts_t opts;
+    SSFAWSProvTopics_t topics;
+    char rx[SSF_AWSPROV_CONFIG_RX_SIZE];
+    char csrReq[SSF_AWSPROV_CONFIG_CSR_REQ_SIZE];
+    size_t csrReqLen;
+    char regReq[SSF_AWSPROV_CONFIG_REG_REQ_SIZE];
+    size_t regReqLen;
+    SSFAWSProvCsrAccepted_t acc;
+    uint8_t pub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+    size_t pubLen;
+    char thingName[SSF_AWSPROV_CONFIG_THING_NAME_SIZE];
+    char deviceConfig[SSF_AWSPROV_CONFIG_DEVICE_CONFIG_SIZE];
+    size_t deviceConfigLen;
+    uint16_t statusCode;
+    char errorCode[SSF_AWSPROV_ERROR_CODE_SIZE];
+    char errorMessage[SSF_AWSPROV_ERROR_MESSAGE_SIZE];
+    SSFPortTick_t tokenTick;
+    SSFPortTick_t wait;
+    uint32_t tries[2];                    /* Per step, for the whole run */
+    uint32_t jitter;
+    uint8_t step;
+    uint8_t response;
+    uint8_t lastFail;
+} SSFAWSProvWork_t;
+
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
@@ -145,6 +246,23 @@ bool SSFAWSProvCsrRequestSizes(SSFECCurve_t curve, const SSFX509GenName_t *subje
 bool SSFAWSProvBuildCsrRequest(SSFECCurve_t curve, const uint8_t *privKey, size_t privKeyLen,
                                const SSFX509GenName_t *subjectOpt, uint8_t *scratch,
                                size_t scratchSize, char *outStr, size_t outSize, size_t *outLen);
+
+/* Provisioning state machine; SSFSMInit() first. One run at a time (ssfmqttc is a singleton). */
+/* Every call and callback is on the app thread that runs SSFSMTask() and SSFMQTTCTask().      */
+void SSFAWSProvInit(void);
+/* After the run has ended and ssfmqttc reported STOPPED */
+void SSFAWSProvDeInit(void);
+/* Pass these to SSFMQTTCInit (contexts NULL); ssfmqttc STOPPED. doneFn is called once, */
+/* possibly before Start returns (reason BUILD); then work is wiped and ssfmqttc stopped. */
+/* doneFn must not call Start or Stop; start a new run after ssfmqttc reports STOPPED.    */
+void SSFAWSProvStart(SSFAWSProvWork_t *work, const SSFAWSProvOpts_t *opts,
+                     SSFAWSProvDoneFn_t doneFn, void *doneCtxOpt,
+                     SSFMQTTCEventFn_t appEventFnOpt, void *appEventCtxOpt);
+/* Ends a run with no done callback: work is wiped before return, ssfmqttc stops after */
+void SSFAWSProvStop(void);
+bool SSFAWSProvIsStarted(void);
+bool SSFAWSProvRxPublish(void *ctx, const SSFMQTTCRxPublish_t *rxPublish);
+void SSFAWSProvEvent(void *ctx, SSFMQTTCEvent_t event, SSFMQTTCReason_t reason);
 #endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN */
 
 /* --------------------------------------------------------------------------------------------- */
@@ -152,6 +270,9 @@ bool SSFAWSProvBuildCsrRequest(SSFECCurve_t curve, const uint8_t *privKey, size_
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_CONFIG_AWSPROV_UNIT_TEST == 1
 void SSFAWSProvUnitTest(void);
+#if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
+SSFPortTick_t _SSFAWSProvUTNextBackoff(SSFAWSProvWork_t *w);
+#endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN */
 #endif /* SSF_CONFIG_AWSPROV_UNIT_TEST */
 
 #ifdef __cplusplus

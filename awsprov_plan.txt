@@ -23,7 +23,7 @@ Status     : G01 done (commit 9041eba, 2026-11-26). G02 done (commit d510ab3, 20
              G13 done (commit 7697f67, 2026-11-27). M01 done (commit bbd7bfa, 2026-11-27).
              M02 done (commit 43537e7, 2026-11-27). M03 done (commit 178f16f, 2026-11-27).
              M04 done (commit e1a6af3, 2026-11-27). M05 done (commit a6483eb, 2026-11-27).
-             M06 done (2026-11-27).
+             M06 done (commit 8cf1ffb, 2026-11-27). M07 done (2026-11-27).
              Everything else is plan only.
 
 Layout
@@ -832,6 +832,28 @@ AWSPROV-G13  ssfec: wipe the Z inverses in SSFECPointToAffine
            thousands of times per scalar mul), so a wipe per call costs real time; the module
            wipes at the EC layer instead. Not proposed; noted for a future ssfbn review.
 
+AWSPROV-G14  ssfmqttc: fails with SSF_CONFIG_ENABLE_THREAD_SUPPORT 0 (bare metal)
+  Found 2026-11-27 during M07 (pre-existing; ssfmqttc.c is unchanged on this branch).
+  Why    : Built with -DSSF_CONFIG_ENABLE_THREAD_SUPPORT=0 (the setting build-arm.sh uses, and
+           the usual bare-metal port), SSFMQTTCUnitTest fails at ssfmqttc.c:537, the
+           SSF_REQUIRE(pktLen <= _mqttc.rxLen) in _SSFMQTTCRxFrameConsume, called from
+           SSFMQTTCTask. With thread support 0, SSFSMPutEventData runs an event at once when
+           no handler is active and the queue is empty. So an event the pump posts (decoded
+           CONNACK, SUBACK, link failure) is handled inside SSFMQTTCTask, and the handler
+           changes the rx framing state (rxLen) before the pump consumes the packet. Every
+           host build uses thread support 1 (events always queued), so no test ran this path.
+           ssfawsprov's state machine tests fail the same way in that build.
+  Reproduce: compile every source in build-linux.ninja with
+           -DSSF_CONFIG_ENABLE_THREAD_SUPPORT=0 and link a main() that calls SSFMQTTCUnitTest.
+  Change : To be planned. Likely the pump must finish with the frame (consume, then post),
+           or post its events in a way that defers them until it returns; check every
+           pump-posted event and every callback the handlers make. Also add a host build or a
+           features.sh row with thread support 0 so it stays tested (ssfmqttc, ssfawsprov,
+           ssfsm users).
+  Done   : ssfmqttc and ssfawsprov unit tests pass with thread support 0 and 1. Needs
+           approval (ssfmqttc). Blocks any bare-metal use of ssfmqttc / ssfawsprov (V03 on a
+           target, field devices).
+
 No gap for ssftlsc: TLS 1.3, mutual TLS, SNI and ALPN already cover AWS (1.2).
 No gap for ssfmqttc routing: its rx and event callbacks are bound at SSFMQTTCInit, and
 SSFMQTTCDeInit/Init are allowed in STOPPED, so the app Inits with ssfawsprov's callbacks for
@@ -1479,32 +1501,238 @@ AWSPROV-M06  Error classification
     - ./ssf 64/64 passes.
 
 AWSPROV-M07  Provisioning state machine over ssfmqttc
-  Change : SSFAWSProvStart(opts, doneFn, ctx) where opts holds the claim-connection
-           SSFMQTTCOpts_t fields, template name, subject, parameters, device key and the
-           deadline mode (claim: none; trusted user: 5 min from first connect). The module
-           provides SSFAWSProvRxPublish / SSFAWSProvEvent for the app to pass to SSFMQTTCInit,
-           and SSFAWSProvTask() for timeouts. States:
-             CONNECTING -> READY (4 subscriptions granted) -> CSR_SENT -> HAVE_CERT
-             -> REGISTER_SENT -> DONE | FAILED
-           Rules:
-           - Publish only after READY ([FPA]: subscribe first).
-           - Per-step response timeout from the opt header; on timeout or a retryable error,
-             retry with exponential backoff plus jitter (throttle limits, 1.3).
-           - Disconnect after HAVE_CERT: ssfmqttc reconnects; resume at REGISTER_SENT while the
-             token is under one hour old, else go back to the CSR step (AWS deletes the
-             unactivated certificate, 1.4).
-           - Trusted-user mode fails with a distinct reason when the 5-minute window closes.
-           - A fatal rejected response ends with FAILED and the AWS statusCode/errorCode.
-           - Ignore PUBLISHes on unexpected topics and duplicate responses.
-           - SSFAWSProvStop() at any point; token and key material wiped on DONE, FAILED, Stop.
-  Test   : Drive through ssfmqttc with the mock transport from ssfmqttc_ut (a scripted broker
-           that sends CONNACK, SUBACK and response PUBLISHes): happy path; rejected on each
-           step (retryable then success, fatal); response timeout; disconnect before CSR,
-           between steps, and after REGISTER_SENT; token age past one hour (fake tick);
-           trusted-user deadline; SUBACK refusing a filter; unexpected-topic PUBLISH;
-           duplicate accepted message; Stop in every state; no key or token bytes left in
-           module state after DONE/FAILED (scrub check).
-  Done   : ./ssf passes; ASan build clean; coverage 100% of reachable lines.
+  Found in the code and docs (2026-11-27)
+    ssfmqttc
+    - It is a singleton, run by ssfsm (SSF_SM_MQTTC). The app pumps SSFMQTTCTask and
+      SSFSMTask. Callbacks run on the app thread from inside those calls. So ssfawsprov is
+      a singleton too.
+    - It always uses a clean session and resubscribes the declared set after every
+      reconnect. A response published while the link is down is lost, so after a reconnect
+      M07 must resend the step it was on.
+    - It reconnects by itself, forever, with doubling backoff and no jitter. It only stops
+      when told. Nothing bounds provisioning time today, so M07 must.
+    - READY fires even when a filter is refused (reason SUBSCRIBE_REFUSED), and the refused
+      filters are retried every SUB_RETRY_TICKS (300 s). SSFMQTTCGetSubResult(index) gives
+      each filter's result. AWS refuses a subscribe only on policy, so a refused filter
+      means the claim policy is wrong.
+    - SSFMQTTCTxPublish encodes the payload into a pool block, so the caller's buffer is
+      free once it returns true. It returns false outside READY, or when the packet doesn't
+      fit txBlockSize. Completion comes later through the txPublish callback.
+    - The rx payload is valid only during the rx callback. Returning false defers it (it is
+      offered again). M07 parses inside the callback and always consumes.
+    - Freed pool blocks are not wiped. The RegisterThing request (it holds the token) stays
+      in a tx block, and the CSR accepted payload (token) in an rx block, until
+      SSFMQTTCDeInit, which wipes every pool block. M08's flow DeInits anyway. M09 must say
+      so, and that ssftlsc record buffers are the app's to clear.
+    - Timers: ssfmqttc runs at most 4 at once (READY: keep-alive, PINGRESP, txPublish,
+      sub retry). SSF_SM_MAX_ACTIVE_TIMERS is 8, so two more for ssfawsprov fit.
+    - ssfmqttc_ut uses real ticks with short timeouts (50 ms) and a static mock transport.
+      There is no fake tick. Long AWS times (1 h token, 5 min window) therefore have to be
+      options of Start, so tests can shrink them.
+    Earlier milestones
+    - M03: build the CSR request once per key and resend that payload on retries; never
+      re-sign (fault attacks on repeated deterministic signatures). The CSR scratch borrows
+      the rx buffer, which is idle while building.
+    - M04: SSFAWSProvCsrAccepted_t is about 4.5 KB. M04 needs the device public key, which
+      M07 derives once with SSFECDSAPubKeyFromPrivKey.
+    - M05: the RegisterThing request is built from the raw token. M06 gives retryable.
+    AWS
+    - Each CreateCertificateFromCsr call makes a new certificate. A late accepted for an
+      earlier attempt is a second certificate, left PENDING_ACTIVATION; AWS deletes it after
+      the token's hour (1.4). So: take the first accepted, ignore the rest.
+    - The request/response API has no correlation id, so a late response can't be told
+      from a current one. Within a step, any accepted or rejected answers the step.
+    - Throttle limits are account wide (1.3), so retries need jitter. ssfmqttc has none, and
+      SSF has no RNG without app entropy. The device public key is unique per device and
+      already at hand, so it seeds a small xorshift for jitter. Jitter is not a secret.
+
+  Decisions (need approval)
+    D1 Memory. The work set is about 13 KB at defaults (csr accepted 4.5 KB, rx copy 4 KB,
+       RegisterThing request 2.5 KB, CSR request 1 KB, topics, names, config copy), used once
+       in the device's life.
+       A (recommended) the caller passes an SSFAWSProvWork_t to Start and owns it; it may
+         be heap, a union with operational buffers, or static. The module keeps a pointer and
+         wipes it on DONE, FAILED and Stop.
+       B static in the module: 13 KB of RAM held forever.
+       C SSF_MALLOC at Start, free at the end: adds heap failure as a path.
+    D2 Timers.
+       A (recommended) a ssfsm machine SSF_SM_AWSPROV with its own events and 2 timers
+         (response-or-backoff, deadline). The app already pumps SSFSMTask, so no new task
+         call. Same structure as ssfmqttc.
+       B SSFAWSProvTask(&nextTimeout) polling tick deadlines, as the old plan said.
+    D3 A refused filter at READY.
+       A (recommended) FAILED at once with reason SUBSCRIBE_REFUSED: the claim policy is
+         wrong and retrying won't fix it before the window closes.
+       B wait for SUBSCRIPTION_CHANGED until the deadline.
+    D4 Bounds (each a field of the Start options, tests shrink them):
+       - responseTimeout   per request, default 10 s
+       - retryMinWait / retryMaxWait  backoff, default 1 s / 60 s, doubling, jitter in
+         [wait/2, wait]
+       - maxAttempts       per step, default 8 (timeouts and retryable rejects both count)
+       - deadline          from the first CONNECTED, 0 = none. Claim mode: app's choice;
+         trusted-user mode: <= 5 min. One mechanism, not two modes.
+       - tokenLifetime     default 55 min (AWS's 1 h less 5 min margin)
+       Required: maxAttempts > 0 or deadline > 0, so provisioning always ends.
+
+  Change (_net/ssfawsprov.h/.c, _opt/ssfsm_opt.h, _opt/ssfawsprov_opt.h), as D1-D4 A
+    - typedef struct {
+          SSFMQTTCOpts_t mqtt;            host, port, clientId, keep-alive, ssfmqttc timeouts;
+                                          subsOpt/subCount/willOpt must be NULL/0 (the module
+                                          sets the four filters)
+          SSFCStrIn_t templateName;
+          SSFECCurve_t curve; const uint8_t *privKey; size_t privKeyLen;  app owned
+          const SSFX509GenName_t *subjectOpt;
+          const SSFAWSProvParam_t *paramsOpt; size_t paramCount;
+          SSFPortTick_t responseTimeout, retryMinWait, retryMaxWait, deadline, tokenLifetime;
+          uint32_t maxAttempts;
+      } SSFAWSProvOpts_t;
+      Everything it points to must stay valid until the done callback or Stop.
+    - typedef enum { NONE, REJECTED (fatal statusCode), ATTEMPTS, DEADLINE,
+      SUBSCRIBE_REFUSED, CONNECT_REFUSED (CONNACK 1, 2, 4, 5), BAD_RESPONSE (accepted
+      payload failed M04/M05 parsing, after maxAttempts), TX_TOO_LARGE } SSFAWSProvReason_t
+    - typedef struct { SSFAWSProvReason_t reason; uint16_t statusCode;
+      char errorCode[], errorMessage[]; const SSFAWSProvCsrAccepted_t *cert;
+      const char *thingName; const char *deviceConfig; size_t deviceConfigLen; }
+      SSFAWSProvResult_t, valid only during the callback. M08 extends what DONE hands over.
+    - typedef void (*SSFAWSProvDoneFn_t)(void *ctx, bool isDone, const SSFAWSProvResult_t *r)
+    - typedef struct { ... } SSFAWSProvWork_t: topics, rx copy, CSR request, RegisterThing
+      request, csr accepted, public key, thing name, device config, counters, ticks. Opaque
+      by convention (fields not part of the API).
+    - void SSFAWSProvStart(SSFAWSProvWork_t *work, const SSFAWSProvOpts_t *opts,
+                           SSFAWSProvDoneFn_t doneFn, void *doneCtxOpt,
+                           SSFMQTTCEventFn_t appEventFnOpt, void *appEventCtxOpt)
+      - REQUIRE: ssfmqttc Inited with SSFAWSProvRxPublish / SSFAWSProvEvent and in STOPPED;
+        not already started; option rules above.
+      - Derives the public key, builds the topics and the CSR request (once), seeds the
+        jitter, then SSFMQTTCStart. A failure here (bad template name, CSR too large for its
+        buffer) calls doneFn with FAILED before returning.
+    - bool SSFAWSProvRxPublish(void *ctx, const SSFMQTTCRxPublish_t *rx) and
+      void SSFAWSProvEvent(void *ctx, SSFMQTTCEvent_t ev, SSFMQTTCReason_t reason): the app
+      passes these (ctx NULL) to SSFMQTTCInit. Events are forwarded to appEventFnOpt.
+    - void SSFAWSProvStop(void): wipes work, SSFMQTTCStop. No done callback.
+    - bool SSFAWSProvIsStarted(void).
+    - States (ssfsm):
+        WAIT_READY  -> on READY: any refused filter -> FAILED (D3); else send step's request
+        CSR_SENT    -> accepted: parse (M04); ok -> build RegisterThing request, REG_SENT
+                       rejected retryable / timeout -> BACKOFF; fatal -> FAILED
+        REG_SENT    -> accepted: parse (M05); ok -> DONE; retryable / timeout -> BACKOFF
+        BACKOFF     -> timer -> resend the step's stored request
+        DISCONNECTED/CONNECT_FAILED in any step -> WAIT_READY (cancel response timer); on the
+          next READY resend the step's request; if in the RegisterThing step and the token is
+          older than tokenLifetime, go back to the CSR step and resend the stored CSR request.
+        Deadline timer from first CONNECTED -> FAILED DEADLINE in any state.
+      - An accepted that fails to parse counts as an attempt (BAD_RESPONSE after the cap).
+      - PUBLISHes on other topics, and responses for the step not in progress, are consumed
+        and ignored.
+      - TxPublish returning false in READY means the request doesn't fit txBlockSize:
+        FAILED TX_TOO_LARGE.
+    - DONE / FAILED: doneFn, then wipe work, then SSFMQTTCStop. The app waits for STOPPED
+      and then DeInits (that also wipes the ssfmqttc pools).
+    - Options: SSF_AWSPROV_CONFIG_CSR_REQ_SIZE (1024), _REG_REQ_SIZE (2560), _DEVICE_CONFIG_SIZE
+      (512), with #error ranges; ssfsm_opt.h: SSF_SM_AWSPROV and its events.
+  Test (TDD)
+    - Mock transport and scripted broker in ssfawsprov_ut.c (ssfmqttc_ut's mock is static and
+      not shared; extracting it would change ssfmqttc_ut). It reads CONNECT, SUBSCRIBE,
+      PUBLISH, sends CONNACK, SUBACK (per-filter results), PUBACK and response PUBLISHes
+      from M04/M05 fixtures (the P-256 test key and its certificate). Real ticks, short
+      times (50..200 ms), as ssfmqttc_ut does.
+    - Happy path: CONNECT carries clientId, four SUBSCRIBE filters at QoS 1, CSR request
+      byte-exact, RegisterThing request byte-exact with parameters, DONE result fields.
+    - Each step: retryable reject then success; fatal reject (statusCode, errorCode in the
+      result); timeout then success; retries to maxAttempts -> ATTEMPTS; bad accepted
+      payload then good; bad accepted to the cap -> BAD_RESPONSE.
+    - The resent request is byte-identical to the first (no re-sign); ECDSA sign called once
+      (test hook count, or compare against the stored payload).
+    - Backoff: waits within [wait/2, wait], doubling to the cap.
+    - Disconnect while waiting for READY, after the CSR request, after HAVE_CERT, after the
+      RegisterThing request: resumes and finishes. Token older than tokenLifetime on
+      reconnect: back to CSR with the same CSR bytes.
+    - Deadline: fires in WAIT_READY and in BACKOFF -> DEADLINE.
+    - SUBACK refusing one filter -> SUBSCRIBE_REFUSED. CONNACK 5 -> CONNECT_REFUSED.
+    - Unexpected-topic PUBLISH, duplicate accepted after DONE step changes, a CSR accepted
+      arriving in the RegisterThing step: ignored.
+    - txBlockSize too small for the RegisterThing request -> TX_TOO_LARGE.
+    - Stop in every state; Start after Stop and after DONE.
+    - Scrub: after DONE, FAILED and Stop, the work struct is all zero.
+    - Event forwarding to the app callback. DBC for Start's REQUIREs.
+  Audit
+    - Mutants on the transitions and bounds, gcov 100% of reachable lines, size and stack,
+      ASan, features.sh, ARM, XC32, XC16.
+    - Independent review (fresh agent, code only).
+  Approved: D1-D4 option A, as planned, 2026-11-27.
+  Done
+    - ./ssf passes; ASan build clean. One commit.
+
+  Result (2026-11-27)
+    - Not TDD: the state machine was written before its tests (a departure from the
+      milestone rule). The tests then found two bugs before review (ssfsm forbids self
+      transitions; a DBC test left a run half started), and mutants checked the tests.
+    - Departures from the plan, all found in the code:
+        SSFAWSProvInit/DeInit added: ssfsm needs the handler registered once
+          (SSFSMInitHandler), as ssfmqttc does.
+        The deadline counts from Start, not the first CONNECTED: with maxAttempts 0 a
+          device that never connects would otherwise never end. Stricter, and still right
+          for the trusted-user 5 minute window.
+        A refused filter is taken from READY's reason (SUBSCRIBE_REFUSED), not from
+          SSFMQTTCGetSubResult: the reason travels with the event, so there is no race.
+        TX_TOO_LARGE became TX_REFUSED, counted as a try: SSFMQTTCTxPublish returns false
+          both for a packet over txBlockSize and for an empty pool, and can't tell which.
+        BUILD reason added (template name, CSR, RegisterThing request, private key).
+        ssfsm has no self transition, so a new send from SENT (CSR -> RegisterThing) or a
+          new backoff from BACKOFF re-arms the state's timer in place (_SSFAWSProvGo).
+          Responses are handled in the substates so the re-armed timer stays theirs.
+        Each step's try count runs for the whole run (review finding 3 below).
+        Every timeout option <= 2^62 ticks: ssfsm adds it to the tick without a check.
+        The private key is used only inside Start and is not kept in the work set.
+    - Independent review (fresh agent, code only) found, all fixed and tested:
+        a response stored for one step could be applied to the other after a token-age
+          restart (thread support 0 can queue READY ahead of it), ending in a REQUIRE in
+          the RegisterThing builder: SetStep now drops a stored response, and a RESPONSE
+          event with nothing stored is ignored;
+        Start from inside doneFn re-entered and the outer Finish wiped the new run: REQUIRE
+          (work == NULL), documented;
+        a token-age restart reset both try counts, so a run could loop forever (minting
+          a certificate per lap) with maxAttempts > 0: counts are now per step for the
+          whole run, so every lap costs both steps a try;
+        DeInit with a STOP still queued: REQUIRE the machine is in IDLE;
+        an unparseable reject wiped the last good statusCode: parsed aside, kept on success;
+        tries used up after a link drop reported the older failure (BAD_RESPONSE):
+          a link loss now sets the reason to ATTEMPTS;
+        NULL parameter key/value only failed after the certificate was issued: REQUIRE;
+        huge timeouts wrapped in ssfsm: REQUIRE <= 2^62;
+        tests: wasWorkLive proved nothing (now checks the result points into the work
+          set), late answers in BACKOFF and WAIT_READY were untested (now scripted).
+      Not changed: Start can't see a queued SSFMQTTCStart (ssfmqttc's own REQUIRE stops
+      it); Stop and the callbacks are app-thread only (documented, as for ssfmqttc).
+    - Found in ssfmqttc (pre-existing, not changed): with SSF_CONFIG_ENABLE_THREAD_SUPPORT 0
+      (the bare-metal setting) SSFMQTTCUnitTest fails at ssfmqttc.c:537
+      (_SSFMQTTCRxFrameConsume REQUIRE): an event handled at once inside SSFMQTTCTask
+      changes the rx framing buffer under it. ssfawsprov's tests fail the same way in that
+      build. Every SSF host build uses thread support 1, so no test covered it. Needs its
+      own task before ssfmqttc is used on bare metal.
+    - Tests: a scripted mock broker (CONNECT, SUBSCRIBE, PUBLISH, PINGREQ; per-request
+      replies: accepted, 429, 400, unparseable, none, drop, late, after resubscribe, noise),
+      real ticks, about 6 s. Happy path byte-exact (CSR fixture, RegisterThing request,
+      four QoS 1 filters, clientId), each step's rejects, timeouts, bad responses, drops,
+      tries to the limit, backoff (exact sequence via a unit-test hook, jitter range,
+      no overflow near 2^64), connect failures, CONNACK 1/2/4/5 and 3, refused filter,
+      deadline in SENT, BACKOFF and while never connected, token age, late answers,
+      Stop in five states then a new run, BUILD paths, DBC. The work set is all zero
+      after every end. Eight concurrent runs pass (timing under load).
+    - Mutants: 52 + 18 + 2 run; all killed except 2 equivalent (token age > vs >=;
+      within a tick) and 3 removed as redundant code (CSR size pre-check, isStarted
+      guards on event posting and on START in IDLE).
+    - gcov: every M07 line runs; module 99.7% of 770 lines (the 2 uncovered are M03's).
+    - Size (-Os, state machine only): M4 3008 B, M0+ 3328 B, XC32 4952 B. Work set
+      13,696 B on M4 (caller owned). Largest new frame SSFAWSProvRxPublish 256 B (M4).
+    - ./ssf 64/64 and ASan 64/64 pass. ARM M4/M0+ 0 warnings (the 3 pre-existing failed
+      files). XC32 v6.00 and XC16 v2.10 0 warnings (the mock broker was cut under 32 KB
+      for XC16).
+    - features.sh: all 23 rows build with 0 warnings and pass. json2k first failed on the
+      new #error (REG_REQ_SIZE 2560 > MAX_IN_LEN 2047 + 1), as intended; the row now also
+      sets SSF_AWSPROV_CONFIG_REG_REQ_SIZE 2048. The state machine tests need P-256, signing
+      and the full-size buffers, so rows without them (p256off, signoff, json2k, awsprovmin)
+      skip them.
 
 AWSPROV-M08  Handing the credentials to the operational connection
   Change : On DONE the callback gets {curve, priv scalar, certificate DER, thingName,
@@ -1591,3 +1819,5 @@ AWSPROV-V03  End-to-end with ssfawsprov
   G08 is independent; best before field deployment of G02. G13 (ssfec, approved) after G08.
   G09 is independent; best before M03 puts device data into CSR subjects.
   G10 (if V02 needs it) after G09.  G11, G12 optional, after G09, not needed for ssfawsprov.
+  G14 (ssfmqttc, thread support 0) is independent of the M tasks; it must land before any
+  bare-metal use of ssfmqttc or ssfawsprov.

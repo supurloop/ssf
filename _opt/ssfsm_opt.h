@@ -123,6 +123,7 @@ typedef enum
     SSF_SM_USER_1,
 #endif /* SSF_CONFIG_SM_UNIT_TEST */
     SSF_SM_MQTTC,        /* _net/ssfmqttc MQTT client */
+    SSF_SM_AWSPROV,      /* _net/ssfawsprov AWS IoT fleet provisioning */
     SSF_SM_MAX
 } SSFSMList_t;
 
@@ -166,6 +167,19 @@ typedef enum
     SSF_SM_EVENT_MQTTC_TO_RECONNECT,       /* Timer: reconnect backoff */
     SSF_SM_EVENT_MQTTC_TO_STOP,            /* Timer: STOPPING flush limit */
     SSF_SM_EVENT_MQTTC_TO_SUB_RETRY,       /* Timer: re-subscribe refused filters */
+
+    /* _net/ssfawsprov AWS IoT fleet provisioning (SSF_SM_AWSPROV) */
+    SSF_SM_EVENT_AWSPROV_START,            /* API: SSFAWSProvStart() */
+    SSF_SM_EVENT_AWSPROV_STOP,             /* API: SSFAWSProvStop() */
+    SSF_SM_EVENT_AWSPROV_READY,            /* ssfmqttc: READY, every filter granted */
+    SSF_SM_EVENT_AWSPROV_SUB_REFUSED,      /* ssfmqttc: READY with a refused filter */
+    SSF_SM_EVENT_AWSPROV_LINK_LOST,        /* ssfmqttc: DISCONNECTED */
+    SSF_SM_EVENT_AWSPROV_CONNECT_FAILED,   /* ssfmqttc: CONNECT_FAILED, transient */
+    SSF_SM_EVENT_AWSPROV_CONNECT_REFUSED,  /* ssfmqttc: CONNECT_FAILED, CONNACK 1, 2, 4 or 5 */
+    SSF_SM_EVENT_AWSPROV_RESPONSE,         /* Rx: a response for the step is in the work set */
+    SSF_SM_EVENT_AWSPROV_TO_RESPONSE,      /* Timer: response */
+    SSF_SM_EVENT_AWSPROV_TO_BACKOFF,       /* Timer: retry backoff */
+    SSF_SM_EVENT_AWSPROV_TO_DEADLINE,      /* Timer: overall deadline */
     SSF_SM_EVENT_MAX
 } SSFSMEventList_t;
 

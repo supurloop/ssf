@@ -31,6 +31,8 @@
 #include "ssfport.h"
 #include "ssf.h"
 #include "ssfassert.h"
+#include "ssfsm.h"
+#include "ssfnet.h"
 #include "ssfmqttpkt.h"
 #include "ssfjson.h"
 #include "ssfpem.h"
@@ -1711,6 +1713,1404 @@ static void _SSFAWSProvUTRegAccepted(void)
                                                           &_utRxAligned[1]));
 }
 
+#if (SSF_ECDSA_CONFIG_ENABLE_SIGN == 1) && (SSF_EC_CONFIG_ENABLE_P256 == 1) && \
+    (SSF_AWSPROV_UT_ACC_FULL == 1)
+/* --------------------------------------------------------------------------------------------- */
+/* Provisioning state machine: mock transport and scripted broker                                */
+/* --------------------------------------------------------------------------------------------- */
+#define SSF_AWSPROV_UT_BK_TX_SIZE   (4096u)
+#define SSF_AWSPROV_UT_BK_RX_SIZE   (8192u)    /* Mock under 32 KB for 16-bit */
+#define SSF_AWSPROV_UT_BK_REQ_SIZE  (2048u)
+#define SSF_AWSPROV_UT_BK_SCRIPT    (8u)
+#define SSF_AWSPROV_UT_BK_LOG       (8u)
+#define SSF_AWSPROV_UT_TX_BLOCK     (2048u)
+#define SSF_AWSPROV_UT_RX_BLOCK     (4096u)
+#define SSF_AWSPROV_UT_TMPL         "tmpl-1"
+#define SSF_AWSPROV_UT_PROV_REQ     SSF_AWSPROV_UT_PT_PREFIX SSF_AWSPROV_UT_TMPL \
+                                    SSF_AWSPROV_UT_PT_REQ
+#define SSF_AWSPROV_UT_PROV_ACC     SSF_AWSPROV_UT_PT_PREFIX SSF_AWSPROV_UT_TMPL \
+                                    SSF_AWSPROV_UT_PT_ACCEPTED
+#define SSF_AWSPROV_UT_PROV_REJ     SSF_AWSPROV_UT_PT_PREFIX SSF_AWSPROV_UT_TMPL \
+                                    SSF_AWSPROV_UT_PT_REJECTED
+#define SSF_AWSPROV_UT_REG_ACC      "{\"deviceConfiguration\":{\"a\":\"1\"}," \
+                                    "\"thingName\":\"thing-1\"}"
+#define SSF_AWSPROV_UT_REJ_429      "{\"statusCode\":429,\"errorCode\":\"Throttled\"," \
+                                    "\"errorMessage\":\"slow down\"}"
+#define SSF_AWSPROV_UT_REJ_400      "{\"statusCode\":400,\"errorCode\":\"InvalidRequest\"," \
+                                    "\"errorMessage\":\"no\"}"
+#define SSF_AWSPROV_UT_RESPONSE_TO  (150u)   /* Ticks; responses come within one pump */
+#define SSF_AWSPROV_UT_RETRY_MIN    (20u)
+#define SSF_AWSPROV_UT_RETRY_MAX    (40u)
+#define SSF_AWSPROV_UT_LONG         (100000u)
+#define SSF_AWSPROV_UT_SETTLE       (3000u)   /* Wait bound on a loaded host */
+
+/* Broker replies to a request, one script entry per request; past the end: accepted */
+typedef enum
+{
+    SSF_AWSPROV_UT_R_ACC = 0,     /* Accepted */
+    SSF_AWSPROV_UT_R_REJ429,      /* Rejected 429 (retryable) */
+    SSF_AWSPROV_UT_R_REJ400,      /* Rejected 400 (fatal) */
+    SSF_AWSPROV_UT_R_BAD,         /* Accepted topic, payload that fails parsing */
+    SSF_AWSPROV_UT_R_BADREJ,      /* Rejected topic, payload that fails parsing */
+    SSF_AWSPROV_UT_R_NONE,        /* No reply */
+    SSF_AWSPROV_UT_R_DROP,        /* No reply, the link drops */
+    SSF_AWSPROV_UT_R_NOISE,       /* Unrelated topic, the other step's accepted, then accepted */
+                                  /* twice */
+    SSF_AWSPROV_UT_R_LATE,        /* Accepted, lateTicks after the request */
+    SSF_AWSPROV_UT_R_RESUB,       /* The link drops; accepted right after the next SUBACK */
+} SSFAWSProvUTReply_t;
+
+typedef struct
+{
+    SSFNetTransport_t transport;  /* Must be first */
+    bool openResult;
+    bool isOpen;
+    bool isPeerClosed;
+    uint8_t connAckCode;          /* 0xFF => no CONNACK */
+    uint8_t subResult[SSF_AWSPROV_SUB_COUNT];
+    uint8_t csrScript[SSF_AWSPROV_UT_BK_SCRIPT];
+    uint8_t regScript[SSF_AWSPROV_UT_BK_SCRIPT];
+    SSFPortTick_t lateTicks;
+    SSFPortTick_t lateDue;        /* 0 => no late reply pending */
+    bool isLateCsr;
+    bool isResubPending;
+    uint32_t openCount;
+    uint32_t connectCount;
+    uint32_t subscribeCount;
+    uint32_t csrCount;
+    uint32_t regCount;
+    SSFPortTick_t csrTick[SSF_AWSPROV_UT_BK_LOG];
+    char clientId[SSF_MQTTC_CONFIG_MAX_CLIENT_ID_SIZE];
+    char filters[SSF_AWSPROV_SUB_COUNT][SSF_AWSPROV_MAX_TOPIC_SIZE];
+    uint8_t filterQos[SSF_AWSPROV_SUB_COUNT];
+    uint8_t csrFirst[SSF_AWSPROV_UT_BK_REQ_SIZE];
+    size_t csrFirstLen;
+    uint8_t csrLast[SSF_AWSPROV_UT_BK_REQ_SIZE];
+    size_t csrLastLen;
+    uint8_t regLast[SSF_AWSPROV_UT_BK_REQ_SIZE];
+    size_t regLastLen;
+    uint8_t tx[SSF_AWSPROV_UT_BK_TX_SIZE];
+    size_t txLen;
+    uint8_t rx[SSF_AWSPROV_UT_BK_RX_SIZE];
+    size_t rxLen;
+    size_t rxPos;
+} SSFAWSProvUTBroker_t;
+
+typedef struct
+{
+    uint32_t count;
+    bool isDone;
+    SSFAWSProvReason_t reason;
+    uint16_t statusCode;
+    char errorCode[SSF_AWSPROV_ERROR_CODE_SIZE];
+    char errorMessage[SSF_AWSPROV_ERROR_MESSAGE_SIZE];
+    char thingName[SSF_AWSPROV_CONFIG_THING_NAME_SIZE];
+    char deviceConfig[SSF_AWSPROV_CONFIG_DEVICE_CONFIG_SIZE];
+    size_t deviceConfigLen;
+    char certificateId[SSF_AWSPROV_CERT_ID_SIZE];
+    size_t certDerLen;
+    size_t tokenLen;
+    bool wasWorkLive;             /* The work set still held the outcome during the callback */
+} SSFAWSProvUTDone_t;
+
+static SSFAWSProvUTBroker_t _utBk;
+static SSFAWSProvUTDone_t _utDone;
+static SSFAWSProvWork_t _utWork;
+static SSFAWSProvOpts_t _utOpts;
+static uint32_t _utAppEvents[SSF_MQTTC_EVENT_MAX];
+static char _utCsrAcc[SSF_AWSPROV_UT_RX_SIZE];
+static size_t _utCsrAccLen;
+static uint8_t _utBkPkt[SSF_AWSPROV_UT_RX_BLOCK + 512u];
+static const SSFX509GenName_t _utSubject = { "dev-1", "SSF", NULL, "US", NULL, NULL };
+static const SSFAWSProvParam_t _utParams[] = { { "SerialNumber", "SN-1" } };
+static char _utRegExpect[SSF_AWSPROV_CONFIG_REG_REQ_SIZE];
+static size_t _utRegExpectLen;
+
+/* --------------------------------------------------------------------------------------------- */
+/* Mock transport callbacks.                                                                     */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFAWSProvUTBkOpen(SSFNetTransport_t *t, SSFCStrIn_t hostStr, size_t hostSize,
+                                uint16_t port)
+{
+    SSF_REQUIRE(t == &_utBk.transport);
+    SSF_REQUIRE(hostStr != NULL);
+    (void)hostSize;
+    (void)port;
+
+    _utBk.openCount++;
+    if (_utBk.openResult == false) return false;
+    _utBk.isOpen = true;
+    _utBk.isPeerClosed = false;
+    _utBk.txLen = 0;
+    _utBk.rxLen = 0;
+    _utBk.rxPos = 0;
+    return true;
+}
+
+static SSFNetIOResult_t _SSFAWSProvUTBkPollOpen(SSFNetTransport_t *t)
+{
+    SSF_REQUIRE(t == &_utBk.transport);
+    return SSF_NET_IO_SUCCESS;
+}
+
+static SSFNetIOResult_t _SSFAWSProvUTBkSend(SSFNetTransport_t *t, const uint8_t *buf,
+                                            size_t len, size_t *sentOut)
+{
+    SSF_REQUIRE(t == &_utBk.transport);
+    SSF_REQUIRE(buf != NULL);
+    SSF_REQUIRE(sentOut != NULL);
+    SSF_ASSERT(_utBk.isOpen);
+
+    *sentOut = 0;
+    if (_utBk.isPeerClosed) return SSF_NET_IO_CLOSED;
+    SSF_ASSERT((_utBk.txLen + len) <= sizeof(_utBk.tx));
+    memcpy(&_utBk.tx[_utBk.txLen], buf, len);
+    _utBk.txLen += len;
+    *sentOut = len;
+    return SSF_NET_IO_SUCCESS;
+}
+
+static SSFNetIOResult_t _SSFAWSProvUTBkRecv(SSFNetTransport_t *t, uint8_t *buf, size_t size,
+                                            size_t *gotOut)
+{
+    size_t n;
+
+    SSF_REQUIRE(t == &_utBk.transport);
+    SSF_REQUIRE(buf != NULL);
+    SSF_REQUIRE(gotOut != NULL);
+    SSF_ASSERT(_utBk.isOpen);
+
+    *gotOut = 0;
+    if (_utBk.isPeerClosed) return SSF_NET_IO_CLOSED;
+    n = _utBk.rxLen - _utBk.rxPos;
+    if (n == 0) return SSF_NET_IO_WANT_READ;
+    if (n > size) n = size;
+    memcpy(buf, &_utBk.rx[_utBk.rxPos], n);
+    _utBk.rxPos += n;
+    *gotOut = n;
+    return SSF_NET_IO_SUCCESS;
+}
+
+static SSFNetIOResult_t _SSFAWSProvUTBkShutdown(SSFNetTransport_t *t)
+{
+    SSF_REQUIRE(t == &_utBk.transport);
+    return SSF_NET_IO_SUCCESS;
+}
+
+static void _SSFAWSProvUTBkClose(SSFNetTransport_t *t)
+{
+    SSF_REQUIRE(t == &_utBk.transport);
+    _utBk.isOpen = false;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Queues bytes for the client to receive.                                                       */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTBkInject(const uint8_t *bytes, size_t len)
+{
+    SSF_REQUIRE(bytes != NULL);
+    SSF_ASSERT((_utBk.rxLen + len) <= sizeof(_utBk.rx));
+
+    memcpy(&_utBk.rx[_utBk.rxLen], bytes, len);
+    _utBk.rxLen += len;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Queues a QoS 0 PUBLISH of payloadStr on topicStr for the client.                              */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTBkPublish(const char *topicStr, const char *payloadStr, size_t len)
+{
+    size_t pktLen;
+
+    SSF_REQUIRE(topicStr != NULL);
+    SSF_REQUIRE(payloadStr != NULL);
+
+    SSFMQTTPktEncodePublish(_utBkPkt, sizeof(_utBkPkt), &pktLen, topicStr, strlen(topicStr) + 1u,
+                            (const uint8_t *)payloadStr, len, SSF_MQTTC_QOS_0, false, 0);
+    SSF_ASSERT(pktLen > 0);
+    _SSFAWSProvUTBkInject(_utBkPkt, pktLen);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Answers one request per its script entry.                                                     */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTBkReply(bool isCsr, uint8_t reply)
+{
+    const char *accTopic = isCsr ? SSF_AWSPROV_UT_CSR_ACCEPTED : SSF_AWSPROV_UT_PROV_ACC;
+    const char *rejTopic = isCsr ? SSF_AWSPROV_UT_CSR_REJECTED : SSF_AWSPROV_UT_PROV_REJ;
+    const char *accStr = isCsr ? _utCsrAcc : SSF_AWSPROV_UT_REG_ACC;
+    size_t accLen = isCsr ? _utCsrAccLen : SSF_AWSPROV_UT_LIT_LEN(SSF_AWSPROV_UT_REG_ACC);
+
+    switch (reply)
+    {
+    case SSF_AWSPROV_UT_R_ACC:
+        _SSFAWSProvUTBkPublish(accTopic, accStr, accLen);
+        break;
+    case SSF_AWSPROV_UT_R_REJ429:
+        _SSFAWSProvUTBkPublish(rejTopic, SSF_AWSPROV_UT_REJ_429,
+                               SSF_AWSPROV_UT_LIT_LEN(SSF_AWSPROV_UT_REJ_429));
+        break;
+    case SSF_AWSPROV_UT_R_REJ400:
+        _SSFAWSProvUTBkPublish(rejTopic, SSF_AWSPROV_UT_REJ_400,
+                               SSF_AWSPROV_UT_LIT_LEN(SSF_AWSPROV_UT_REJ_400));
+        break;
+    case SSF_AWSPROV_UT_R_BAD:
+        _SSFAWSProvUTBkPublish(accTopic, "{}", 2u);
+        break;
+    case SSF_AWSPROV_UT_R_BADREJ:
+        _SSFAWSProvUTBkPublish(rejTopic, "{\"statusCode\":\"x\"}", 18u);
+        break;
+    case SSF_AWSPROV_UT_R_DROP:
+        _utBk.isPeerClosed = true;
+        break;
+    case SSF_AWSPROV_UT_R_LATE:
+        _utBk.lateDue = SSFPortGetTick64() + _utBk.lateTicks;
+        _utBk.isLateCsr = isCsr;
+        break;
+    case SSF_AWSPROV_UT_R_RESUB:
+        SSF_ASSERT(isCsr == false);
+        _utBk.isPeerClosed = true;
+        _utBk.isResubPending = true;
+        break;
+    case SSF_AWSPROV_UT_R_NOISE:
+        _SSFAWSProvUTBkPublish("x/y", "{}", 2u);
+        /* The other step's accepted, on its own topic */
+        if (isCsr) _SSFAWSProvUTBkPublish(SSF_AWSPROV_UT_PROV_ACC, SSF_AWSPROV_UT_REG_ACC,
+                                          SSF_AWSPROV_UT_LIT_LEN(SSF_AWSPROV_UT_REG_ACC));
+        else _SSFAWSProvUTBkPublish(SSF_AWSPROV_UT_CSR_ACCEPTED, _utCsrAcc, _utCsrAccLen);
+        _SSFAWSProvUTBkPublish(accTopic, accStr, accLen);
+        _SSFAWSProvUTBkPublish(accTopic, accStr, accLen);
+        break;
+    default:
+        break;
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Reads a 2-byte length-prefixed string at p[*pos] into out; returns its length.                */
+/* --------------------------------------------------------------------------------------------- */
+static size_t _SSFAWSProvUTBkStr(const uint8_t *p, size_t *pos, char *out, size_t outSize)
+{
+    size_t n;
+
+    SSF_REQUIRE((p != NULL) && (pos != NULL) && (out != NULL));
+
+    n = (((size_t)p[*pos]) << 8) | p[*pos + 1u];
+    SSF_ASSERT(n < outSize);
+    memcpy(out, &p[*pos + 2u], n);
+    out[n] = 0;
+    *pos += n + 2u;
+    return n;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Handles one client PUBLISH: PUBACK, then the scripted reply.                                  */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTBkRxPublish(uint8_t b0, const uint8_t *v, size_t vLen)
+{
+    static char topic[SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE];
+    uint8_t ack[4] = { 0x40, 0x02, 0, 0 };
+    size_t pos = 0;
+    size_t payLen;
+    const uint8_t *pay;
+    uint32_t i;
+
+    (void)_SSFAWSProvUTBkStr(v, &pos, topic, sizeof(topic));
+    /* Requests go out at QoS 1 */
+    SSF_ASSERT(((b0 >> 1) & 3u) == 1u);
+    {
+        /* Yes, acknowledge */
+        ack[2] = v[pos];
+        ack[3] = v[pos + 1u];
+        pos += 2u;
+        _SSFAWSProvUTBkInject(ack, sizeof(ack));
+    }
+    pay = &v[pos];
+    payLen = vLen - pos;
+    SSF_ASSERT(payLen <= SSF_AWSPROV_UT_BK_REQ_SIZE);
+    if (strcmp(topic, SSF_AWSPROV_UT_CSR_REQ) == 0)
+    {
+        i = _utBk.csrCount++;
+        if (i < SSF_AWSPROV_UT_BK_LOG) _utBk.csrTick[i] = SSFPortGetTick64();
+        if (i == 0) { memcpy(_utBk.csrFirst, pay, payLen); _utBk.csrFirstLen = payLen; }
+        memcpy(_utBk.csrLast, pay, payLen);
+        _utBk.csrLastLen = payLen;
+        _SSFAWSProvUTBkReply(true, (i < SSF_AWSPROV_UT_BK_SCRIPT) ? _utBk.csrScript[i] :
+                             (uint8_t)SSF_AWSPROV_UT_R_ACC);
+    }
+    else
+    {
+        SSF_ASSERT(strcmp(topic, SSF_AWSPROV_UT_PROV_REQ) == 0);
+        i = _utBk.regCount++;
+        memcpy(_utBk.regLast, pay, payLen);
+        _utBk.regLastLen = payLen;
+        _SSFAWSProvUTBkReply(false, (i < SSF_AWSPROV_UT_BK_SCRIPT) ? _utBk.regScript[i] :
+                             (uint8_t)SSF_AWSPROV_UT_R_ACC);
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Handles one client SUBSCRIBE: records the filters, answers per subResult.                     */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTBkRxSubscribe(const uint8_t *v, size_t vLen)
+{
+    uint8_t ack[4 + SSF_AWSPROV_SUB_COUNT];
+    size_t pos = 2u;
+    uint32_t n = 0;
+
+    _utBk.subscribeCount++;
+    ack[0] = 0x90;
+    ack[2] = v[0];
+    ack[3] = v[1];
+    while (pos < vLen)
+    {
+        SSF_ASSERT(n < SSF_AWSPROV_SUB_COUNT);
+        (void)_SSFAWSProvUTBkStr(v, &pos, _utBk.filters[n], sizeof(_utBk.filters[n]));
+        _utBk.filterQos[n] = v[pos++];
+        ack[4u + n] = _utBk.subResult[n];
+        n++;
+    }
+    ack[1] = (uint8_t)(2u + n);
+    _SSFAWSProvUTBkInject(ack, 4u + n);
+    /* The answer to the request sent before the drop, in the same read as the SUBACK */
+    if (_utBk.isResubPending)
+    {
+        _utBk.isResubPending = false;
+        _SSFAWSProvUTBkPublish(SSF_AWSPROV_UT_PROV_ACC, SSF_AWSPROV_UT_REG_ACC,
+                               SSF_AWSPROV_UT_LIT_LEN(SSF_AWSPROV_UT_REG_ACC));
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Takes every complete packet the client sent and answers it.                                   */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTBkRun(void)
+{
+    static const uint8_t pingResp[] = { 0xD0, 0x00 };
+    size_t pos = 0;
+
+    /* A late reply due? */
+    if ((_utBk.lateDue != 0) && _utBk.isOpen && (_utBk.isPeerClosed == false) &&
+        (SSFPortGetTick64() >= _utBk.lateDue))
+    {
+        /* Yes */
+        _utBk.lateDue = 0;
+        _SSFAWSProvUTBkReply(_utBk.isLateCsr, SSF_AWSPROV_UT_R_ACC);
+    }
+
+    while ((_utBk.isOpen) && (_utBk.isPeerClosed == false) && (pos < _utBk.txLen))
+    {
+        uint8_t b0 = _utBk.tx[pos];
+        size_t rem = 0;
+        size_t mul = 1;
+        size_t hdr = 1;
+        const uint8_t *v;
+
+        /* Remaining length */
+        for (;;)
+        {
+            SSF_ASSERT((pos + hdr) < _utBk.txLen);
+            rem += (size_t)(_utBk.tx[pos + hdr] & 0x7Fu) * mul;
+            mul <<= 7;
+            if ((_utBk.tx[pos + hdr++] & 0x80u) == 0) break;
+        }
+        if ((pos + hdr + rem) > _utBk.txLen) break;
+        v = &_utBk.tx[pos + hdr];
+        switch (b0 >> 4)
+        {
+        case 1u:
+        {
+            uint8_t ack[4] = { 0x20, 0x02, 0x00, 0x00 };
+            size_t p = 10u;
+            _utBk.connectCount++;
+            (void)_SSFAWSProvUTBkStr(v, &p, _utBk.clientId, sizeof(_utBk.clientId));
+            ack[3] = _utBk.connAckCode;
+            if (_utBk.connAckCode != 0xFFu) _SSFAWSProvUTBkInject(ack, sizeof(ack));
+            break;
+        }
+        case 3u:
+            _SSFAWSProvUTBkRxPublish(b0, v, rem);
+            break;
+        case 8u:
+            _SSFAWSProvUTBkRxSubscribe(v, rem);
+            break;
+        case 12u:
+            _SSFAWSProvUTBkInject(pingResp, sizeof(pingResp));
+            break;
+        default:
+            break;
+        }
+        pos += hdr + rem;
+    }
+    /* Keep only what is not yet a whole packet */
+    if (pos > 0)
+    {
+        memmove(_utBk.tx, &_utBk.tx[pos], _utBk.txLen - pos);
+        _utBk.txLen -= pos;
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* App callbacks.                                                                                */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTDoneFn(void *ctx, bool isDone, const SSFAWSProvResult_t *r)
+{
+    SSF_ASSERT(ctx == &_utDone);
+    SSF_ASSERT(r != NULL);
+    SSF_ASSERT(SSFAWSProvIsStarted() == false);
+    SSF_ASSERT(isDone == (r->reason == SSF_AWSPROV_REASON_NONE));
+    SSF_ASSERT((r->errorCode != NULL) && (r->errorMessage != NULL));
+
+    _utDone.count++;
+    _utDone.isDone = isDone;
+    _utDone.reason = r->reason;
+    _utDone.statusCode = r->statusCode;
+    SSF_ASSERT(strlen(r->errorCode) < sizeof(_utDone.errorCode));
+    SSF_ASSERT(strlen(r->errorMessage) < sizeof(_utDone.errorMessage));
+    strcpy(_utDone.errorCode, r->errorCode);
+    strcpy(_utDone.errorMessage, r->errorMessage);
+    /* The result points into the work set, which is wiped only after the callback */
+    _utDone.wasWorkLive = ((r->errorCode == _utWork.errorCode) &&
+                           (r->errorMessage == _utWork.errorMessage) &&
+                           ((isDone == false) || ((r->certOpt == &_utWork.acc) &&
+                                                  (r->certOpt->tokenLen > 0u) &&
+                                                  (r->thingNameOpt == _utWork.thingName))));
+    /* Credentials only on success */
+    if (isDone)
+    {
+        SSF_ASSERT((r->certOpt != NULL) && (r->thingNameOpt != NULL) &&
+                   (r->deviceConfigOpt != NULL));
+        strcpy(_utDone.thingName, r->thingNameOpt);
+        memcpy(_utDone.deviceConfig, r->deviceConfigOpt, r->deviceConfigLen + 1u);
+        _utDone.deviceConfigLen = r->deviceConfigLen;
+        strcpy(_utDone.certificateId, r->certOpt->certificateId);
+        _utDone.certDerLen = r->certOpt->certDerLen;
+        _utDone.tokenLen = r->certOpt->tokenLen;
+    }
+    else
+    {
+        SSF_ASSERT((r->certOpt == NULL) && (r->thingNameOpt == NULL) &&
+                   (r->deviceConfigOpt == NULL) && (r->deviceConfigLen == 0));
+    }
+}
+
+static void _SSFAWSProvUTAppEvent(void *ctx, SSFMQTTCEvent_t event, SSFMQTTCReason_t reason)
+{
+    SSF_ASSERT(ctx == _utAppEvents);
+    SSF_ASSERT((event > SSF_MQTTC_EVENT_MIN) && (event < SSF_MQTTC_EVENT_MAX));
+    (void)reason;
+    _utAppEvents[event]++;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Runs ssfsm, ssfmqttc and the broker until event chains settle.                                */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTPump(void)
+{
+    uint32_t i;
+
+    for (i = 0; i < 12u; i++)
+    {
+        (void)SSFSMTask(NULL);
+        (void)SSFMQTTCTask(NULL);
+        _SSFAWSProvUTBkRun();
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Pumps until the run has ended and ssfmqttc is STOPPED; asserts if that takes too long.        */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTPumpUntilStopped(void)
+{
+    SSFPortTick_t end = SSFPortGetTick64() + SSF_AWSPROV_UT_SETTLE;
+
+    for (;;)
+    {
+        bool isLate = (SSFPortGetTick64() > end);
+
+        _SSFAWSProvUTPump();
+        if ((SSFAWSProvIsStarted() == false) &&
+            (SSFMQTTCGetState() == SSF_MQTTC_STATE_STOPPED)) break;
+        SSF_ASSERT(isLate == false);
+    }
+    _SSFAWSProvUTPump();
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Pumps for at least ticks.                                                                     */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTPumpFor(SSFPortTick_t ticks)
+{
+    SSFPortTick_t end = SSFPortGetTick64() + ticks;
+
+    while (SSFPortGetTick64() < end) _SSFAWSProvUTPump();
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Fresh ssfsm, broker, ssfmqttc (txBlockSize given) and provisioning; default options.           */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTSmBegin(uint32_t txBlockSize)
+{
+    SSFSMInit(SSF_SM_MAX_ACTIVE_EVENTS, SSF_SM_MAX_ACTIVE_TIMERS);
+    memset(&_utBk, 0, sizeof(_utBk));
+    _utBk.transport.open = _SSFAWSProvUTBkOpen;
+    _utBk.transport.pollOpen = _SSFAWSProvUTBkPollOpen;
+    _utBk.transport.send = _SSFAWSProvUTBkSend;
+    _utBk.transport.recv = _SSFAWSProvUTBkRecv;
+    _utBk.transport.shutdown = _SSFAWSProvUTBkShutdown;
+    _utBk.transport.close = _SSFAWSProvUTBkClose;
+    _utBk.openResult = true;
+    memset(_utBk.subResult, 0x01, sizeof(_utBk.subResult));
+    memset(&_utDone, 0, sizeof(_utDone));
+    memset(_utAppEvents, 0, sizeof(_utAppEvents));
+    memset(&_utWork, 0x5A, sizeof(_utWork));
+
+    SSFMQTTCInit(&_utBk.transport, 4u, txBlockSize, SSF_AWSPROV_UT_RX_BLOCK, SSFAWSProvRxPublish,
+                 NULL, SSFAWSProvEvent, NULL);
+    SSFAWSProvInit();
+
+    memset(&_utOpts, 0, sizeof(_utOpts));
+    _utOpts.mqtt.host = "mock";
+    _utOpts.mqtt.port = 8883;
+    _utOpts.mqtt.clientId = "claim-1";
+    _utOpts.mqtt.keepAliveSec = 120;
+    _utOpts.mqtt.connectTimeout = 100;
+    _utOpts.mqtt.subscribeTimeout = 100;
+    _utOpts.mqtt.txPublishTimeout = 500;
+    _utOpts.mqtt.reconnectMinWait = 20;
+    _utOpts.mqtt.reconnectMaxWait = 40;
+    _utOpts.templateName = SSF_AWSPROV_UT_TMPL;
+    _utOpts.curve = SSF_EC_CURVE_P256;
+    _utOpts.privKey = _utAWSProvP256Priv;
+    _utOpts.privKeyLen = sizeof(_utAWSProvP256Priv);
+    _utOpts.subjectOpt = &_utSubject;
+    _utOpts.paramsOpt = _utParams;
+    _utOpts.paramCount = 1u;
+    _utOpts.responseTimeout = SSF_AWSPROV_UT_RESPONSE_TO;
+    _utOpts.retryMinWait = SSF_AWSPROV_UT_RETRY_MIN;
+    _utOpts.retryMaxWait = SSF_AWSPROV_UT_RETRY_MAX;
+    _utOpts.deadline = 0;
+    _utOpts.tokenLifetime = SSF_AWSPROV_UT_LONG;
+    _utOpts.maxAttempts = 4u;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Tears down what _SSFAWSProvUTSmBegin built; the run must be over.                             */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTSmEnd(void)
+{
+    SSF_ASSERT(SSFAWSProvIsStarted() == false);
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_STOPPED);
+    SSFAWSProvDeInit();
+    SSFMQTTCDeInit();
+    SSFSMDeInit();
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Starts with _utOpts, runs to the end, and checks the outcome and the scrub.                    */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTRun(SSFAWSProvReason_t reason)
+{
+    SSFAWSProvStart(&_utWork, &_utOpts, _SSFAWSProvUTDoneFn, &_utDone, _SSFAWSProvUTAppEvent,
+                    _utAppEvents);
+    _SSFAWSProvUTPumpUntilStopped();
+    SSF_ASSERT(_utDone.count == 1u);
+    SSF_ASSERT(_utDone.reason == reason);
+    SSF_ASSERT(_utDone.wasWorkLive);
+    SSF_ASSERT(_SSFAWSProvUTIsZero(&_utWork, sizeof(_utWork)));
+    SSF_ASSERT(_utAppEvents[SSF_MQTTC_EVENT_STOPPED] == 1u);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Asserts a successful outcome with the fixture credentials.                                    */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTExpectDone(void)
+{
+    SSF_ASSERT(_utDone.isDone);
+    SSF_ASSERT(strcmp(_utDone.thingName, "thing-1") == 0);
+    SSF_ASSERT(strcmp(_utDone.deviceConfig, "{\"a\":\"1\"}") == 0);
+    SSF_ASSERT(_utDone.deviceConfigLen == 9u);
+    SSF_ASSERT(strcmp(_utDone.certificateId, _utAWSProvCertId) == 0);
+    SSF_ASSERT(_utDone.certDerLen == sizeof(_utAWSProvP256CertDer));
+    SSF_ASSERT(_utDone.tokenLen == strlen(_utAWSProvToken));
+    SSF_ASSERT((_utDone.statusCode == 0u) || (_utDone.statusCode == 429u));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Asserts every CSR request was the fixture's bytes (built once, never signed again).           */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTExpectCsrBytes(void)
+{
+    size_t n = SSF_AWSPROV_UT_LIT_LEN(_utAWSProvP256CNOCJson);
+
+    SSF_ASSERT((_utBk.csrFirstLen == n) &&
+               (memcmp(_utBk.csrFirst, _utAWSProvP256CNOCJson, n) == 0));
+    SSF_ASSERT((_utBk.csrLastLen == n) && (memcmp(_utBk.csrLast, _utAWSProvP256CNOCJson, n) == 0));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Asserts the last RegisterThing request was the token with the parameters.                     */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTExpectRegBytes(void)
+{
+    SSF_ASSERT(_utBk.regLastLen == _utRegExpectLen);
+    SSF_ASSERT(memcmp(_utBk.regLast, _utRegExpect, _utRegExpectLen) == 0);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Happy path, the wire, the scrub, restart after DONE.                                          */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTSmHappy(void)
+{
+    static const char *const filters[SSF_AWSPROV_SUB_COUNT] =
+    { SSF_AWSPROV_UT_CSR_ACCEPTED, SSF_AWSPROV_UT_CSR_REJECTED, SSF_AWSPROV_UT_PROV_ACC,
+      SSF_AWSPROV_UT_PROV_REJ };
+    uint32_t i;
+
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    SSFAWSProvStart(&_utWork, &_utOpts, _SSFAWSProvUTDoneFn, &_utDone, _SSFAWSProvUTAppEvent,
+                    _utAppEvents);
+    SSF_ASSERT(SSFAWSProvIsStarted());
+    /* The private key is not kept */
+    SSF_ASSERT(_utWork.opts.privKey == NULL);
+    SSF_ASSERT(_SSFAWSProvUTContains((const uint8_t *)&_utWork, sizeof(_utWork),
+                                     _utAWSProvP256Priv, sizeof(_utAWSProvP256Priv)) == false);
+    _SSFAWSProvUTPumpUntilStopped();
+    SSF_ASSERT(_utDone.count == 1u);
+    _SSFAWSProvUTExpectDone();
+    SSF_ASSERT(_utDone.statusCode == 0u);
+    SSF_ASSERT(_utDone.wasWorkLive);
+    SSF_ASSERT(_SSFAWSProvUTIsZero(&_utWork, sizeof(_utWork)));
+    SSF_ASSERT(strcmp(_utBk.clientId, "claim-1") == 0);
+    SSF_ASSERT(_utBk.connectCount == 1u);
+    SSF_ASSERT(_utBk.subscribeCount == 1u);
+    for (i = 0; i < SSF_AWSPROV_SUB_COUNT; i++)
+    {
+        SSF_ASSERT(strcmp(_utBk.filters[i], filters[i]) == 0);
+        SSF_ASSERT(_utBk.filterQos[i] == 1u);
+    }
+    SSF_ASSERT((_utBk.csrCount == 1u) && (_utBk.regCount == 1u));
+    _SSFAWSProvUTExpectCsrBytes();
+    _SSFAWSProvUTExpectRegBytes();
+    SSF_ASSERT(_utAppEvents[SSF_MQTTC_EVENT_CONNECTED] == 1u);
+    SSF_ASSERT(_utAppEvents[SSF_MQTTC_EVENT_READY] == 1u);
+    SSF_ASSERT(_utAppEvents[SSF_MQTTC_EVENT_STOPPED] == 1u);
+
+    /* A second run on the same Init, no app event callback */
+    memset(&_utDone, 0, sizeof(_utDone));
+    memset(&_utBk.csrScript, 0, sizeof(_utBk.csrScript));
+    SSFAWSProvStart(&_utWork, &_utOpts, _SSFAWSProvUTDoneFn, &_utDone, NULL, NULL);
+    _SSFAWSProvUTPumpUntilStopped();
+    SSF_ASSERT(_utDone.count == 1u);
+    _SSFAWSProvUTExpectDone();
+    SSF_ASSERT((_utBk.csrCount == 2u) && (_utBk.regCount == 2u));
+    SSF_ASSERT(_utAppEvents[SSF_MQTTC_EVENT_STOPPED] == 1u);
+    _SSFAWSProvUTSmEnd();
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Runs one scripted scenario on a fresh setup and checks the outcome.                           */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTSmScript(const uint8_t *csr, size_t csrLen, const uint8_t *reg,
+                                  size_t regLen, SSFAWSProvReason_t reason, uint32_t csrCount,
+                                  uint32_t regCount)
+{
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    SSF_ASSERT((csrLen <= SSF_AWSPROV_UT_BK_SCRIPT) && (regLen <= SSF_AWSPROV_UT_BK_SCRIPT));
+    if (csrLen > 0) memcpy(_utBk.csrScript, csr, csrLen);
+    if (regLen > 0) memcpy(_utBk.regScript, reg, regLen);
+    _SSFAWSProvUTRun(reason);
+    SSF_ASSERT(_utBk.csrCount == csrCount);
+    SSF_ASSERT(_utBk.regCount == regCount);
+    if (csrCount > 0) _SSFAWSProvUTExpectCsrBytes();
+    if (regCount > 0) _SSFAWSProvUTExpectRegBytes();
+    if (reason == SSF_AWSPROV_REASON_NONE) _SSFAWSProvUTExpectDone();
+    _SSFAWSProvUTSmEnd();
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Rejects, timeouts, bad responses, link drops and noise on each step.                           */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTSmSteps(void)
+{
+    static const uint8_t r429[] = { SSF_AWSPROV_UT_R_REJ429 };
+    static const uint8_t r400[] = { SSF_AWSPROV_UT_R_REJ400 };
+    static const uint8_t none[] = { SSF_AWSPROV_UT_R_NONE };
+    static const uint8_t none4[] = { SSF_AWSPROV_UT_R_NONE, SSF_AWSPROV_UT_R_NONE,
+                                     SSF_AWSPROV_UT_R_NONE, SSF_AWSPROV_UT_R_NONE };
+    static const uint8_t r4294[] = { SSF_AWSPROV_UT_R_REJ429, SSF_AWSPROV_UT_R_REJ429,
+                                     SSF_AWSPROV_UT_R_REJ429, SSF_AWSPROV_UT_R_REJ429 };
+    static const uint8_t bad[] = { SSF_AWSPROV_UT_R_BAD, SSF_AWSPROV_UT_R_BADREJ };
+    static const uint8_t bad4[] = { SSF_AWSPROV_UT_R_BADREJ, SSF_AWSPROV_UT_R_BAD,
+                                    SSF_AWSPROV_UT_R_BAD, SSF_AWSPROV_UT_R_BAD };
+    static const uint8_t drop[] = { SSF_AWSPROV_UT_R_DROP };
+    static const uint8_t noise[] = { SSF_AWSPROV_UT_R_NOISE };
+    static const uint8_t mixed[] = { SSF_AWSPROV_UT_R_NONE, SSF_AWSPROV_UT_R_REJ429,
+                                     SSF_AWSPROV_UT_R_BAD };
+
+    /* CreateCertificateFromCsr */
+    _SSFAWSProvUTSmScript(r429, sizeof(r429), NULL, 0, SSF_AWSPROV_REASON_NONE, 2u, 1u);
+    SSF_ASSERT(_utDone.statusCode == 429u);   /* The last reject is still reported */
+    _SSFAWSProvUTSmScript(r400, sizeof(r400), NULL, 0, SSF_AWSPROV_REASON_REJECTED, 1u, 0);
+    SSF_ASSERT(_utDone.statusCode == 400u);
+    SSF_ASSERT(strcmp(_utDone.errorCode, "InvalidRequest") == 0);
+    SSF_ASSERT(strcmp(_utDone.errorMessage, "no") == 0);
+    _SSFAWSProvUTSmScript(none, sizeof(none), NULL, 0, SSF_AWSPROV_REASON_NONE, 2u, 1u);
+    _SSFAWSProvUTSmScript(none4, sizeof(none4), NULL, 0, SSF_AWSPROV_REASON_ATTEMPTS, 4u, 0);
+    _SSFAWSProvUTSmScript(r4294, sizeof(r4294), NULL, 0, SSF_AWSPROV_REASON_ATTEMPTS, 4u, 0);
+    SSF_ASSERT(_utDone.statusCode == 429u);
+    SSF_ASSERT(strcmp(_utDone.errorCode, "Throttled") == 0);
+    _SSFAWSProvUTSmScript(bad, sizeof(bad), NULL, 0, SSF_AWSPROV_REASON_NONE, 3u, 1u);
+    _SSFAWSProvUTSmScript(bad4, sizeof(bad4), NULL, 0, SSF_AWSPROV_REASON_BAD_RESPONSE, 4u, 0);
+    _SSFAWSProvUTSmScript(mixed, sizeof(mixed), NULL, 0, SSF_AWSPROV_REASON_NONE, 4u, 1u);
+    _SSFAWSProvUTSmScript(drop, sizeof(drop), NULL, 0, SSF_AWSPROV_REASON_NONE, 2u, 1u);
+    SSF_ASSERT(_utAppEvents[SSF_MQTTC_EVENT_DISCONNECTED] == 1u);
+    _SSFAWSProvUTSmScript(noise, sizeof(noise), NULL, 0, SSF_AWSPROV_REASON_NONE, 1u, 1u);
+
+    /* RegisterThing */
+    _SSFAWSProvUTSmScript(NULL, 0, r429, sizeof(r429), SSF_AWSPROV_REASON_NONE, 1u, 2u);
+    _SSFAWSProvUTSmScript(NULL, 0, r400, sizeof(r400), SSF_AWSPROV_REASON_REJECTED, 1u, 1u);
+    SSF_ASSERT(_utDone.statusCode == 400u);
+    _SSFAWSProvUTSmScript(NULL, 0, none, sizeof(none), SSF_AWSPROV_REASON_NONE, 1u, 2u);
+    _SSFAWSProvUTSmScript(NULL, 0, none4, sizeof(none4), SSF_AWSPROV_REASON_ATTEMPTS, 1u, 4u);
+    _SSFAWSProvUTSmScript(NULL, 0, bad, sizeof(bad), SSF_AWSPROV_REASON_NONE, 1u, 3u);
+    _SSFAWSProvUTSmScript(NULL, 0, bad4, sizeof(bad4), SSF_AWSPROV_REASON_BAD_RESPONSE, 1u, 4u);
+    _SSFAWSProvUTSmScript(NULL, 0, drop, sizeof(drop), SSF_AWSPROV_REASON_NONE, 1u, 2u);
+    _SSFAWSProvUTSmScript(NULL, 0, noise, sizeof(noise), SSF_AWSPROV_REASON_NONE, 1u, 1u);
+
+    /* Retries start over for each step: three failures on each still succeed with 4 tries */
+    _SSFAWSProvUTSmScript(r4294, 3u, none4, 3u, SSF_AWSPROV_REASON_NONE, 4u, 4u);
+
+    /* maxAttempts 0 with a deadline: tries are unlimited */
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    memset(_utBk.csrScript, SSF_AWSPROV_UT_R_REJ429, 6u);
+    _utOpts.maxAttempts = 0;
+    _utOpts.deadline = SSF_AWSPROV_UT_LONG;
+    _SSFAWSProvUTRun(SSF_AWSPROV_REASON_NONE);
+    SSF_ASSERT(_utBk.csrCount == 7u);
+    _SSFAWSProvUTSmEnd();
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Backoff: doubling from retryMinWait to retryMaxWait, each wait jittered within [w/2, w].      */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTSmBackoff(void)
+{
+    static const SSFPortTick_t base[] = { 40u, 80u, 160u, 160u, 160u };
+    SSFPortTick_t gap;
+    uint32_t i;
+
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    memset(_utBk.csrScript, SSF_AWSPROV_UT_R_REJ429, 5u);
+    _utOpts.retryMinWait = 40u;
+    _utOpts.retryMaxWait = 160u;
+    _utOpts.maxAttempts = 6u;
+    _SSFAWSProvUTRun(SSF_AWSPROV_REASON_NONE);
+    SSF_ASSERT(_utBk.csrCount == 6u);
+    for (i = 0; i < 5u; i++)
+    {
+        gap = _utBk.csrTick[i + 1u] - _utBk.csrTick[i];
+        SSF_ASSERT(gap >= (base[i] / 2u));
+        SSF_ASSERT(gap <= (base[i] + SSF_AWSPROV_UT_SETTLE));
+    }
+    _SSFAWSProvUTSmEnd();
+
+    /* An odd cap: past half of it the wait goes straight to the cap */
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    memset(_utBk.csrScript, SSF_AWSPROV_UT_R_REJ429, 3u);
+    _utOpts.retryMinWait = 30u;
+    _utOpts.retryMaxWait = 45u;
+    _SSFAWSProvUTRun(SSF_AWSPROV_REASON_NONE);
+    SSF_ASSERT(_utBk.csrCount == 4u);
+    SSF_ASSERT((_utBk.csrTick[1] - _utBk.csrTick[0]) >= 15u);
+    SSF_ASSERT((_utBk.csrTick[2] - _utBk.csrTick[1]) >= 22u);
+    SSF_ASSERT((_utBk.csrTick[3] - _utBk.csrTick[2]) >= 22u);
+    _SSFAWSProvUTSmEnd();
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Checks the backoff sequence for (minWait, maxWait) against expect[0..n).                      */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTBackoffSeq(SSFPortTick_t minWait, SSFPortTick_t maxWait,
+                                    const SSFPortTick_t *expect, size_t n)
+{
+    SSFPortTick_t t;
+    size_t i;
+
+    SSF_REQUIRE(expect != NULL);
+
+    memset(&_utWork, 0, sizeof(_utWork));
+    _utWork.opts.retryMinWait = minWait;
+    _utWork.opts.retryMaxWait = maxWait;
+    _utWork.jitter = 1u;
+    for (i = 0; i < n; i++)
+    {
+        t = _SSFAWSProvUTNextBackoff(&_utWork);
+        SSF_ASSERT(_utWork.wait == expect[i]);
+        SSF_ASSERT((t >= (expect[i] - (expect[i] >> 1))) && (t <= expect[i]));
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Backoff arithmetic: doubling, the cap, no overflow, jitter range.                             */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTSmBackoffMath(void)
+{
+    static const SSFPortTick_t even[] = { 40u, 80u, 160u, 160u };
+    static const SSFPortTick_t odd[] = { 30u, 45u, 45u };
+    static const SSFPortTick_t odd2[] = { 22u, 44u, 45u };
+    static const SSFPortTick_t one[] = { 1u, 1u };
+    static SSFPortTick_t big[3];
+    bool seen[5] = { false, false, false, false, false };
+    SSFPortTick_t t;
+    uint32_t i;
+
+    _SSFAWSProvUTBackoffSeq(40u, 160u, even, 4u);
+    _SSFAWSProvUTBackoffSeq(30u, 45u, odd, 3u);
+    _SSFAWSProvUTBackoffSeq(22u, 45u, odd2, 3u);    /* At exactly half of an odd cap: doubles */
+    _SSFAWSProvUTBackoffSeq(1u, 1u, one, 2u);
+    /* Near the top of the tick range doubling must not wrap */
+    big[0] = ((SSFPortTick_t)1u) << 62;
+    big[1] = ((SSFPortTick_t)1u) << 63;
+    big[2] = ~((SSFPortTick_t)0u);
+    _SSFAWSProvUTBackoffSeq(big[0], big[2], big, 3u);
+
+    /* Jitter covers all of [w/2, w] and nothing else */
+    memset(&_utWork, 0, sizeof(_utWork));
+    _utWork.opts.retryMinWait = 4u;
+    _utWork.opts.retryMaxWait = 4u;
+    _utWork.jitter = 12345u;
+    for (i = 0; i < 1000u; i++)
+    {
+        t = _SSFAWSProvUTNextBackoff(&_utWork);
+        SSF_ASSERT((t >= 2u) && (t <= 4u));
+        seen[t] = true;
+    }
+    SSF_ASSERT(seen[2] && seen[3] && seen[4]);
+    memset(&_utWork, 0, sizeof(_utWork));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Connection: failures counted as tries, refusals, refused filters, the deadline, the token.    */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTSmLink(void)
+{
+    static const uint8_t refused[] = { 1u, 2u, 4u, 5u };
+    static const uint8_t connAck[] = { 0x20, 0x02, 0x00, 0x00 };
+    static uint8_t key2[sizeof(_utAWSProvP256Priv)];
+    uint32_t seed;
+    size_t i;
+
+    /* The jitter seed comes from the device key */
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    _utBk.connAckCode = 0xFFu;
+    SSFAWSProvStart(&_utWork, &_utOpts, _SSFAWSProvUTDoneFn, &_utDone, NULL, NULL);
+    seed = _utWork.jitter;
+    SSFAWSProvStop();
+    _SSFAWSProvUTPumpUntilStopped();
+    memcpy(key2, _utAWSProvP256Priv, sizeof(key2));
+    key2[sizeof(key2) - 1u] ^= 1u;
+    _utOpts.privKey = key2;
+    SSFAWSProvStart(&_utWork, &_utOpts, _SSFAWSProvUTDoneFn, &_utDone, NULL, NULL);
+    SSF_ASSERT((_utWork.jitter != seed) && (_utWork.jitter != 0u));
+    SSFAWSProvStop();
+    _SSFAWSProvUTPumpUntilStopped();
+    _SSFAWSProvUTSmEnd();
+
+    /* RegisterThing starts with a fresh try count and backoff */
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    _utBk.csrScript[0] = SSF_AWSPROV_UT_R_REJ429;
+    _utBk.regScript[0] = SSF_AWSPROV_UT_R_NONE;
+    _utOpts.responseTimeout = SSF_AWSPROV_UT_LONG;
+    SSFAWSProvStart(&_utWork, &_utOpts, _SSFAWSProvUTDoneFn, &_utDone, NULL, NULL);
+    while (_utBk.regCount < 1u) _SSFAWSProvUTPump();
+    SSF_ASSERT((_utWork.step == 1u) && (_utWork.wait == 0) && (_utWork.tries[1] == 1u));
+    SSF_ASSERT(_utWork.tries[0] == 2u);
+    SSFAWSProvStop();
+    _SSFAWSProvUTPumpUntilStopped();
+    _SSFAWSProvUTSmEnd();
+
+    /* Out of tries on a failure: ends at once, not after the (long) backoff */
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    _utBk.csrScript[0] = SSF_AWSPROV_UT_R_REJ429;
+    _utOpts.maxAttempts = 1u;
+    _utOpts.retryMinWait = SSF_AWSPROV_UT_LONG;
+    _utOpts.retryMaxWait = SSF_AWSPROV_UT_LONG;
+    _SSFAWSProvUTRun(SSF_AWSPROV_REASON_ATTEMPTS);
+    _SSFAWSProvUTSmEnd();
+
+    /* A drop while waiting for the response: resent on reconnect, not after its timeout */
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    _utBk.csrScript[0] = SSF_AWSPROV_UT_R_DROP;
+    _utOpts.responseTimeout = SSF_AWSPROV_UT_LONG;
+    _SSFAWSProvUTRun(SSF_AWSPROV_REASON_NONE);
+    SSF_ASSERT(_utBk.csrCount == 2u);
+    _SSFAWSProvUTSmEnd();
+
+    /* The link never comes up: four failed connects end the run */
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    _utBk.openResult = false;
+    _SSFAWSProvUTRun(SSF_AWSPROV_REASON_ATTEMPTS);
+    SSF_ASSERT(_utBk.openCount == 4u);
+    SSF_ASSERT(_utAppEvents[SSF_MQTTC_EVENT_CONNECT_FAILED] == 4u);
+    _SSFAWSProvUTSmEnd();
+
+    /* Never up, no try limit: the deadline (from Start) ends it */
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    _utBk.openResult = false;
+    _utOpts.maxAttempts = 0;
+    _utOpts.deadline = 150u;
+    _SSFAWSProvUTRun(SSF_AWSPROV_REASON_DEADLINE);
+    SSF_ASSERT(_utBk.openCount >= 2u);
+    _SSFAWSProvUTSmEnd();
+
+    /* Two failed connects, then up */
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    _utBk.openResult = false;
+    SSFAWSProvStart(&_utWork, &_utOpts, _SSFAWSProvUTDoneFn, &_utDone, NULL, NULL);
+    while (_utBk.openCount < 2u) _SSFAWSProvUTPump();
+    _utBk.openResult = true;
+    _SSFAWSProvUTPumpUntilStopped();
+    SSF_ASSERT((_utDone.count == 1u) && _utDone.isDone);
+    SSF_ASSERT(_utBk.openCount == 3u);
+    _SSFAWSProvUTSmEnd();
+
+    /* CONNACK 1, 2, 4, 5 end the run; 3 (server unavailable) is retried */
+    for (i = 0; i < sizeof(refused); i++)
+    {
+        _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+        _utBk.connAckCode = refused[i];
+        _SSFAWSProvUTRun(SSF_AWSPROV_REASON_CONNECT_REFUSED);
+        SSF_ASSERT(_utBk.connectCount == 1u);
+        _SSFAWSProvUTSmEnd();
+    }
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    _utBk.connAckCode = 3u;
+    _SSFAWSProvUTRun(SSF_AWSPROV_REASON_ATTEMPTS);
+    SSF_ASSERT(_utBk.connectCount == 4u);
+    _SSFAWSProvUTSmEnd();
+
+    /* A refused response filter: fail at READY, nothing published */
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    _utBk.subResult[SSF_AWSPROV_SUB_PROV_ACCEPTED] = 0x80u;
+    _SSFAWSProvUTRun(SSF_AWSPROV_REASON_SUBSCRIBE_REFUSED);
+    SSF_ASSERT(_utBk.csrCount == 0);
+    _SSFAWSProvUTSmEnd();
+
+    /* Deadline while waiting for a response, and in BACKOFF */
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    _utBk.csrScript[0] = SSF_AWSPROV_UT_R_NONE;
+    _utOpts.responseTimeout = SSF_AWSPROV_UT_LONG;
+    _utOpts.deadline = 100u;
+    _SSFAWSProvUTRun(SSF_AWSPROV_REASON_DEADLINE);
+    SSF_ASSERT(_utBk.csrCount == 1u);
+    _SSFAWSProvUTSmEnd();
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    _utBk.csrScript[0] = SSF_AWSPROV_UT_R_REJ429;
+    _utOpts.retryMinWait = SSF_AWSPROV_UT_LONG;
+    _utOpts.retryMaxWait = SSF_AWSPROV_UT_LONG;
+    _utOpts.deadline = 100u;
+    _SSFAWSProvUTRun(SSF_AWSPROV_REASON_DEADLINE);
+    SSF_ASSERT(_utBk.csrCount == 1u);
+    SSF_ASSERT(_utDone.statusCode == 429u);
+    _SSFAWSProvUTSmEnd();
+
+    /* The link drops during BACKOFF and comes back before it ends: the backoff runs out */
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    _utBk.csrScript[0] = SSF_AWSPROV_UT_R_REJ429;
+    _utOpts.retryMinWait = 100u;
+    _utOpts.retryMaxWait = 100u;
+    SSFAWSProvStart(&_utWork, &_utOpts, _SSFAWSProvUTDoneFn, &_utDone, NULL, NULL);
+    while (_utBk.csrCount < 1u) _SSFAWSProvUTPump();
+    _utBk.isPeerClosed = true;
+    _SSFAWSProvUTPumpUntilStopped();
+    SSF_ASSERT((_utDone.count == 1u) && _utDone.isDone);
+    SSF_ASSERT((_utBk.csrCount == 2u) && (_utBk.connectCount == 2u));
+    SSF_ASSERT((_utBk.csrTick[1] - _utBk.csrTick[0]) >= 50u);
+    _SSFAWSProvUTSmEnd();
+
+    /* Still down when the backoff ends: no try spent, the resend waits for READY */
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    _utBk.csrScript[0] = SSF_AWSPROV_UT_R_REJ429;
+    _utOpts.retryMinWait = 40u;
+    _utOpts.retryMaxWait = 40u;
+    _utOpts.mqtt.connectTimeout = SSF_AWSPROV_UT_LONG;   /* Down = CONNACK withheld */
+    SSFAWSProvStart(&_utWork, &_utOpts, _SSFAWSProvUTDoneFn, &_utDone, NULL, NULL);
+    while (_utBk.csrCount < 1u) _SSFAWSProvUTPump();
+    _utBk.connAckCode = 0xFFu;
+    _utBk.isPeerClosed = true;
+    _SSFAWSProvUTPumpFor(150u);
+    SSF_ASSERT((_utBk.csrCount == 1u) && (_utBk.connectCount == 2u));
+    SSF_ASSERT(_utWork.tries[0] == 1u);
+    _utBk.connAckCode = 0;
+    _SSFAWSProvUTBkInject(connAck, sizeof(connAck));
+    _SSFAWSProvUTPumpUntilStopped();
+    SSF_ASSERT((_utDone.count == 1u) && _utDone.isDone);
+    SSF_ASSERT((_utBk.csrCount == 2u) && (_utBk.connectCount == 2u));
+    _SSFAWSProvUTSmEnd();
+
+    /* The token ages out across a link drop after RegisterThing: same CSR again */
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    _utBk.regScript[0] = SSF_AWSPROV_UT_R_DROP;
+    _utOpts.tokenLifetime = 10u;                 /* reconnectMinWait is 20 */
+    _SSFAWSProvUTRun(SSF_AWSPROV_REASON_NONE);
+    SSF_ASSERT((_utBk.csrCount == 2u) && (_utBk.regCount == 2u));
+    _SSFAWSProvUTExpectCsrBytes();
+    _SSFAWSProvUTExpectDone();
+    _SSFAWSProvUTSmEnd();
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Requests that can't be built or sent.                                                         */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTSmBuild(void)
+{
+    static char longCn[SSF_AWSPROV_CONFIG_CSR_REQ_SIZE];
+    static const SSFAWSProvParam_t badParam[] = { { "k", "\xC3\xA9" } };
+    SSFX509GenName_t subj;
+
+    /* Invalid template name: done (BUILD) before Start returns, ssfmqttc never started */
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    _utOpts.templateName = "bad name";
+    SSFAWSProvStart(&_utWork, &_utOpts, _SSFAWSProvUTDoneFn, &_utDone, NULL, NULL);
+    SSF_ASSERT((_utDone.count == 1u) && (_utDone.reason == SSF_AWSPROV_REASON_BUILD));
+    SSF_ASSERT(SSFAWSProvIsStarted() == false);
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_STOPPED);
+    SSF_ASSERT(_SSFAWSProvUTIsZero(&_utWork, sizeof(_utWork)));
+    _SSFAWSProvUTPump();
+    SSF_ASSERT((_utBk.openCount == 0) && (_utDone.count == 1u));
+
+    /* The CSR request can't fit SSF_AWSPROV_CONFIG_CSR_REQ_SIZE */
+    memset(&_utDone, 0, sizeof(_utDone));
+    memset(longCn, 'a', sizeof(longCn) - 1u);
+    memset(&subj, 0, sizeof(subj));
+    subj.cn = longCn;
+    _utOpts.templateName = SSF_AWSPROV_UT_TMPL;
+    _utOpts.subjectOpt = &subj;
+    SSFAWSProvStart(&_utWork, &_utOpts, _SSFAWSProvUTDoneFn, &_utDone, NULL, NULL);
+    SSF_ASSERT((_utDone.count == 1u) && (_utDone.reason == SSF_AWSPROV_REASON_BUILD));
+    SSF_ASSERT(_SSFAWSProvUTIsZero(&_utWork, sizeof(_utWork)));
+
+    /* An invalid private key (zero scalar) */
+    memset(&_utDone, 0, sizeof(_utDone));
+    _utOpts.subjectOpt = &_utSubject;
+    _utOpts.privKey = (const uint8_t *)longCn + sizeof(longCn) - 1u - 32u;
+    memset(longCn, 0, sizeof(longCn));
+    SSFAWSProvStart(&_utWork, &_utOpts, _SSFAWSProvUTDoneFn, &_utDone, NULL, NULL);
+    SSF_ASSERT((_utDone.count == 1u) && (_utDone.reason == SSF_AWSPROV_REASON_BUILD));
+    _SSFAWSProvUTSmEnd();
+
+    /* A RegisterThing parameter that can't be sent: BUILD after the certificate */
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    _utOpts.paramsOpt = badParam;
+    _SSFAWSProvUTRun(SSF_AWSPROV_REASON_BUILD);
+    SSF_ASSERT((_utBk.csrCount == 1u) && (_utBk.regCount == 0));
+    _SSFAWSProvUTSmEnd();
+
+    /* txBlockSize too small for the CSR request: every try refused */
+    _SSFAWSProvUTSmBegin(256u);
+    _SSFAWSProvUTRun(SSF_AWSPROV_REASON_TX_REFUSED);
+    SSF_ASSERT(_utBk.csrCount == 0);
+    _SSFAWSProvUTSmEnd();
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Done callback that tries to start a new run from inside the callback.                        */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTDoneRestart(void *ctx, bool isDone, const SSFAWSProvResult_t *r)
+{
+    _SSFAWSProvUTDoneFn(ctx, isDone, r);
+    SSF_ASSERT_TEST(SSFAWSProvStart(&_utWork, &_utOpts, _SSFAWSProvUTDoneFn, &_utDone, NULL,
+                                    NULL));
+    SSF_ASSERT_TEST(SSFAWSProvStop());
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Late answers, stale responses across a step change, and the token-age loop bound.            */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTSmLate(void)
+{
+    static const uint8_t bad429[] = { SSF_AWSPROV_UT_R_REJ429, SSF_AWSPROV_UT_R_BADREJ };
+    static const uint8_t badDrop[] = { SSF_AWSPROV_UT_R_BAD, SSF_AWSPROV_UT_R_DROP };
+
+    /* An answer after its timeout, during the (long) backoff: taken */
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    _utBk.csrScript[0] = SSF_AWSPROV_UT_R_LATE;
+    _utBk.lateTicks = SSF_AWSPROV_UT_RESPONSE_TO + 50u;
+    _utOpts.retryMinWait = SSF_AWSPROV_UT_LONG;
+    _utOpts.retryMaxWait = SSF_AWSPROV_UT_LONG;
+    _SSFAWSProvUTRun(SSF_AWSPROV_REASON_NONE);
+    SSF_ASSERT((_utBk.csrCount == 1u) && (_utBk.regCount == 1u));
+    _SSFAWSProvUTSmEnd();
+
+    /* The RegisterThing answer arrives with the SUBACK after a drop: taken, no resend */
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    _utBk.regScript[0] = SSF_AWSPROV_UT_R_RESUB;
+    _SSFAWSProvUTRun(SSF_AWSPROV_REASON_NONE);
+    SSF_ASSERT((_utBk.csrCount == 1u) && (_utBk.regCount == 1u));
+    SSF_ASSERT(_utBk.subscribeCount == 2u);
+    _SSFAWSProvUTSmEnd();
+
+    /* Same, with the token aged out by then: the answer still completes the run */
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    _utBk.regScript[0] = SSF_AWSPROV_UT_R_RESUB;
+    _utOpts.tokenLifetime = 10u;
+    _SSFAWSProvUTRun(SSF_AWSPROV_REASON_NONE);
+    SSF_ASSERT(_utBk.regCount == 1u);
+    _SSFAWSProvUTSmEnd();
+
+    /* Token always too old by the reconnect: each lap costs both steps a try, so it ends */
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    memset(_utBk.regScript, SSF_AWSPROV_UT_R_DROP, sizeof(_utBk.regScript));
+    _utOpts.tokenLifetime = 10u;
+    _utOpts.maxAttempts = 2u;
+    _SSFAWSProvUTRun(SSF_AWSPROV_REASON_ATTEMPTS);
+    SSF_ASSERT((_utBk.csrCount == 2u) && (_utBk.regCount == 2u));
+    _SSFAWSProvUTSmEnd();
+
+    /* A response stored for RegisterThing whose event is still queued when an old token sends */
+    /* the run back to the CSR step: dropped with the step change (thread support 0 can queue */
+    /* READY ahead of it; ssfmqttc does not run there yet, so the state is set up directly) */
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    _utBk.regScript[0] = SSF_AWSPROV_UT_R_DROP;
+    _utOpts.tokenLifetime = 10u;
+    SSFAWSProvStart(&_utWork, &_utOpts, _SSFAWSProvUTDoneFn, &_utDone, NULL, NULL);
+    while (_utBk.regCount < 1u) _SSFAWSProvUTPump();
+    SSF_ASSERT((_utWork.step == 1u) && (_utWork.response == 0));
+    _utWork.response = 1u;                       /* ACCEPTED, for the old step */
+    _SSFAWSProvUTPumpUntilStopped();
+    SSF_ASSERT((_utDone.count == 1u) && _utDone.isDone);
+    SSF_ASSERT((_utBk.csrCount == 2u) && (_utBk.regCount == 2u));
+    _SSFAWSProvUTSmEnd();
+
+    /* A RESPONSE event with nothing stored (its response dropped that way): ignored */
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    _utBk.csrScript[0] = SSF_AWSPROV_UT_R_NONE;
+    _utOpts.responseTimeout = SSF_AWSPROV_UT_LONG;
+    SSFAWSProvStart(&_utWork, &_utOpts, _SSFAWSProvUTDoneFn, &_utDone, NULL, NULL);
+    while (_utBk.csrCount < 1u) _SSFAWSProvUTPump();
+    SSFSMPutEvent(SSF_SM_AWSPROV, SSF_SM_EVENT_AWSPROV_RESPONSE);
+    _SSFAWSProvUTPump();
+    SSF_ASSERT(SSFAWSProvIsStarted() && (_utDone.count == 0) && (_utBk.csrCount == 1u));
+    SSFAWSProvStop();
+    _SSFAWSProvUTPumpUntilStopped();
+    _SSFAWSProvUTSmEnd();
+
+    /* An unparseable reject keeps the last good one for the result */
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    memcpy(_utBk.csrScript, bad429, sizeof(bad429));
+    _utOpts.maxAttempts = 2u;
+    _SSFAWSProvUTRun(SSF_AWSPROV_REASON_BAD_RESPONSE);
+    SSF_ASSERT((_utDone.statusCode == 429u) && (strcmp(_utDone.errorCode, "Throttled") == 0));
+    SSF_ASSERT(strcmp(_utDone.errorMessage, "slow down") == 0);
+    _SSFAWSProvUTSmEnd();
+
+    /* Tries used up by a drop after a bad response: ATTEMPTS, not BAD_RESPONSE */
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    memcpy(_utBk.csrScript, badDrop, sizeof(badDrop));
+    _utOpts.maxAttempts = 2u;
+    _SSFAWSProvUTRun(SSF_AWSPROV_REASON_ATTEMPTS);
+    SSF_ASSERT(_utBk.csrCount == 2u);
+    _SSFAWSProvUTSmEnd();
+
+    /* No Start or Stop from inside the done callback */
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    _utOpts.templateName = "bad name";
+    SSFAWSProvStart(&_utWork, &_utOpts, _SSFAWSProvUTDoneRestart, &_utDone, NULL, NULL);
+    SSF_ASSERT((_utDone.count == 1u) && (_utDone.reason == SSF_AWSPROV_REASON_BUILD));
+    SSF_ASSERT(SSFAWSProvIsStarted() == false);
+    SSF_ASSERT(_SSFAWSProvUTIsZero(&_utWork, sizeof(_utWork)));
+    _utOpts.templateName = SSF_AWSPROV_UT_TMPL;
+    memset(&_utDone, 0, sizeof(_utDone));
+    SSFAWSProvStart(&_utWork, &_utOpts, _SSFAWSProvUTDoneRestart, &_utDone, NULL, NULL);
+    _SSFAWSProvUTPumpUntilStopped();
+    SSF_ASSERT((_utDone.count == 1u) && _utDone.isDone);
+
+    /* No DeInit while a STOP is still queued */
+    memset(&_utDone, 0, sizeof(_utDone));
+    _utBk.connAckCode = 0xFFu;
+    SSFAWSProvStart(&_utWork, &_utOpts, _SSFAWSProvUTDoneFn, &_utDone, NULL, NULL);
+    _SSFAWSProvUTPump();
+    SSFAWSProvStop();
+    SSF_ASSERT_TEST(SSFAWSProvDeInit());
+    _SSFAWSProvUTPumpUntilStopped();
+    SSF_ASSERT(_utDone.count == 0);
+    _SSFAWSProvUTSmEnd();
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Stops a run once cond holds, then checks the stop and that a new run completes.               */
+/* --------------------------------------------------------------------------------------------- */
+#define SSF_AWSPROV_UT_STOP_START    (0u)
+#define SSF_AWSPROV_UT_STOP_CONNECT  (1u)
+#define SSF_AWSPROV_UT_STOP_CSR      (2u)
+#define SSF_AWSPROV_UT_STOP_BACKOFF  (3u)
+#define SSF_AWSPROV_UT_STOP_REG      (4u)
+#define SSF_AWSPROV_UT_STOP_COUNT    (5u)
+
+static void _SSFAWSProvUTSmStopAt(uint32_t at)
+{
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    _utBk.csrScript[0] = (at == SSF_AWSPROV_UT_STOP_BACKOFF) ? SSF_AWSPROV_UT_R_REJ429 :
+                         SSF_AWSPROV_UT_R_NONE;
+    _utBk.regScript[0] = SSF_AWSPROV_UT_R_NONE;
+    if (at == SSF_AWSPROV_UT_STOP_CONNECT) _utBk.connAckCode = 0xFFu;
+    if (at == SSF_AWSPROV_UT_STOP_REG) _utBk.csrScript[0] = SSF_AWSPROV_UT_R_ACC;
+    _utOpts.retryMinWait = SSF_AWSPROV_UT_LONG;
+    _utOpts.retryMaxWait = SSF_AWSPROV_UT_LONG;
+    _utOpts.responseTimeout = SSF_AWSPROV_UT_LONG;
+    SSFAWSProvStart(&_utWork, &_utOpts, _SSFAWSProvUTDoneFn, &_utDone, _SSFAWSProvUTAppEvent,
+                    _utAppEvents);
+    switch (at)
+    {
+    case SSF_AWSPROV_UT_STOP_CONNECT:
+        while (_utBk.connectCount < 1u) _SSFAWSProvUTPump();
+        break;
+    case SSF_AWSPROV_UT_STOP_CSR:
+    case SSF_AWSPROV_UT_STOP_BACKOFF:
+        while (_utBk.csrCount < 1u) _SSFAWSProvUTPump();
+        _SSFAWSProvUTPump();
+        break;
+    case SSF_AWSPROV_UT_STOP_REG:
+        while (_utBk.regCount < 1u) _SSFAWSProvUTPump();
+        break;
+    default:
+        break;
+    }
+    SSF_ASSERT(SSFAWSProvIsStarted());
+    SSFAWSProvStop();
+    SSF_ASSERT(SSFAWSProvIsStarted() == false);
+    SSF_ASSERT(_SSFAWSProvUTIsZero(&_utWork, sizeof(_utWork)));
+    _SSFAWSProvUTPumpUntilStopped();
+    _SSFAWSProvUTPumpFor(50u);
+    SSF_ASSERT(_utDone.count == 0);
+    SSF_ASSERT(_utAppEvents[SSF_MQTTC_EVENT_STOPPED] == 1u);
+    SSF_ASSERT(_SSFAWSProvUTIsZero(&_utWork, sizeof(_utWork)));
+
+    /* A new run after the stop completes */
+    memset(_utBk.csrScript, 0, sizeof(_utBk.csrScript));
+    memset(_utBk.regScript, 0, sizeof(_utBk.regScript));
+    _utBk.connAckCode = 0;
+    _utBk.csrCount = 0;
+    _utBk.regCount = 0;
+    _utOpts.responseTimeout = SSF_AWSPROV_UT_RESPONSE_TO;
+    SSFAWSProvStart(&_utWork, &_utOpts, _SSFAWSProvUTDoneFn, &_utDone, NULL, NULL);
+    _SSFAWSProvUTPumpUntilStopped();
+    SSF_ASSERT(_utDone.count == 1u);
+    _SSFAWSProvUTExpectDone();
+    _SSFAWSProvUTSmEnd();
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Design by contract.                                                                           */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTSmDbc(void)
+{
+    static const SSFAWSProvParam_t badKey[] = { { NULL, "v" } };
+    static const SSFAWSProvParam_t badValue[] = { { "k", NULL } };
+    const SSFPortTick_t maxTicks = ((SSFPortTick_t)1u) << 62;
+    SSFAWSProvOpts_t o;
+    SSFMQTTCRxPublish_t rx;
+
+    _SSFAWSProvUTSmBegin(SSF_AWSPROV_UT_TX_BLOCK);
+    SSF_ASSERT_TEST(SSFAWSProvInit());
+    SSF_ASSERT_TEST(SSFAWSProvStop());
+    SSF_ASSERT_TEST(SSFAWSProvStart(NULL, &_utOpts, _SSFAWSProvUTDoneFn, NULL, NULL, NULL));
+    SSF_ASSERT_TEST(SSFAWSProvStart(&_utWork, NULL, _SSFAWSProvUTDoneFn, NULL, NULL, NULL));
+    SSF_ASSERT_TEST(SSFAWSProvStart(&_utWork, &_utOpts, NULL, NULL, NULL, NULL));
+    SSF_ASSERT_TEST(SSFAWSProvStart(&_utWork, &_utOpts, _SSFAWSProvUTDoneFn, NULL, NULL,
+                                    _utAppEvents));
+    SSF_ASSERT_TEST(SSFAWSProvStart((SSFAWSProvWork_t *)(void *)&_utOpts, &_utOpts,
+                                    _SSFAWSProvUTDoneFn, NULL, NULL, NULL));
+#define SSF_AWSPROV_UT_BAD_OPT(stmt) \
+    memcpy(&o, &_utOpts, sizeof(o)); stmt; \
+    SSF_ASSERT_TEST(SSFAWSProvStart(&_utWork, &o, _SSFAWSProvUTDoneFn, NULL, NULL, NULL))
+    SSF_AWSPROV_UT_BAD_OPT(o.mqtt.subsOpt = _utWork.topics.subs);
+    SSF_AWSPROV_UT_BAD_OPT(o.mqtt.subCount = 1u);
+    SSF_AWSPROV_UT_BAD_OPT(o.mqtt.willOpt = (const SSFMQTTCWill_t *)(void *)&o);
+    SSF_AWSPROV_UT_BAD_OPT(o.templateName = NULL);
+    SSF_AWSPROV_UT_BAD_OPT(o.privKey = NULL);
+    SSF_AWSPROV_UT_BAD_OPT(o.privKeyLen = 0);
+    SSF_AWSPROV_UT_BAD_OPT(o.paramsOpt = NULL);
+    SSF_AWSPROV_UT_BAD_OPT(o.responseTimeout = 0);
+    SSF_AWSPROV_UT_BAD_OPT(o.retryMinWait = 0);
+    SSF_AWSPROV_UT_BAD_OPT(o.retryMaxWait = o.retryMinWait - 1u);
+    SSF_AWSPROV_UT_BAD_OPT(o.tokenLifetime = 0);
+    SSF_AWSPROV_UT_BAD_OPT(o.maxAttempts = 0);
+    SSF_AWSPROV_UT_BAD_OPT(o.paramsOpt = badKey);
+    SSF_AWSPROV_UT_BAD_OPT(o.paramsOpt = badValue);
+    SSF_AWSPROV_UT_BAD_OPT(o.responseTimeout = maxTicks + 1u);
+    SSF_AWSPROV_UT_BAD_OPT(o.retryMaxWait = maxTicks + 1u);
+    SSF_AWSPROV_UT_BAD_OPT(o.deadline = maxTicks + 1u);
+    SSF_AWSPROV_UT_BAD_OPT(o.tokenLifetime = maxTicks + 1u);
+#undef SSF_AWSPROV_UT_BAD_OPT
+    /* The corner cases that are allowed */
+    memcpy(&o, &_utOpts, sizeof(o));
+    o.paramsOpt = NULL;
+    o.paramCount = 0;
+    o.retryMaxWait = o.retryMinWait;
+    o.deadline = maxTicks;
+    o.tokenLifetime = maxTicks;
+    SSFAWSProvStart(&_utWork, &o, _SSFAWSProvUTDoneFn, &_utDone, NULL, NULL);
+    /* Started: no second Start, no DeInit */
+    SSF_ASSERT_TEST(SSFAWSProvStart(&_utWork, &_utOpts, _SSFAWSProvUTDoneFn, NULL, NULL, NULL));
+    SSF_ASSERT_TEST(SSFAWSProvDeInit());
+    memset(&rx, 0, sizeof(rx));
+    SSF_ASSERT_TEST((void)SSFAWSProvRxPublish(NULL, NULL));
+    SSF_ASSERT_TEST((void)SSFAWSProvRxPublish(NULL, &rx));
+    rx.topic = "a";
+    rx.payloadLen = 1u;
+    SSF_ASSERT_TEST((void)SSFAWSProvRxPublish(NULL, &rx));
+    SSF_ASSERT_TEST(SSFAWSProvEvent(NULL, SSF_MQTTC_EVENT_MAX, SSF_MQTTC_REASON_NONE));
+    SSF_ASSERT_TEST(SSFAWSProvEvent(NULL, SSF_MQTTC_EVENT_READY, SSF_MQTTC_REASON_MAX));
+    SSF_ASSERT_TEST(SSFAWSProvEvent(NULL, SSF_MQTTC_EVENT_MIN, SSF_MQTTC_REASON_NONE));
+    SSF_ASSERT_TEST(SSFAWSProvEvent(NULL, SSF_MQTTC_EVENT_READY, SSF_MQTTC_REASON_MIN));
+    _SSFAWSProvUTPumpUntilStopped();
+    SSF_ASSERT((_utDone.count == 1u) && _utDone.isDone);
+    /* ssfmqttc not STOPPED (Start only queues its event, so let it run) */
+    SSFMQTTCStart(&_utOpts.mqtt);
+    _SSFAWSProvUTPump();
+    SSF_ASSERT(SSFMQTTCGetState() != SSF_MQTTC_STATE_STOPPED);
+    SSF_ASSERT_TEST(SSFAWSProvStart(&_utWork, &_utOpts, _SSFAWSProvUTDoneFn, NULL, NULL, NULL));
+    SSFMQTTCStop();
+    _SSFAWSProvUTPumpUntilStopped();
+    _SSFAWSProvUTSmEnd();
+    /* Not initialized */
+    SSF_ASSERT_TEST(SSFAWSProvDeInit());
+    SSF_ASSERT_TEST((void)SSFAWSProvIsStarted());
+    SSF_ASSERT_TEST(SSFAWSProvStop());
+    SSF_ASSERT_TEST((void)SSFAWSProvRxPublish(NULL, &rx));
+    SSF_ASSERT_TEST(SSFAWSProvEvent(NULL, SSF_MQTTC_EVENT_READY, SSF_MQTTC_REASON_NONE));
+    SSF_ASSERT_TEST(SSFAWSProvStart(&_utWork, &_utOpts, _SSFAWSProvUTDoneFn, NULL, NULL, NULL));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Checks the provisioning state machine.                                                        */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvUTStateMachine(void)
+{
+    uint32_t i;
+
+    /* The good accepted response and the expected RegisterThing request */
+    _utCsrAccLen = _SSFAWSProvUTAccGood(_utAWSProvP256CertPem);
+    SSF_ASSERT(_utCsrAccLen < sizeof(_utCsrAcc));
+    memcpy(_utCsrAcc, _utJson, _utCsrAccLen + 1u);
+    SSF_ASSERT(SSFAWSProvBuildRegisterRequest(_utAWSProvToken, strlen(_utAWSProvToken), _utParams,
+                                              1u, _utRegExpect, sizeof(_utRegExpect),
+                                              &_utRegExpectLen));
+
+    _SSFAWSProvUTSmHappy();
+    _SSFAWSProvUTSmSteps();
+    _SSFAWSProvUTSmBackoff();
+    _SSFAWSProvUTSmBackoffMath();
+    _SSFAWSProvUTSmLink();
+    _SSFAWSProvUTSmBuild();
+    _SSFAWSProvUTSmLate();
+    for (i = 0; i < SSF_AWSPROV_UT_STOP_COUNT; i++) _SSFAWSProvUTSmStopAt(i);
+    _SSFAWSProvUTSmDbc();
+}
+#endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN, SSF_EC_CONFIG_ENABLE_P256, SSF_AWSPROV_UT_ACC_FULL */
+
 /* --------------------------------------------------------------------------------------------- */
 /* Runs the ssfawsprov unit test.                                                                */
 /* --------------------------------------------------------------------------------------------- */
@@ -1728,6 +3128,10 @@ void SSFAWSProvUnitTest(void)
     _SSFAWSProvUTRetryable();
     _SSFAWSProvUTRegRequest();
     _SSFAWSProvUTRegAccepted();
+#if (SSF_ECDSA_CONFIG_ENABLE_SIGN == 1) && (SSF_EC_CONFIG_ENABLE_P256 == 1) && \
+    (SSF_AWSPROV_UT_ACC_FULL == 1)
+    _SSFAWSProvUTStateMachine();
+#endif
 }
 
 #endif /* SSF_CONFIG_AWSPROV_UNIT_TEST */

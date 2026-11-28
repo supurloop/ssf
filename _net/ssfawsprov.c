@@ -35,6 +35,7 @@
 #include "ssfsha2.h"
 #include "ssfpem.h"
 #include "ssfjson.h"
+#include "ssfsm.h"
 #include "ssfawsprov.h"
 
 /* --------------------------------------------------------------------------------------------- */
@@ -1013,5 +1014,716 @@ done:
         outStr[0] = 0;
     }
     return ok;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Provisioning state machine                                                                    */
+/* --------------------------------------------------------------------------------------------- */
+#define SSF_AWSPROV_INIT_MAGIC (0x41575350ul)
+
+/* Largest timeout option: ssfsm adds it to the current tick without an overflow check */
+#define SSF_AWSPROV_MAX_TICKS (((SSFPortTick_t)1u) << 62)
+
+/* work.step */
+#define SSF_AWSPROV_STEP_CSR (0u)
+#define SSF_AWSPROV_STEP_REG (1u)
+
+/* work.response: what the rx callback stored for the state machine */
+#define SSF_AWSPROV_RSP_NONE     (0u)
+#define SSF_AWSPROV_RSP_ACCEPTED (1u)
+#define SSF_AWSPROV_RSP_REJECTED (2u)
+#define SSF_AWSPROV_RSP_BAD      (3u)
+
+/* work.lastFail: why the last try failed */
+#define SSF_AWSPROV_FAIL_NONE     (0u)
+#define SSF_AWSPROV_FAIL_TIMEOUT  (1u)
+#define SSF_AWSPROV_FAIL_REJECTED (2u)
+#define SSF_AWSPROV_FAIL_CONNECT  (3u)
+#define SSF_AWSPROV_FAIL_BAD      (4u)
+#define SSF_AWSPROV_FAIL_TX       (5u)
+
+typedef struct
+{
+    SSFAWSProvWork_t *work;
+    SSFAWSProvDoneFn_t doneFn;
+    void *doneCtx;
+    SSFMQTTCEventFn_t appEventFn;
+    void *appEventCtx;
+    SSFSMHandler_t state;         /* Current state; ssfsm has no self transition, see Go */
+    uint32_t magic;
+    bool isStarted;
+} SSFAWSProv_t;
+
+static SSFAWSProv_t _awsprov;
+
+static void _SSFAWSProvStateIdle(SSFSMEventId_t eid, const SSFSMData_t *data,
+                                 SSFSMDataLen_t dataLen, SSFVoidFn_t *superHandler);
+static void _SSFAWSProvSuperActive(SSFSMEventId_t eid, const SSFSMData_t *data,
+                                   SSFSMDataLen_t dataLen, SSFVoidFn_t *superHandler);
+static void _SSFAWSProvStateWaitReady(SSFSMEventId_t eid, const SSFSMData_t *data,
+                                      SSFSMDataLen_t dataLen, SSFVoidFn_t *superHandler);
+static void _SSFAWSProvStateSent(SSFSMEventId_t eid, const SSFSMData_t *data,
+                                 SSFSMDataLen_t dataLen, SSFVoidFn_t *superHandler);
+static void _SSFAWSProvStateBackoff(SSFSMEventId_t eid, const SSFSMData_t *data,
+                                    SSFSMDataLen_t dataLen, SSFVoidFn_t *superHandler);
+
+/* --------------------------------------------------------------------------------------------- */
+/* Calls the done callback with the outcome, then wipes the work set and stops ssfmqttc.         */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvFinish(SSFAWSProvReason_t reason)
+{
+    SSFAWSProvWork_t *w = _awsprov.work;
+    SSFAWSProvResult_t r;
+
+    SSF_REQUIRE((reason > SSF_AWSPROV_REASON_MIN) && (reason < SSF_AWSPROV_REASON_MAX));
+    SSF_REQUIRE(w != NULL);
+    SSF_REQUIRE(_awsprov.isStarted);
+
+    memset(&r, 0, sizeof(r));
+    r.reason = reason;
+    r.statusCode = w->statusCode;
+    r.errorCode = w->errorCode;
+    r.errorMessage = w->errorMessage;
+    /* Did provisioning succeed? */
+    if (reason == SSF_AWSPROV_REASON_NONE)
+    {
+        /* Yes, hand over the credentials */
+        r.certOpt = &w->acc;
+        r.thingNameOpt = w->thingName;
+        r.deviceConfigOpt = w->deviceConfig;
+        r.deviceConfigLen = w->deviceConfigLen;
+    }
+    _awsprov.isStarted = false;
+    _awsprov.doneFn(_awsprov.doneCtx, (reason == SSF_AWSPROV_REASON_NONE), &r);
+    memset(&r, 0, sizeof(r));
+    memset(w, 0, sizeof(*w));
+    _awsprov.work = NULL;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Ends a started run from a state handler: done callback, wipe, ssfmqttc stop, IDLE.            */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvEnd(SSFAWSProvReason_t reason)
+{
+    _SSFAWSProvFinish(reason);
+    SSFMQTTCStop();
+    SSFSMTran(_SSFAWSProvStateIdle);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns the reason a run ends with when tries are used up after lastFail.                     */
+/* --------------------------------------------------------------------------------------------- */
+static SSFAWSProvReason_t _SSFAWSProvTriesReason(uint8_t lastFail)
+{
+    if (lastFail == SSF_AWSPROV_FAIL_BAD) return SSF_AWSPROV_REASON_BAD_RESPONSE;
+    if (lastFail == SSF_AWSPROV_FAIL_TX) return SSF_AWSPROV_REASON_TX_REFUSED;
+    return SSF_AWSPROV_REASON_ATTEMPTS;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the step has used up maxAttempts tries, else false.                           */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFAWSProvIsOutOfTries(const SSFAWSProvWork_t *w)
+{
+    SSF_REQUIRE(w != NULL);
+    return ((w->opts.maxAttempts > 0u) && (w->tries[w->step] >= w->opts.maxAttempts));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Moves to step with a fresh backoff. Each step's try count runs for the whole run, so going    */
+/* back to the CSR step on an old token can't reset them: every lap costs both steps a try.      */
+/* A stored response belongs to the old step, so it is dropped.                                  */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvSetStep(SSFAWSProvWork_t *w, uint8_t step)
+{
+    SSF_REQUIRE(w != NULL);
+    SSF_REQUIRE((step == SSF_AWSPROV_STEP_CSR) || (step == SSF_AWSPROV_STEP_REG));
+
+    w->step = step;
+    w->wait = 0;
+    w->lastFail = SSF_AWSPROV_FAIL_NONE;
+    w->response = SSF_AWSPROV_RSP_NONE;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns the next backoff: doubling from retryMinWait to retryMaxWait, jittered to [w/2, w].   */
+/* --------------------------------------------------------------------------------------------- */
+static SSFPortTick_t _SSFAWSProvNextBackoff(SSFAWSProvWork_t *w)
+{
+    SSFPortTick_t half;
+    uint32_t x;
+
+    SSF_REQUIRE(w != NULL);
+
+    /* Double without overflow: past half the cap, doubling would pass it */
+    if (w->wait == 0u) w->wait = w->opts.retryMinWait;
+    else if (w->wait > (w->opts.retryMaxWait >> 1)) w->wait = w->opts.retryMaxWait;
+    else w->wait <<= 1;
+
+    /* xorshift32; spreads a fleet's retries, not a secret */
+    x = w->jitter;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    w->jitter = x;
+    half = w->wait >> 1;
+    return (w->wait - half) + (((SSFPortTick_t)x) % (half + 1u));
+}
+
+#if SSF_CONFIG_AWSPROV_UNIT_TEST == 1
+/* --------------------------------------------------------------------------------------------- */
+/* Unit test access to the backoff sequence.                                                     */
+/* --------------------------------------------------------------------------------------------- */
+SSFPortTick_t _SSFAWSProvUTNextBackoff(SSFAWSProvWork_t *w)
+{
+    return _SSFAWSProvNextBackoff(w);
+}
+#endif /* SSF_CONFIG_AWSPROV_UNIT_TEST */
+
+/* --------------------------------------------------------------------------------------------- */
+/* Starts the timer that SENT or BACKOFF runs on, from that state's own handler.                 */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvArmTimer(void)
+{
+    SSFAWSProvWork_t *w = _awsprov.work;
+
+    SSF_REQUIRE(w != NULL);
+
+    if (_awsprov.state == _SSFAWSProvStateSent)
+    { SSFSMStartTimer(SSF_SM_EVENT_AWSPROV_TO_RESPONSE, w->opts.responseTimeout); }
+    else if (_awsprov.state == _SSFAWSProvStateBackoff)
+    { SSFSMStartTimer(SSF_SM_EVENT_AWSPROV_TO_BACKOFF, _SSFAWSProvNextBackoff(w)); }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Moves to next; into the current state it re-arms the state's timer in place instead.          */
+/* Re-arming happens only from substate handlers, so the timer still belongs to the substate;    */
+/* the super calls it only for WAIT_READY, which has no timer.                                   */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvGo(SSFSMHandler_t next)
+{
+    SSF_REQUIRE(next != NULL);
+
+    if (next != _awsprov.state) { SSFSMTran(next); return; }
+    _SSFAWSProvArmTimer();
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Handles a failed try: ends the run if out of tries, else backs off.                           */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvRetry(uint8_t fail)
+{
+    SSFAWSProvWork_t *w = _awsprov.work;
+
+    SSF_REQUIRE(w != NULL);
+
+    w->lastFail = fail;
+    if (_SSFAWSProvIsOutOfTries(w)) { _SSFAWSProvEnd(_SSFAWSProvTriesReason(fail)); return; }
+    _SSFAWSProvGo(_SSFAWSProvStateBackoff);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Sends the step's stored request and enters SENT, or handles why it can't be sent.             */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvTry(void)
+{
+    SSFAWSProvWork_t *w = _awsprov.work;
+    bool isQueued;
+
+    SSF_REQUIRE(w != NULL);
+
+    /* Is the link down? */
+    if (SSFMQTTCIsReady() == false)
+    {
+        /* Yes, the next READY resends */
+        _SSFAWSProvGo(_SSFAWSProvStateWaitReady);
+        return;
+    }
+    /* Has the token aged out before its RegisterThing request? */
+    if ((w->step == SSF_AWSPROV_STEP_REG) &&
+        ((SSFPortGetTick64() - w->tokenTick) >= w->opts.tokenLifetime))
+    {
+        /* Yes, AWS deletes the unactivated certificate; ask for a new one with the same CSR */
+        memset(&w->acc, 0, sizeof(w->acc));
+        memset(w->regReq, 0, sizeof(w->regReq));
+        w->regReqLen = 0;
+        _SSFAWSProvSetStep(w, SSF_AWSPROV_STEP_CSR);
+    }
+    if (_SSFAWSProvIsOutOfTries(w)) { _SSFAWSProvEnd(_SSFAWSProvTriesReason(w->lastFail)); return; }
+    w->tries[w->step]++;
+    /* Send the stored bytes; a retry never signs again */
+    if (w->step == SSF_AWSPROV_STEP_CSR)
+    {
+        isQueued = SSFMQTTCTxPublish(SSF_AWSPROV_TOPIC_CSR, (const uint8_t *)w->csrReq,
+                                     w->csrReqLen, SSF_MQTTC_QOS_1, false, NULL, NULL);
+    }
+    else
+    {
+        isQueued = SSFMQTTCTxPublish(w->topics.provReq, (const uint8_t *)w->regReq,
+                                     w->regReqLen, SSF_MQTTC_QOS_1, false, NULL, NULL);
+    }
+    /* Was the request queued? */
+    if (isQueued) { _SSFAWSProvGo(_SSFAWSProvStateSent); return; }
+    /* No, too large for txBlockSize or the pool is empty: a failed try */
+    _SSFAWSProvRetry(SSF_AWSPROV_FAIL_TX);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Acts on the response the rx callback stored for the current step.                             */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvOnResponse(void)
+{
+    SSFAWSProvWork_t *w = _awsprov.work;
+    uint8_t rsp;
+
+    SSF_REQUIRE(w != NULL);
+
+    rsp = w->response;
+    w->response = SSF_AWSPROV_RSP_NONE;
+    /* Was it dropped by a step change after its event was queued? */
+    if (rsp == SSF_AWSPROV_RSP_NONE) return;
+    /* No, accepted? */
+    if (rsp == SSF_AWSPROV_RSP_ACCEPTED)
+    {
+        /* Yes, was it the certificate? */
+        if (w->step == SSF_AWSPROV_STEP_CSR)
+        {
+            /* Yes, build the RegisterThing request once and send it */
+            w->tokenTick = SSFPortGetTick64();
+            if (SSFAWSProvBuildRegisterRequest(w->acc.token, w->acc.tokenLen, w->opts.paramsOpt,
+                                               w->opts.paramCount, w->regReq,
+                                               sizeof(w->regReq), &w->regReqLen) == false)
+            { _SSFAWSProvEnd(SSF_AWSPROV_REASON_BUILD); return; }
+            _SSFAWSProvSetStep(w, SSF_AWSPROV_STEP_REG);
+            _SSFAWSProvTry();
+            return;
+        }
+        /* No, the thing is registered */
+        _SSFAWSProvEnd(SSF_AWSPROV_REASON_NONE);
+    }
+    /* No, rejected? */
+    else if (rsp == SSF_AWSPROV_RSP_REJECTED)
+    {
+        /* Yes, fatal or a failed try */
+        if (SSFAWSProvIsRetryable(w->statusCode) == false)
+        { _SSFAWSProvEnd(SSF_AWSPROV_REASON_REJECTED); }
+        else _SSFAWSProvRetry(SSF_AWSPROV_FAIL_REJECTED);
+    }
+    else
+    {
+        /* No, unparseable: a failed try. A RESPONSE event always has a response stored. */
+        SSF_ASSERT(rsp == SSF_AWSPROV_RSP_BAD);
+        _SSFAWSProvRetry(SSF_AWSPROV_FAIL_BAD);
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Handles state machine events in IDLE.                                                         */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvStateIdle(SSFSMEventId_t eid, const SSFSMData_t *data,
+                                 SSFSMDataLen_t dataLen, SSFVoidFn_t *superHandler)
+{
+    SSF_REQUIRE((eid > SSF_SM_EVENT_MIN) && (eid < SSF_SM_EVENT_MAX));
+    SSF_REQUIRE((data != NULL) || (dataLen == 0));
+    SSF_REQUIRE(superHandler != NULL);
+
+    if (eid == SSF_SM_EVENT_ENTRY) _awsprov.state = _SSFAWSProvStateIdle;
+    /* A run starting; if it was stopped before this START, its STOP follows and returns here */
+    if (eid == SSF_SM_EVENT_AWSPROV_START) SSFSMTran(_SSFAWSProvStateWaitReady);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Handles state machine events common to every state of a run (ACTIVE).                         */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvSuperActive(SSFSMEventId_t eid, const SSFSMData_t *data,
+                                   SSFSMDataLen_t dataLen, SSFVoidFn_t *superHandler)
+{
+    SSFAWSProvWork_t *w = _awsprov.work;
+
+    SSF_REQUIRE((eid > SSF_SM_EVENT_MIN) && (eid < SSF_SM_EVENT_MAX));
+    SSF_REQUIRE((data != NULL) || (dataLen == 0));
+    SSF_REQUIRE(superHandler != NULL);
+
+    /* Was the run stopped by SSFAWSProvStop()? */
+    if (_awsprov.isStarted == false)
+    {
+        /* Yes, the work set is gone; only leave */
+        if (eid == SSF_SM_EVENT_AWSPROV_STOP) SSFSMTran(_SSFAWSProvStateIdle);
+        return;
+    }
+    SSF_ASSERT(w != NULL);
+
+    switch (eid)
+    {
+    case SSF_SM_EVENT_ENTRY:
+        /* The deadline counts from Start, so a link that never comes up also ends the run */
+        if (w->opts.deadline > 0u)
+        { SSFSMStartTimer(SSF_SM_EVENT_AWSPROV_TO_DEADLINE, w->opts.deadline); }
+        break;
+    case SSF_SM_EVENT_AWSPROV_TO_DEADLINE:
+        _SSFAWSProvEnd(SSF_AWSPROV_REASON_DEADLINE);
+        break;
+    case SSF_SM_EVENT_AWSPROV_SUB_REFUSED:
+        _SSFAWSProvEnd(SSF_AWSPROV_REASON_SUBSCRIBE_REFUSED);
+        break;
+    case SSF_SM_EVENT_AWSPROV_CONNECT_REFUSED:
+        _SSFAWSProvEnd(SSF_AWSPROV_REASON_CONNECT_REFUSED);
+        break;
+    case SSF_SM_EVENT_AWSPROV_CONNECT_FAILED:
+        /* A failed connect is a try, so a link that never comes up still ends the run */
+        w->tries[w->step]++;
+        w->lastFail = SSF_AWSPROV_FAIL_CONNECT;
+        if (_SSFAWSProvIsOutOfTries(w)) _SSFAWSProvEnd(SSF_AWSPROV_REASON_ATTEMPTS);
+        break;
+    case SSF_SM_EVENT_AWSPROV_LINK_LOST:
+        /* The response, if any, is lost with the clean session; resend after READY. BACKOFF */
+        /* keeps its wait; in WAIT_READY this is a no-op (no timer to re-arm). */
+        w->lastFail = SSF_AWSPROV_FAIL_CONNECT;
+        _SSFAWSProvGo(_SSFAWSProvStateWaitReady);
+        break;
+    default:
+        break;
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Handles state machine events in WAIT_READY, substate of ACTIVE.                               */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvStateWaitReady(SSFSMEventId_t eid, const SSFSMData_t *data,
+                                      SSFSMDataLen_t dataLen, SSFVoidFn_t *superHandler)
+{
+    SSF_REQUIRE((eid > SSF_SM_EVENT_MIN) && (eid < SSF_SM_EVENT_MAX));
+    SSF_REQUIRE((data != NULL) || (dataLen == 0));
+    SSF_REQUIRE(superHandler != NULL);
+
+    if (eid == SSF_SM_EVENT_ENTRY) { _awsprov.state = _SSFAWSProvStateWaitReady; return; }
+    if (_awsprov.isStarted)
+    {
+        /* Link up with every filter granted: send (or resend) the step's request */
+        if (eid == SSF_SM_EVENT_AWSPROV_READY) { _SSFAWSProvTry(); return; }
+        /* Any answer for the step counts, also a late one */
+        if (eid == SSF_SM_EVENT_AWSPROV_RESPONSE) { _SSFAWSProvOnResponse(); return; }
+    }
+    SSF_SM_SUPER(_SSFAWSProvSuperActive);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Handles state machine events in SENT, substate of ACTIVE.                                     */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvStateSent(SSFSMEventId_t eid, const SSFSMData_t *data,
+                                 SSFSMDataLen_t dataLen, SSFVoidFn_t *superHandler)
+{
+    SSF_REQUIRE((eid > SSF_SM_EVENT_MIN) && (eid < SSF_SM_EVENT_MAX));
+    SSF_REQUIRE((data != NULL) || (dataLen == 0));
+    SSF_REQUIRE(superHandler != NULL);
+
+    if (eid == SSF_SM_EVENT_ENTRY)
+    {
+        _awsprov.state = _SSFAWSProvStateSent;
+        _SSFAWSProvArmTimer();
+        return;
+    }
+    if (_awsprov.isStarted)
+    {
+        /* No answer in time: a failed try */
+        if (eid == SSF_SM_EVENT_AWSPROV_TO_RESPONSE)
+        { _SSFAWSProvRetry(SSF_AWSPROV_FAIL_TIMEOUT); return; }
+        if (eid == SSF_SM_EVENT_AWSPROV_RESPONSE) { _SSFAWSProvOnResponse(); return; }
+    }
+    SSF_SM_SUPER(_SSFAWSProvSuperActive);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Handles state machine events in BACKOFF, substate of ACTIVE.                                  */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAWSProvStateBackoff(SSFSMEventId_t eid, const SSFSMData_t *data,
+                                    SSFSMDataLen_t dataLen, SSFVoidFn_t *superHandler)
+{
+    SSF_REQUIRE((eid > SSF_SM_EVENT_MIN) && (eid < SSF_SM_EVENT_MAX));
+    SSF_REQUIRE((data != NULL) || (dataLen == 0));
+    SSF_REQUIRE(superHandler != NULL);
+
+    if (eid == SSF_SM_EVENT_ENTRY)
+    {
+        _awsprov.state = _SSFAWSProvStateBackoff;
+        _SSFAWSProvArmTimer();
+        return;
+    }
+    if (_awsprov.isStarted)
+    {
+        /* Backoff over: try again (WAIT_READY if the link is down) */
+        if (eid == SSF_SM_EVENT_AWSPROV_TO_BACKOFF) { _SSFAWSProvTry(); return; }
+        if (eid == SSF_SM_EVENT_AWSPROV_RESPONSE) { _SSFAWSProvOnResponse(); return; }
+        /* A link loss doesn't cut the backoff short */
+        if (eid == SSF_SM_EVENT_AWSPROV_LINK_LOST) return;
+    }
+    SSF_SM_SUPER(_SSFAWSProvSuperActive);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Initializes the provisioning state machine in IDLE; SSFSMInit() must have been called.        */
+/* --------------------------------------------------------------------------------------------- */
+void SSFAWSProvInit(void)
+{
+    SSF_REQUIRE(_awsprov.magic != SSF_AWSPROV_INIT_MAGIC);
+
+    memset(&_awsprov, 0, sizeof(_awsprov));
+    SSFSMInitHandler(SSF_SM_AWSPROV, _SSFAWSProvStateIdle);
+    _awsprov.magic = SSF_AWSPROV_INIT_MAGIC;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Deinitializes the provisioning state machine; not while a run is started.                     */
+/* --------------------------------------------------------------------------------------------- */
+void SSFAWSProvDeInit(void)
+{
+    SSF_REQUIRE(_awsprov.magic == SSF_AWSPROV_INIT_MAGIC);
+    SSF_REQUIRE(_awsprov.isStarted == false);
+    SSF_REQUIRE(_awsprov.state == _SSFAWSProvStateIdle);   /* A queued STOP has been handled */
+
+    SSFSMDeInitHandler(SSF_SM_AWSPROV);
+    memset(&_awsprov, 0, sizeof(_awsprov));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the opts follow the Start rules, else false.                                  */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFAWSProvOptsAreValid(const SSFAWSProvOpts_t *opts)
+{
+    size_t i;
+
+    SSF_REQUIRE(opts != NULL);
+
+    for (i = 0; (opts->paramsOpt != NULL) && (i < opts->paramCount); i++)
+    {
+        if ((opts->paramsOpt[i].keyStr == NULL) || (opts->paramsOpt[i].valueStr == NULL))
+        { return false; }
+    }
+    return ((opts->mqtt.subsOpt == NULL) && (opts->mqtt.subCount == 0u) &&
+            (opts->mqtt.willOpt == NULL) && (opts->templateName != NULL) &&
+            (opts->privKey != NULL) && (opts->privKeyLen > 0u) &&
+            ((opts->paramsOpt != NULL) || (opts->paramCount == 0u)) &&
+            (opts->responseTimeout > 0u) && (opts->retryMinWait > 0u) &&
+            (opts->retryMaxWait >= opts->retryMinWait) && (opts->tokenLifetime > 0u) &&
+            (opts->responseTimeout <= SSF_AWSPROV_MAX_TICKS) &&
+            (opts->retryMaxWait <= SSF_AWSPROV_MAX_TICKS) &&
+            (opts->deadline <= SSF_AWSPROV_MAX_TICKS) &&
+            (opts->tokenLifetime <= SSF_AWSPROV_MAX_TICKS) &&
+            ((opts->maxAttempts > 0u) || (opts->deadline > 0u)));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the topics, public key, CSR request and jitter seed are in work, else false.  */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFAWSProvPrepare(SSFAWSProvWork_t *w)
+{
+    size_t i;
+    bool ok;
+
+    SSF_REQUIRE(w != NULL);
+
+    if (SSFAWSProvTopicsInit(&w->topics, w->opts.templateName,
+                             SSF_AWSPROV_TEMPLATE_NAME_SIZE) == false) return false;
+    if (SSFECDSAPubKeyFromPrivKey(w->opts.curve, w->opts.privKey, w->opts.privKeyLen, w->pub,
+                                  sizeof(w->pub), &w->pubLen) == false) return false;
+    /* The rx copy is idle until a response arrives, so it is the CSR scratch; the builder */
+    /* refuses a CSR that doesn't fit it or csrReq */
+    ok = SSFAWSProvBuildCsrRequest(w->opts.curve, w->opts.privKey, w->opts.privKeyLen,
+                                   w->opts.subjectOpt, (uint8_t *)w->rx, sizeof(w->rx), w->csrReq,
+                                   sizeof(w->csrReq), &w->csrReqLen);
+    memset(w->rx, 0, sizeof(w->rx));
+    if (ok == false) return false;
+
+    /* Jitter seed from the public key, unique per device; never zero */
+    w->jitter = 0x9E3779B9ul;
+    for (i = 0; i < w->pubLen; i++)
+    {
+        w->jitter = (w->jitter ^ w->pub[i]) * 16777619ul;
+    }
+    if (w->jitter == 0u) w->jitter = 1u;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Starts a provisioning run on the STOPPED ssfmqttc client.                                     */
+/* --------------------------------------------------------------------------------------------- */
+void SSFAWSProvStart(SSFAWSProvWork_t *work, const SSFAWSProvOpts_t *opts,
+                     SSFAWSProvDoneFn_t doneFn, void *doneCtxOpt,
+                     SSFMQTTCEventFn_t appEventFnOpt, void *appEventCtxOpt)
+{
+    SSF_REQUIRE(_awsprov.magic == SSF_AWSPROV_INIT_MAGIC);
+    SSF_REQUIRE(_awsprov.isStarted == false);
+    SSF_REQUIRE(_awsprov.work == NULL);                    /* Not from inside doneFn */
+    SSF_REQUIRE(work != NULL);
+    SSF_REQUIRE(opts != NULL);
+    SSF_REQUIRE(doneFn != NULL);
+    SSF_REQUIRE((appEventFnOpt != NULL) || (appEventCtxOpt == NULL));
+    SSF_REQUIRE(_SSFAWSProvIsDisjoint(work, sizeof(*work), opts, sizeof(*opts)));
+    SSF_REQUIRE(_SSFAWSProvOptsAreValid(opts));
+    SSF_REQUIRE(SSFMQTTCGetState() == SSF_MQTTC_STATE_STOPPED);
+
+    memset(work, 0, sizeof(*work));
+    memcpy(&work->opts, opts, sizeof(work->opts));
+    _awsprov.work = work;
+    _awsprov.doneFn = doneFn;
+    _awsprov.doneCtx = doneCtxOpt;
+    _awsprov.appEventFn = appEventFnOpt;
+    _awsprov.appEventCtx = appEventCtxOpt;
+    _awsprov.isStarted = true;
+    _SSFAWSProvSetStep(work, SSF_AWSPROV_STEP_CSR);
+    /* Can every request be built? */
+    if (_SSFAWSProvPrepare(work) == false)
+    {
+        /* No, end now; ssfmqttc was never started */
+        _SSFAWSProvFinish(SSF_AWSPROV_REASON_BUILD);
+        return;
+    }
+    work->opts.mqtt.subsOpt = work->topics.subs;
+    work->opts.mqtt.subCount = SSF_AWSPROV_SUB_COUNT;
+    work->opts.privKey = NULL;
+    work->opts.privKeyLen = 0;
+    SSFSMPutEvent(SSF_SM_AWSPROV, SSF_SM_EVENT_AWSPROV_START);
+    SSFMQTTCStart(&work->opts.mqtt);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Stops a started run without a done callback; the work set is wiped before return.             */
+/* --------------------------------------------------------------------------------------------- */
+void SSFAWSProvStop(void)
+{
+    SSF_REQUIRE(_awsprov.magic == SSF_AWSPROV_INIT_MAGIC);
+    SSF_REQUIRE(_awsprov.isStarted);
+    SSF_REQUIRE(_awsprov.work != NULL);
+
+    _awsprov.isStarted = false;
+    memset(_awsprov.work, 0, sizeof(*_awsprov.work));
+    _awsprov.work = NULL;
+    SSFSMPutEvent(SSF_SM_AWSPROV, SSF_SM_EVENT_AWSPROV_STOP);
+    SSFMQTTCStop();
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if a run is started and has not ended, else false.                               */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFAWSProvIsStarted(void)
+{
+    SSF_REQUIRE(_awsprov.magic == SSF_AWSPROV_INIT_MAGIC);
+    return _awsprov.isStarted;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Parses a response for the current step into the work set; always consumes the PUBLISH.        */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFAWSProvRxPublish(void *ctx, const SSFMQTTCRxPublish_t *rxPublish)
+{
+    SSFAWSProvWork_t *w = _awsprov.work;
+    const char *acceptedStr;
+    const char *rejectedStr;
+    bool ok;
+
+    SSF_REQUIRE(_awsprov.magic == SSF_AWSPROV_INIT_MAGIC);
+    SSF_REQUIRE(rxPublish != NULL);
+    SSF_REQUIRE(rxPublish->topic != NULL);
+    SSF_REQUIRE((rxPublish->payload != NULL) || (rxPublish->payloadLen == 0));
+    (void)ctx;
+
+    /* Not running, or an earlier response not yet taken by the state machine? */
+    if ((_awsprov.isStarted == false) || (w->response != SSF_AWSPROV_RSP_NONE)) return true;
+
+    if (w->step == SSF_AWSPROV_STEP_CSR)
+    {
+        acceptedStr = SSF_AWSPROV_TOPIC_CSR_ACCEPTED;
+        rejectedStr = SSF_AWSPROV_TOPIC_CSR_REJECTED;
+    }
+    else
+    {
+        acceptedStr = w->topics.provAccepted;
+        rejectedStr = w->topics.provRejected;
+    }
+    /* An accepted response for the step? */
+    if (strcmp(rxPublish->topic, acceptedStr) == 0)
+    {
+        /* Yes */
+        if (w->step == SSF_AWSPROV_STEP_CSR)
+        {
+            ok = SSFAWSProvParseCsrAccepted(rxPublish->payload, rxPublish->payloadLen, w->rx,
+                                            sizeof(w->rx), w->opts.curve, w->pub, w->pubLen,
+                                            &w->acc);
+        }
+        else
+        {
+            ok = SSFAWSProvParseRegisterAccepted(rxPublish->payload, rxPublish->payloadLen,
+                                                 w->rx, sizeof(w->rx), w->thingName,
+                                                 sizeof(w->thingName), w->deviceConfig,
+                                                 sizeof(w->deviceConfig), &w->deviceConfigLen);
+        }
+        w->response = ok ? SSF_AWSPROV_RSP_ACCEPTED : SSF_AWSPROV_RSP_BAD;
+    }
+    /* No, a rejected response for the step? */
+    else if (strcmp(rxPublish->topic, rejectedStr) == 0)
+    {
+        /* Yes, parsed aside so an unparseable one keeps the last good reject for the result */
+        uint16_t statusCode;
+        char errorCode[SSF_AWSPROV_ERROR_CODE_SIZE];
+        char errorMessage[SSF_AWSPROV_ERROR_MESSAGE_SIZE];
+
+        ok = SSFAWSProvParseRejected(rxPublish->payload, rxPublish->payloadLen, w->rx,
+                                     sizeof(w->rx), &statusCode, errorCode, sizeof(errorCode),
+                                     errorMessage, sizeof(errorMessage));
+        /* Parsed? */
+        if (ok)
+        {
+            /* Yes, keep it */
+            w->statusCode = statusCode;
+            memcpy(w->errorCode, errorCode, sizeof(w->errorCode));
+            memcpy(w->errorMessage, errorMessage, sizeof(w->errorMessage));
+        }
+        w->response = ok ? SSF_AWSPROV_RSP_REJECTED : SSF_AWSPROV_RSP_BAD;
+    }
+    /* No, another topic or the other step's response: ignored */
+    else return true;
+    SSFSMPutEvent(SSF_SM_AWSPROV, SSF_SM_EVENT_AWSPROV_RESPONSE);
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Maps an ssfmqttc lifecycle event to the state machine, then forwards it to the app.           */
+/* --------------------------------------------------------------------------------------------- */
+void SSFAWSProvEvent(void *ctx, SSFMQTTCEvent_t event, SSFMQTTCReason_t reason)
+{
+    SSFSMEventId_t eid = SSF_SM_EVENT_MAX;
+
+    SSF_REQUIRE(_awsprov.magic == SSF_AWSPROV_INIT_MAGIC);
+    SSF_REQUIRE((event > SSF_MQTTC_EVENT_MIN) && (event < SSF_MQTTC_EVENT_MAX));
+    SSF_REQUIRE((reason > SSF_MQTTC_REASON_MIN) && (reason < SSF_MQTTC_REASON_MAX));
+    (void)ctx;
+
+    switch (event)
+    {
+    case SSF_MQTTC_EVENT_READY:
+        eid = (reason == SSF_MQTTC_REASON_SUBSCRIBE_REFUSED) ?
+              SSF_SM_EVENT_AWSPROV_SUB_REFUSED : SSF_SM_EVENT_AWSPROV_READY;
+        break;
+    case SSF_MQTTC_EVENT_DISCONNECTED:
+        eid = SSF_SM_EVENT_AWSPROV_LINK_LOST;
+        break;
+    case SSF_MQTTC_EVENT_CONNECT_FAILED:
+        /* Will retrying the connection never help? */
+        if ((reason == SSF_MQTTC_REASON_CONNACK_PROTOCOL_VERSION) ||
+            (reason == SSF_MQTTC_REASON_CONNACK_CLIENT_ID) ||
+            (reason == SSF_MQTTC_REASON_CONNACK_BAD_CREDENTIALS) ||
+            (reason == SSF_MQTTC_REASON_CONNACK_NOT_AUTHORIZED))
+        {
+            /* Yes */
+            eid = SSF_SM_EVENT_AWSPROV_CONNECT_REFUSED;
+        }
+        else eid = SSF_SM_EVENT_AWSPROV_CONNECT_FAILED;
+        break;
+    default:
+        break;
+    }
+    /* Posted also after a stop: IDLE and the stopped guards ignore it */
+    if (eid != SSF_SM_EVENT_MAX) SSFSMPutEvent(SSF_SM_AWSPROV, eid);
+    if (_awsprov.appEventFn != NULL) _awsprov.appEventFn(_awsprov.appEventCtx, event, reason);
 }
 #endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN */

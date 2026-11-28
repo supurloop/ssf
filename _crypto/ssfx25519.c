@@ -58,7 +58,7 @@ static void _SSFX25519FeAdd(SSFFE25519_t *r, const SSFFE25519_t *a, const SSFFE2
     }
     /* 2^256 mod p = 2 * 19 = 38. carry is 0 or 1; multiply unconditionally. */
     {
-        uint64_t c = 38u * carry;
+        uint64_t c = SSF_CT_MUL32(38u, carry);
         for (i = 0; i < 8u; i++)
         {
             c += (uint64_t)r->v[i];
@@ -87,12 +87,17 @@ static void _SSFX25519FeSub(SSFFE25519_t *r, const SSFFE25519_t *a, const SSFFE2
         borrow = (diff >> 63) & 1u;
     }
 
-    /* Conditionally add 2p: borrow is 0 or 1, so borrow * 2 * p.v[i] is the addend. */
-    for (i = 0; i < 8u; i++)
+    /* Conditionally add 2p: borrow is 0 or 1, so the addend is 2 * p.v[i] under its mask. */
     {
-        carry += (uint64_t)r->v[i] + ((2u * (uint64_t)SSF_FE25519_P.v[i]) * borrow);
-        r->v[i] = (uint32_t)carry;
-        carry >>= 32;
+        uint32_t mask = 0u - (uint32_t)borrow;
+
+        SSF_CT_VALUE_BARRIER(mask);
+        for (i = 0; i < 8u; i++)
+        {
+            carry += (uint64_t)r->v[i] + (2u * (uint64_t)(SSF_FE25519_P.v[i] & mask));
+            r->v[i] = (uint32_t)carry;
+            carry >>= 32;
+        }
     }
 
     /* Fully reduce so output is in [0, p) (Wycheproof tcId 57 depends on it). */
@@ -109,14 +114,14 @@ static void _SSFX25519FeMulSmall(SSFFE25519_t *r, const SSFFE25519_t *a, uint32_
 
     for (i = 0; i < 8u; i++)
     {
-        carry += (uint64_t)a->v[i] * (uint64_t)c;
+        carry += SSF_CT_MUL32(a->v[i], c);
         r->v[i] = (uint32_t)carry;
         carry >>= 32;
     }
 
     /* Fold carry back: carry * 38 mod p. Unconditional -- carry == 0 leaves r unchanged. */
     {
-        uint64_t c2 = carry * 38u;
+        uint64_t c2 = SSF_CT_MUL32(carry, 38u);
         for (i = 0; i < 8u; i++)
         {
             c2 += (uint64_t)r->v[i];

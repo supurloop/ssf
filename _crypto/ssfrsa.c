@@ -1095,8 +1095,7 @@ static uint32_t _SSFRSAMod65537(uint32_t x)
     uint32_t ge;
 
     /* Subtract 65537 once if r >= 65537; never more is needed (r < 2 * 65537) */
-    ge = 0u - (1u ^ ((r - 65537u) >> 31));
-    SSF_CT_VALUE_BARRIER(ge);
+    ge = 0u - (1u ^ SSFCryptCTLt(r, 65537u));
     r -= (65537u & ge);
     return r;
 }
@@ -1106,7 +1105,7 @@ static uint32_t _SSFRSAMod65537(uint32_t x)
 /* --------------------------------------------------------------------------------------------- */
 static uint32_t _SSFRSAMulMod65537(uint32_t a, uint32_t b)
 {
-    uint64_t p = ((uint64_t)a * (uint64_t)b);
+    uint64_t p = SSF_CT_MUL32(a, b);
     uint32_t r;
 
     /* p <= 2^32 and 2^32 == 1 mod 65537, so fold the high word into the low */
@@ -1152,7 +1151,7 @@ static void _SSFRSAInvE65537(SSFBN_t *d, const SSFBN_t *lambda, SSFBN_t *t, uint
         uint32_t q = (uint32_t)x * 0xFFFF0001u;
 
         d->limbs[i] = q;
-        c = ((uint32_t)(((uint64_t)q * 65537u) >> 32) + (uint32_t)((x >> 63) & 1u));
+        c = ((uint32_t)(SSF_CT_MUL32(q, 65537u) >> 32) + (uint32_t)((x >> 63) & 1u));
     }
     d->len = nLimbs;
 }

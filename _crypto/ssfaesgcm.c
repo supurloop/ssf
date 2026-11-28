@@ -107,14 +107,14 @@ static inline void _SSFAESGCMCarryless32Mult(uint32_t a, uint32_t b, uint32_t *l
     y[2] = b & 0x44444444;
     y[3] = b & 0x88888888;
 
-    z[0] = ((uint64_t)x[0] * (uint64_t)y[0]) ^ ((uint64_t)x[1] * (uint64_t)y[3])
-         ^ ((uint64_t)x[2] * (uint64_t)y[2]) ^ ((uint64_t)x[3] * (uint64_t)y[1]);
-    z[1] = ((uint64_t)x[0] * (uint64_t)y[1]) ^ ((uint64_t)x[1] * (uint64_t)y[0])
-         ^ ((uint64_t)x[2] * (uint64_t)y[3]) ^ ((uint64_t)x[3] * (uint64_t)y[2]);
-    z[2] = ((uint64_t)x[0] * (uint64_t)y[2]) ^ ((uint64_t)x[1] * (uint64_t)y[1])
-         ^ ((uint64_t)x[2] * (uint64_t)y[0]) ^ ((uint64_t)x[3] * (uint64_t)y[3]);
-    z[3] = ((uint64_t)x[0] * (uint64_t)y[3]) ^ ((uint64_t)x[1] * (uint64_t)y[2])
-         ^ ((uint64_t)x[2] * (uint64_t)y[1]) ^ ((uint64_t)x[3] * (uint64_t)y[0]);
+    z[0] = SSF_CT_MUL32(x[0], y[0]) ^ SSF_CT_MUL32(x[1], y[3])
+         ^ SSF_CT_MUL32(x[2], y[2]) ^ SSF_CT_MUL32(x[3], y[1]);
+    z[1] = SSF_CT_MUL32(x[0], y[1]) ^ SSF_CT_MUL32(x[1], y[0])
+         ^ SSF_CT_MUL32(x[2], y[3]) ^ SSF_CT_MUL32(x[3], y[2]);
+    z[2] = SSF_CT_MUL32(x[0], y[2]) ^ SSF_CT_MUL32(x[1], y[1])
+         ^ SSF_CT_MUL32(x[2], y[0]) ^ SSF_CT_MUL32(x[3], y[3]);
+    z[3] = SSF_CT_MUL32(x[0], y[3]) ^ SSF_CT_MUL32(x[1], y[2])
+         ^ SSF_CT_MUL32(x[2], y[1]) ^ SSF_CT_MUL32(x[3], y[0]);
 
     z[0] &= 0x1111111111111111;
     z[1] &= 0x2222222222222222;

@@ -33,6 +33,7 @@
 #include <string.h>
 #include "ssfassert.h"
 #include "ssffe25519.h"
+#include "ssfcrypt.h"
 
 /* p = 2^255 - 19 as 8 limbs */
 const SSFFE25519_t SSF_FE25519_P = {{ 0xFFFFFFEDu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
@@ -58,7 +59,7 @@ void SSFFE25519Mul(SSFFE25519_t *r, const SSFFE25519_t *a, const SSFFE25519_t *b
         carry = 0;
         for (j = 0; j < 8u; j++)
         {
-            uint64_t prod = ((uint64_t)a->v[i] * (uint64_t)b->v[j]) + (uint64_t)t[i + j] + carry;
+            uint64_t prod = (SSF_CT_MUL32(a->v[i], b->v[j]) + (uint64_t)t[i + j]) + carry;
             t[i + j] = (uint32_t)prod;
             carry = prod >> 32;
         }
@@ -69,14 +70,14 @@ void SSFFE25519Mul(SSFFE25519_t *r, const SSFFE25519_t *a, const SSFFE25519_t *b
     carry = 0;
     for (i = 0; i < 8u; i++)
     {
-        carry += (uint64_t)t[i] + ((uint64_t)38u * (uint64_t)t[i + 8u]);
+        carry += (uint64_t)t[i] + SSF_CT_MUL32(38u, t[i + 8u]);
         r->v[i] = (uint32_t)carry;
         carry >>= 32;
     }
 
     /* Carry might remain (up to ~6 bits). Fold unconditionally; carry == 0 leaves r unchanged. */
     {
-        uint64_t c = carry * 38u;
+        uint64_t c = SSF_CT_MUL32(carry, 38u);
         for (i = 0; i < 8u; i++)
         {
             c += (uint64_t)r->v[i];
@@ -85,7 +86,7 @@ void SSFFE25519Mul(SSFFE25519_t *r, const SSFFE25519_t *a, const SSFFE25519_t *b
         }
 
         /* Fold the 0/1 carry-out of the fold above once more; it cannot carry again */
-        c *= 38u;
+        c = SSF_CT_MUL32(c, 38u);
         for (i = 0; i < 8u; i++)
         {
             c += (uint64_t)r->v[i];
@@ -124,7 +125,7 @@ void SSFFE25519Reduce(SSFFE25519_t *a)
     /* See dbc_hot_audit.txt item A before adding any back. */
 
     /* If bit 255 is set, clear it and add 19 (since 2^255 = 19 mod p). */
-    carry = (uint64_t)(a->v[7] >> 31) * 19u;
+    carry = SSF_CT_MUL32(a->v[7] >> 31, 19u);
     a->v[7] &= 0x7FFFFFFFu;
     for (i = 0; i < 8u; i++)
     {
@@ -134,7 +135,7 @@ void SSFFE25519Reduce(SSFFE25519_t *a)
     }
 
     /* Repeat in case of another overflow. */
-    carry = (uint64_t)(a->v[7] >> 31) * 19u;
+    carry = SSF_CT_MUL32(a->v[7] >> 31, 19u);
     a->v[7] &= 0x7FFFFFFFu;
     for (i = 0; i < 8u; i++)
     {

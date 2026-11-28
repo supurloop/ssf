@@ -3,12 +3,12 @@ SSF CONSTANT-TIME HELPERS: SECRET-DEPENDENT BRANCHES IN COMPILED CODE (ARMv6-M)
 Audit date : 2026-11-27
 Scope      : constant-time select / swap helpers in _crypto, as compiled (not as written).
              Code at commit c0d17b7 (branch mqtt). arm-none-eabi-gcc 15.2, -mthumb -Os.
-Status     : C1 FIXED (steps 2-4 below), C2 OPEN (C1 found during RSA-PERF R4 step 0; C2 found by the C1 step 1
+Status     : C1 FIXED, C2 FIXED (results below), C3 OPEN (C1 found during RSA-PERF R4 step 0; C2 found by the C1 step 1
              check). Step 1 of the C1 plan is done; see STEP 1 RESULTS.
 
 FINDING
 -------
-C1. Mask-select helpers compile to a branch on the secret flag on Cortex-M0 / M0+ / M23 OPEN
+C1. Mask-select helpers compile to a branch on the secret flag on Cortex-M0 / M0+ / M23 FIXED
     The C is correct mask arithmetic:
       SSFBNCondCopy    dst = (src & mask) | (dst & ~mask),  mask = -(sel != 0)
       SSFBNCondSwap    d = (a ^ b) & mask; a ^= d; b ^= d
@@ -207,7 +207,7 @@ Result by core (both compilers, -Os and -O2):
   Every one is the same pattern: a 0 / all-ones mask (or a 0 / 1 compare) that the
   optimizer can see, which a core without IT / conditional moves turns into a branch.
 
-C2. libgcc __muldi3 (64-bit multiply) is variable time on ARMv6-M / v8-M Baseline   OPEN
+C2. libgcc __muldi3 (64-bit multiply) is variable time on ARMv6-M / v8-M Baseline  FIXED
     Cortex-M0 / M0+ / M23 have no 32x32 -> 64 multiply instruction. Every
     (uint64_t)a * b in the code, with GCC and with clang (both link libgcc here), becomes
     a call to __aeabi_lmul -> __muldi3. That builds the product from 16-bit halves with
@@ -293,3 +293,260 @@ Docs: ssfport.md (SSF_CT_VALUE_BARRIER), ssfcrypt.md (the predicates), ssfbn.md 
   / CondSwap), ssffe25519.md (CSwap, and the C2 caveat), _crypto/README.md (new
   "Constant time" section: what is checked, results per core, the open C2 gap on
   M0 / M0+ / M23, and what the check does not cover).
+
+C2 IMPLEMENTATION PLAN
+----------------------
+Goal: on cores without a 32 x 32 -> 64 multiply (ARMv6-M: Cortex-M0 / M0+; ARMv8-M
+Baseline: M23), no constant-time path calls libgcc's variable-time __aeabi_lmul / __muldi3.
+Every other target must compile to the code it does today (byte-identical objects), so the
+change costs nothing there.
+
+Inventory: 64-bit products in _crypto, with whether their operands are secret.
+  ssfbn       the row kernel (_SSF_BN_MAC's C branch: every Montgomery / schoolbook
+              product), MontSquare's diagonal, the remaining (SSFBNDLimb_t)a * b sites
+              (17 hits), and safegcd's int64 x int64 matrix products (_SSFBNS30UpdateFG /
+              UpdateDE: int32-range operands, typed int64)                         secret
+  ssffe25519  Mul (:61), the x38 fold (:72), bit x 19 (:127, :137)                  secret
+  ssfx25519   :93 (2p x borrow, borrow 0 / 1), :112 (a x small constant)           secret
+  ssfed25519  :62 (carry x 38); scalar arithmetic mod L in int64 byte limbs: the
+              fold "(16 * x[i]) * L[j]" (:581), "q * L[j]" (:594), "carry * L[j]"
+              (:600), the schoolbook "a[i] * b[j]" (:706)                          secret
+  ssfpoly1305 the h x r block multiply (26-bit limbs, 15 hits)                     secret
+  ssfaesgcm   GHASH's masked integer multiply (:110-117), on the hash key H and the
+              data                                                                 secret
+  ssfrsa      _SSFRSAMulMod65537 (:1109), :1155: keygen on secret prime candidates  secret
+  ssfasn1, ssfaesccm, ssfsha1: lengths and encodings                               public
+  Not multiplies, also seen as libgcc calls on M0+ (noted, not C2):
+    __aeabi_llsl in _SSFBNToS30 / ModInvCT core: 64-bit shifts by public amounts.
+    __aeabi_uidivmod / __aeabi_uldivmod in SSFBNGenPrime / SSFBNModUint32: trial division
+      of SECRET prime candidates by small public primes. libgcc's divide is variable time;
+      on M0+ / M23 (no UDIV) this leaks residues of the accepted primes. Open it as C3 and
+      leave it out of C2.
+
+Design:
+  ssfcrypt.h, next to the C1 predicates:
+    SSF_CT_MUL32(a, b)  -> uint64_t, unsigned 32 x 32 -> 64
+    SSF_CT_SMUL32(a, b) -> int64_t, signed 32 x 32 -> 64
+  On targets with a widening multiply (everything except __ARM_ARCH_6M__ /
+  __ARM_ARCH_8M_BASE__), these expand to the plain C product, ((uint64_t)a * (uint64_t)b),
+  so the generated code is unchanged. On ARMv6-M / v8-M Baseline they call static inline
+  helpers:
+    SSFCryptCTMul32(a, b): four 32-bit MULS on 16-bit halves, assembled without any carry
+      compare. Let lo = al*bl, m1 = al*bh, m2 = ah*bl, hi = ah*bh. Then
+      t = (lo >> 16) + (m1 & 0xFFFF) + (m2 & 0xFFFF), which is < 3 * 2^16 and cannot
+      overflow, and
+        result_lo = (lo & 0xFFFF) | (t << 16)
+        result_hi = hi + (m1 >> 16) + (m2 >> 16) + (t >> 16)
+      No branch, so nothing for a compiler to turn into one. About 4 MULS + 12 ALU against
+      __aeabi_lmul's call and its 64 x 64 work (R7 measured a 16-bit-halves C kernel at
+      -12.1% on M0+ RSA sign, so likely a speed gain).
+    SSFCryptCTSMul32(a, b): the unsigned product minus (b if a < 0) << 32 and minus
+      (a if b < 0) << 32, with sign masks from arithmetic shifts through
+      SSF_CT_VALUE_BARRIER (C1's rule).
+  Every inventory site gets the macro. Additions of the products stay 64-bit C: on ARMv6-M
+  those compile to adds / adcs, inline and constant time.
+  Sites whose operands are typed int64 but are bounded to int32 (safegcd matrix x limb,
+  Ed25519 byte-limb scalar arithmetic) get a range comment and, under unit test, an
+  assert that the operand fits. Each bound is worked out from the code before converting,
+  and recorded here. Any site that cannot be bounded is reported, not guessed.
+  Constant multipliers (x 19, x 38, x 65537, x 2p): use the macro too. Step 1 checks
+  whether GCC / clang already inline these on ARMv6-M; converting them anyway costs nothing
+  where they already do.
+
+Steps (TDD):
+  1. Red:
+     a. A static check: build the constant-time modules (bn, fe25519, x25519, ed25519,
+        poly1305, aesgcm, ec, ecdsa, rsa) for cortex-m0plus and cortex-m23, gcc and clang,
+        -Os and -O2. Fail if an object references __aeabi_lmul / __muldi3 from a function
+        on a secret path. Allowlist, by function, only the public ones (ssfasn1 lengths,
+        any public-only ssfbn helper, each named after checking). Red at f1edc01.
+     b. ctcheck: add AES-GCM (secret key and data, fixed lengths) and an RSA keygen
+        helper case (_SSFRSAMod65537 / MulMod65537 through a test hook). Red: the 18 C2
+        divergences (more with the new cases).
+     c. Unit tests for SSFCryptCTMul32 / SMul32. These are built on every target (the
+        portable helper is always compiled under unit test, whether or not the macro uses
+        it), against the native 64-bit product. Cases: every pair from {0, 1, 0xFFFF,
+        0x10000, 0x7FFFFFFF, 0x80000000, 0xFFFFFFFF} plus random pairs; signed: the same
+        set reinterpreted, INT32_MIN x INT32_MIN, -1 x -1. Red: the helpers do not exist.
+  2. Green: the helpers, the macros and the call-site conversion, module by module (bn,
+     fe25519, x25519, ed25519, poly1305, aesgcm, rsa). After each module: host suite, the
+     static check for that object, and ctcheck.
+  3. Verify:
+     - ctcheck: all cases ok on all 20 builds (0 C2-only), plus the new cases;
+     - the static check: clean on M0+ / M23, both compilers;
+     - byte-identical .text for every converted object on cortex-m3 / m4 / m33 (gcc and
+       clang) and on the armv7-a and host builds (objdump compare against HEAD). That
+       proves zero cost there; anything not identical is explained or fixed;
+     - correctness on the real ARMv6-M code: the crypto unit tests (ssfbn, ssffe25519,
+       ssfx25519, ssfed25519, ssfpoly1305, ssfaesgcm, ssfec, ssfecdsa; ssfrsa if time
+       allows), built for cortex-m0plus and run under qemu -cpu cortex-m0 with semihosting.
+       The unit-test entry points are called from a small driver with OpenSSL off. If a UT
+       cannot run bare-metal (POSIX use), say which;
+     - host and qemu-arm (armv7-a) suites 64 / 64; build-arm.sh 0 warnings.
+  4. Measure on ARMv6-M (qemu -cpu cortex-m0, instruction counts with -d in_asm,exec):
+     RSA-2048 sign, P-256 sign / verify, X25519, Ed25519 sign, Poly1305 (1 KB), AES-GCM
+     (1 KB). Before = f1edc01, after = C2. M0+ client image size (LTO on / off). M4 must
+     show no change in size or counts.
+  5. Docs: _crypto/README.md "Constant time" (M0 / M0+ / M23 now covered, or what is
+     left), ssfcrypt.md (the macros), the C2 caveat in ssffe25519.md. Results here. Open
+     C3 for the trial-division divide.
+  6. Only if asked: full suites, commit.
+
+Relation to RSA-PERF R7 (an ARMv6-M assembly row kernel): C2's C helper comes first and
+makes R7's goal partly moot for correctness. R7 can still replace the row kernel later for
+speed; the ctcheck and static check then cover it the same way.
+
+Decision (user, 2026-11-28): fix C3 too, after C2. Step 1's red checks include a C3 case.
+
+C3. Trial division of secret prime candidates uses a variable-time divide            OPEN
+    SSFBNGenPrime's trial division (SSFBNModUint32 and the 16-bit-step remainder) runs
+    "%" / "/" on the secret candidate. On Cortex-M0 / M0+ / M23 (no divide instruction)
+    that is libgcc's __aeabi_uidivmod / __aeabi_uldivmod, which loops and branches on the
+    operands. Rejected candidates are discarded, but the accepted primes p and q pass
+    through it too, and their residues mod the small primes are what leaks. Cortex-M3 / M4
+    / M33 have UDIV, whose cycle count also depends on the operands (early termination);
+    qemu cannot see that.
+    Fix direction (planned after C2): a remainder with no divide at all. For each small
+    public prime d, a precomputed reciprocal and a multiply-shift with one masked
+    correction; with C2's SSF_CT_MUL32 on ARMv6-M. That fixes every core, UDIV ones
+    included.
+
+C2 STEP 1 RESULTS (red baseline, code at f1edc01)
+-------------------------------------------------
+a. Static check (scratch lmulcheck.sh): M0+ / M23, gcc / clang, -Os / -O2, the constant-time
+   modules. Functions calling a libgcc multiply or divide (number of the 8 configs):
+     ssfbn       _SSFBNMulAddRow 6, SSFBNMontMul 8, SSFBNMontSquare 8, _SSFBNMulCore 8,
+                 _SSFBNSchoolbookMulRaw 2, SSFBNSquare 8, SSFBNMulUint32 8,
+                 _SSFBNModInvCTCore 8 (__aeabi_lmul) and 4 (__aeabi_uidiv: to check, probably
+                 the public batch count), SSFBNModUint32 8 (__aeabi_uldivmod, C3),
+                 SSFBNGenPrime 4 (__aeabi_uidivmod, C3)
+     ssffe25519  SSFFE25519Mul 8
+     ssfx25519   _SSFX25519FeAdd 8, _SSFX25519FeSub 6, _SSFX25519ScalarMul 8
+     ssfed25519  _SSFEd25519FeAdd 6, GeAdd 4, GeDouble 4, ScModL 8, ScMulAdd 8, Verify 4
+                 (public)
+     ssfpoly1305 _SSFPoly1305MulR 8
+     ssfaesgcm   _SSFAESGCMAbsorb 4, _SSFAESGCMCarryless32Mult 2, _SSFAESGCMMulH 2
+     ssfrsa      SSFRSAKeyGen 8, _SSFRSAMulMod65537 2
+   (ssfec / ssfecdsa: none; they reach the multiplies through ssfbn.)
+b. ctcheck with three new cases: SSFAESGCMEncrypt (secret key and plaintext),
+   SSFBNModUint32 (secret value, divisor 1613: C3), _SSFRSAInvE65537 (secret lambda, via
+   the existing RSA unit-test hook; the check tree builds ssfrsa with
+   SSF_CONFIG_RSA_UNIT_TEST 1 for it). 35 cases, 20 builds:
+     144 C2-only divergences (libgcc __muldi3), M0+ / M23 as before.
+     SSFBNModUint32 FAIL on M0+ (gcc and clang, -Os / -O2): __udivmoddi4 / __clzdi2 (C3).
+       It passes on M23, which has UDIV (still operand-dependent in cycles; qemu cannot
+       see it).
+     _SSFRSAInvE65537 FAIL on clang M0+ / M23 inside _SSFRSAMod65537 (ssfrsa.c:1100). This
+       is a C1 leftover: C1's edit put the barrier after "1 ^ ((r - 65537) >> 31)", which
+       clang rewrites into a compare (the pattern SSFCryptCTLt exists for). No earlier case
+       reached it. Fix with the C2 changes (C1 follow-up).
+     SSFAESGCMEncrypt passes on M0+ despite calling __aeabi_lmul: GHASH masks its operands
+       to every 4th bit, so __muldi3's carry branch never fires for them. Converted anyway
+       (the static check flags it, and conversion costs nothing).
+c. Unit tests for SSFCryptCTMul32 / SSFCryptCTSMul32 and SSF_CT_MUL32 / SMUL32 in
+   ssfcrypt_ut.c (11 x 11 edge pairs and 100,000 random pairs, unsigned and signed, against
+   the native product). Red: the build fails, the helpers do not exist.
+
+C2 STEP 2 RESULTS (green)
+-------------------------
+Change:
+  - ssfcrypt.h: SSFCryptCTMul32 (four 16-bit-half MULS, the middle sum in 16-bit pieces, no
+    carry compare; value barriers on the four partial products) and SSFCryptCTSMul32 (the
+    unsigned product minus the barriered sign corrections). SSF_CT_MUL32 / SSF_CT_SMUL32
+    pick them on __ARM_ARCH_6M__ / __ARM_ARCH_8M_BASE__, else the plain C product.
+  - Call sites converted:
+      ssfbn: the row-kernel macro's C branch, _SSFBNMulCore, MulUint32, Square (cross and
+        diagonal), MontMul word 0, MontSquare diagonal, and the safegcd matrix products in
+        UpdateFG / UpdateDE (operands stored as int32; only the accumulators are int64)
+      ssffe25519: Mul (the product, the x38 fold, the two carry x38 folds), Reduce (bit x 19)
+      ssfx25519: FeAdd / MulSmall x38, MulSmall a x c; FeSub's "2p x borrow" became a
+        barriered mask, as ssfed25519 already does
+      ssfed25519: FeAdd x38; the scalar arithmetic mod L (fold, q x L, carry x L,
+        ScMulAdd's byte products). The int64 operands are bounded by interval arithmetic
+        over the code (|16 x[i]| <= 33,427,456 = 2^25 from ScMulAdd's limb bound
+        32 * 255^2 + 255; q <= 9; carry 0 / -1). Asserted under SSF_CONFIG_ED25519_UNIT_TEST
+        (_SSF_ED_FITS32); the host Ed25519 suite passes with the asserts on.
+      ssfpoly1305: all 25 h x r products; ssfaesgcm: the 16 GHASH products
+      ssfrsa: _SSFRSAMulMod65537, _SSFRSAInvE65537's q x 65537
+  - C1 follow-up: _SSFRSAMod65537 builds "r >= 65537" with SSFCryptCTLt.
+Two rounds needed:
+  1. With the helpers as first written, clang M0+ / M23 still called __aeabi_lmul in
+     _SSFX25519ScalarMul (MulSmall by 121665, inlined). Clang recognized the 16-bit-half
+     decomposition as one 64-bit multiply and turned it back into the libgcc call. GCC
+     M0+ still had two carry x 38 folds in SSFFE25519Mul that the first pass missed.
+  2. Barriers on the four partial products, and the two folds converted: clean.
+Results:
+  - Static check (M0+ / M23, gcc / clang, -Os / -O2): no __aeabi_lmul / __muldi3 in any
+    constant-time module. Left: C3's SSFBNModUint32 / SSFBNGenPrime divides, and
+    _SSFBNModInvCTCore's __aeabi_uidiv, which is _SSFBNS30Steps "(49 bits + 57) / 17" and
+    the batch bound "/ 30": functions of m->len, public.
+  - ctcheck (35 cases, 20 builds): 0 C2-only divergences (was 144); 696 ok. Only
+    SSFBNModUint32 fails, on M0+ (C3).
+  - Host suite 64 / 64 (ssfcrypt_ut's new multiply tests included).
+  - M3 / M4 / M33 objects compared with HEAD (.text): identical for ssfpoly1305,
+    ssfaesgcm, ssfec, ssfecdsa (and ssfbn with clang). Different, all explained:
+      ssfrsa: the C1 follow-up (+23 B gcc, +75 B clang, M4 -Os)
+      ssfx25519: the borrow mask
+      ssffe25519 / ssfed25519 / ssfbn (gcc, safegcd): operands typed 64-bit but bounded
+        are now cast to 32 bits, so one native umull / smull replaces a 64 x 64 sequence
+        (ed25519 -42 B gcc M4)
+    ARMv7-A instructions, C1 (f1edc01) -> C2, same outputs: RSA-2048 sign, P-256 sign /
+    pubkey / verify unchanged (identical counts); X25519 -14,280 (-0.34%); Ed25519 sign
+    -15,880 (-0.07%).
+  - M0+ -Os .text deltas: gcc bn -153, fe25519 +3, x25519 +47, ed25519 +26, rsa +23,
+    poly1305 -41, aesgcm -13; clang bn +1,867, fe25519 +191, x25519 +59, ed25519 +275,
+    rsa +83, poly1305 +1,059, aesgcm -2,741 (clang inlines the helper; speed in step 4).
+
+C2 STEP 3 RESULTS (verify)
+--------------------------
+Correctness on real ARMv6-M code: the unit tests of the ten affected modules (ssfcrypt,
+ssffe25519, ssfx25519, ssfed25519, ssfpoly1305, ssfaesgcm, ssfec, ssfecdsa, ssfbn, ssfrsa;
+OpenSSL cross-checks off, Wycheproof vectors on), built for cortex-m0plus at -Os with
+newlib semihosting and run under qemu-arm -cpu cortex-m0. The driver supplies the
+SSF_ASSERT_TEST longjmp marks, SSFPortAssert and a deterministic SSFPortGetEntropy, in
+place of the POSIX ssfport.c. One qemu process per module (scratch m0ut/).
+  gcc 15.2 -Os:  10 / 10 pass (ssfbn 396 s, ssfec 206 s, ssfrsa 99 s, the rest < 60 s)
+  clang 23 -Os:  10 / 10 pass (ssfbn 192 s, ssfec 125 s, ssfrsa 44 s)
+  No shipped crypto object calls __aeabi_lmul / __muldi3. The one unit-test build
+  reference is _SSFBNS30IsPos, a test-only helper (not converted, by design).
+build-arm.sh: 0 warnings (the usual 3 POSIX-only files fail). Full suite under qemu-arm
+(armv7-a Thumb-2 -O2) 64 / 64; host 64 / 64.
+
+C2 STEP 4 RESULTS (measure, Cortex-M0+)
+---------------------------------------
+Method: a semihosted bare-metal benchmark (scratch m0bench/) built for cortex-m0plus -Os
+and run under qemu-arm -cpu cortex-m0 -d in_asm,exec,nochain; executed instructions,
+start-up (op 0) subtracted. Before = HEAD (f1edc01, C1), after = C2. The output hashes are
+identical for every operation, tree and compiler. The RSA and P-256 hashes also equal the
+ARMv7-A reference.
+  Operation             gcc before   gcc after     delta    clang before  clang after   delta
+  RSA-2048 sign         354,410,723  288,794,561  -18.51%   309,491,965   227,059,807  -26.63%
+  P-256 sign              9,580,991    8,778,960   -8.37%     6,372,979     6,360,543   -0.20%
+  P-256 sign + verify    60,662,902   55,336,849   -8.78%    38,710,520    38,973,004   +0.68%
+  X25519                 16,293,494   13,781,057  -15.42%    14,122,282    11,887,569  -15.82%
+  Ed25519 sign           89,360,736   77,035,648  -13.79%    76,826,475    66,579,873  -13.34%
+  Poly1305 1 KB              83,586       63,042  -24.58%        82,889        61,577  -25.71%
+  AES-GCM 1 KB              631,066      509,386  -19.28%       626,717       535,782  -14.51%
+Helper tuning, measured here: barriers on the four partial products (step 2's form) gave
+clang P-256 sign +4.34% / sign + verify +5.63%. In _SSFBNMulCore the inline helper
+(3.38 M) cost more than the old body plus __muldi3 (1.15 M + 2.18 M), from spills on
+ARMv6-M's 8 low registers. Alternatives tried, all lmul-free in the static check:
+  barriers on the 16-bit halves (chosen):    RSA -26.6%, P-256 sign -0.2%, X25519 -15.8%
+  barriers on the two middle products only:  RSA -23.4%, P-256 sign  0.0%, X25519 -18.6%
+gcc's code is the same under all three. With the chosen form, re-checked: host 64 / 64,
+static check clean, ctcheck 0 C2-only (only C3's SSFBNModUint32 fails, on M0+), and the M0+
+unit tests 10 / 10 with gcc and with clang.
+Code, client image (gcc -Os, text + data), before -> after:
+  M0+       113,463 -> 113,347 (-116)    LTO  88,624 -> 88,249 (-375)    ssfbn.o 20,380 -> 20,224
+  M4        103,903 -> 103,871 (-32)     LTO  83,220 -> 83,172 (-48)     ssfbn.o unchanged
+  (The M4 change is ssfed25519: bounded 64-bit-typed operands now use one umull / smull.)
+RAM: none. ARMv7-A instruction counts (step 2): RSA and P-256 unchanged, X25519 -0.34%,
+Ed25519 sign -0.07%.
+
+C2 STEP 5 (docs)
+----------------
+_crypto/README.md "Constant time": M0 / M0+ / M23 now pass every case except trial
+division; the cases list adds AES-GCM and RSA keygen's 65537^-1 mod lambda; C3 is listed
+as the open item on every core. ssfcrypt.md: SSF_CT_MUL32 / SSF_CT_SMUL32 and the helpers.
+ssffe25519.md: the __muldi3 caveat replaced. doccheck: only the pre-existing failing
+blocks (same as HEAD).

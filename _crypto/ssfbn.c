@@ -940,7 +940,7 @@ SSFBNLimb_t SSFBNSubUint32(SSFBN_t *r, const SSFBN_t *a, uint32_t b)
 #define _SSF_BN_ROW_KERNEL_ID (0u)
 #define _SSF_BN_MAC(r, x, b, a, c) \
     do { \
-        prod = (((SSFBNDLimb_t)(a) * (SSFBNDLimb_t)(b)) + (SSFBNDLimb_t)(x)) + \
+        prod = (SSF_CT_MUL32((a), (b)) + (SSFBNDLimb_t)(x)) + \
                (SSFBNDLimb_t)(c); \
         (r) = (SSFBNLimb_t)prod; \
         (c) = (SSFBNLimb_t)(prod >> SSF_BN_LIMB_BITS); \
@@ -1151,7 +1151,7 @@ static void _SSFBNMulCore(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b)
         /* No zero-limb skip -- see _SSFBNSchoolbookMulRaw for rationale. */
         for (j = 0; j < b->len; j++)
         {
-            SSFBNDLimb_t prod = (((SSFBNDLimb_t)a->limbs[i] * (SSFBNDLimb_t)b->limbs[j]) +
+            SSFBNDLimb_t prod = (SSF_CT_MUL32(a->limbs[i], b->limbs[j]) +
                                  (SSFBNDLimb_t)r->limbs[i + j]) + carry;
             r->limbs[i + j] = (SSFBNLimb_t)prod;
             carry = prod >> SSF_BN_LIMB_BITS;
@@ -1214,7 +1214,7 @@ void SSFBNMulUint32(SSFBN_t *r, const SSFBN_t *a, uint32_t b)
     carry = 0;
     for (i = 0; i < a->len; i++)
     {
-        carry += ((SSFBNDLimb_t)a->limbs[i] * (SSFBNDLimb_t)b);
+        carry += SSF_CT_MUL32(a->limbs[i], b);
         r->limbs[i] = (SSFBNLimb_t)carry;
         carry >>= SSF_BN_LIMB_BITS;
     }
@@ -1259,7 +1259,7 @@ void SSFBNSquare(SSFBN_t *r, const SSFBN_t *a)
         /* No zero-limb skip -- see _SSFBNSchoolbookMulRaw for rationale. */
         for (j = (uint16_t)(i + 1u); j < n; j++)
         {
-            SSFBNDLimb_t prod = (((SSFBNDLimb_t)ai * (SSFBNDLimb_t)a->limbs[j]) +
+            SSFBNDLimb_t prod = (SSF_CT_MUL32(ai, a->limbs[j]) +
                                  (SSFBNDLimb_t)r->limbs[i + j]) + carry;
             r->limbs[i + j] = (SSFBNLimb_t)prod;
             carry = prod >> SSF_BN_LIMB_BITS;
@@ -1290,7 +1290,7 @@ void SSFBNSquare(SSFBN_t *r, const SSFBN_t *a)
 
         for (i = 0; i < n; i++)
         {
-            SSFBNDLimb_t sq = (SSFBNDLimb_t)a->limbs[i] * (SSFBNDLimb_t)a->limbs[i];
+            SSFBNDLimb_t sq = SSF_CT_MUL32(a->limbs[i], a->limbs[i]);
             SSFBNDLimb_t sum;
 
             /* r[2i] += low(sq) + carry; r[2i + 1] += high(sq) + that carry (a^2 < 2^(64n)) */
@@ -2157,14 +2157,14 @@ static void _SSFBNS30UpdateFG(int32_t *f, int32_t *g, uint16_t n, const _SSFBNS3
     /* No argument checks by design: called per batch by SSFBNModInvCT only, with its locals. */
 
     /* Limbs below the top are in [0, 2^30) and |u| + |v| <= 2^30: each sum fits 62 bits */
-    cf = (u * f[0]) + (v * g[0]);
-    cg = (q * f[0]) + (r * g[0]);
+    cf = SSF_CT_SMUL32(u, f[0]) + SSF_CT_SMUL32(v, g[0]);
+    cg = SSF_CT_SMUL32(q, f[0]) + SSF_CT_SMUL32(r, g[0]);
     cf >>= _SSF_BN_S30_BITS;
     cg >>= _SSF_BN_S30_BITS;
     for (i = 1u; i < n; i++)
     {
-        cf += (u * f[i]) + (v * g[i]);
-        cg += (q * f[i]) + (r * g[i]);
+        cf += SSF_CT_SMUL32(u, f[i]) + SSF_CT_SMUL32(v, g[i]);
+        cg += SSF_CT_SMUL32(q, f[i]) + SSF_CT_SMUL32(r, g[i]);
         f[i - 1u] = (int32_t)((uint32_t)cf & _SSF_BN_S30_MASK);
         g[i - 1u] = (int32_t)((uint32_t)cg & _SSF_BN_S30_MASK);
         cf >>= _SSF_BN_S30_BITS;
@@ -2199,20 +2199,20 @@ static void _SSFBNS30UpdateDE(int32_t *d, int32_t *e, uint16_t n, const _SSFBNS3
     se = e[n - 1u] >> 31;
     md = (t->u & sd) + (t->v & se);
     me = (t->q & sd) + (t->r & se);
-    cd = (u * d[0]) + (v * e[0]);
-    ce = (q * d[0]) + (r * e[0]);
+    cd = SSF_CT_SMUL32(u, d[0]) + SSF_CT_SMUL32(v, e[0]);
+    ce = SSF_CT_SMUL32(q, d[0]) + SSF_CT_SMUL32(r, e[0]);
 
     /* Adjust md, me so the low 30 bits of cd + md * m and ce + me * m are zero */
     md -= (int32_t)(((mInv30 * (uint32_t)cd) + (uint32_t)md) & _SSF_BN_S30_MASK);
     me -= (int32_t)(((mInv30 * (uint32_t)ce) + (uint32_t)me) & _SSF_BN_S30_MASK);
-    cd += (int64_t)m[0] * md;
-    ce += (int64_t)m[0] * me;
+    cd += SSF_CT_SMUL32(m[0], md);
+    ce += SSF_CT_SMUL32(m[0], me);
     cd >>= _SSF_BN_S30_BITS;
     ce >>= _SSF_BN_S30_BITS;
     for (i = 1u; i < n; i++)
     {
-        cd += (u * d[i]) + (v * e[i]) + ((int64_t)m[i] * md);
-        ce += (q * d[i]) + (r * e[i]) + ((int64_t)m[i] * me);
+        cd += (SSF_CT_SMUL32(u, d[i]) + SSF_CT_SMUL32(v, e[i])) + SSF_CT_SMUL32(m[i], md);
+        ce += (SSF_CT_SMUL32(q, d[i]) + SSF_CT_SMUL32(r, e[i])) + SSF_CT_SMUL32(m[i], me);
         d[i - 1u] = (int32_t)((uint32_t)cd & _SSF_BN_S30_MASK);
         e[i - 1u] = (int32_t)((uint32_t)ce & _SSF_BN_S30_MASK);
         cd >>= _SSF_BN_S30_BITS;
@@ -3266,8 +3266,8 @@ void SSFBNMontMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBNMon
         u = t[0] * ctx->mp;
 
         /* Word 0 of t + u * m is zero by the choice of u; only its carry is kept */
-        carry = (SSFBNLimb_t)((((SSFBNDLimb_t)u * (SSFBNDLimb_t)ctx->mod.limbs[0]) +
-                               (SSFBNDLimb_t)t[0]) >> SSF_BN_LIMB_BITS);
+        carry = (SSFBNLimb_t)((SSF_CT_MUL32(u, ctx->mod.limbs[0]) + (SSFBNDLimb_t)t[0]) >>
+                              SSF_BN_LIMB_BITS);
 
         /* Words 1..n-1 land one limb down: t[j - 1] = low(u * m[j] + t[j] + carry) */
         carry = _SSFBNMulAddRow(t, &t[1], &ctx->mod.limbs[1], u, (uint32_t)n - 1u, carry);
@@ -3362,7 +3362,7 @@ void SSFBNMontSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBNMont_t *ctx)
 
         for (i = 0; i < n; i++)
         {
-            SSFBNDLimb_t sq = (SSFBNDLimb_t)a->limbs[i] * (SSFBNDLimb_t)a->limbs[i];
+            SSFBNDLimb_t sq = SSF_CT_MUL32(a->limbs[i], a->limbs[i]);
             SSFBNDLimb_t sum;
 
             sum = ((SSFBNDLimb_t)t[2u * i] + (SSFBNDLimb_t)(SSFBNLimb_t)sq) +

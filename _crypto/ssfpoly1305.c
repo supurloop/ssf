@@ -55,21 +55,21 @@ static void _SSFPoly1305MulR(SSFPoly1305Context_t *ctx)
     uint64_t d4;
     uint32_t c;
 
-    d0 = ((uint64_t)ctx->h0 * ctx->r0) + ((uint64_t)ctx->h1 * ctx->rr3) +
-         ((uint64_t)ctx->h2 * ctx->rr2) + ((uint64_t)ctx->h3 * ctx->rr1) +
-         ((uint64_t)ctx->h4 * ctx->rr0);
-    d1 = ((uint64_t)ctx->h0 * ctx->r1) + ((uint64_t)ctx->h1 * ctx->r0) +
-         ((uint64_t)ctx->h2 * ctx->rr3) + ((uint64_t)ctx->h3 * ctx->rr2) +
-         ((uint64_t)ctx->h4 * ctx->rr1);
-    d2 = ((uint64_t)ctx->h0 * ctx->r2) + ((uint64_t)ctx->h1 * ctx->r1) +
-         ((uint64_t)ctx->h2 * ctx->r0) + ((uint64_t)ctx->h3 * ctx->rr3) +
-         ((uint64_t)ctx->h4 * ctx->rr2);
-    d3 = ((uint64_t)ctx->h0 * ctx->r3) + ((uint64_t)ctx->h1 * ctx->r2) +
-         ((uint64_t)ctx->h2 * ctx->r1) + ((uint64_t)ctx->h3 * ctx->r0) +
-         ((uint64_t)ctx->h4 * ctx->rr3);
-    d4 = ((uint64_t)ctx->h0 * ctx->r4) + ((uint64_t)ctx->h1 * ctx->r3) +
-         ((uint64_t)ctx->h2 * ctx->r2) + ((uint64_t)ctx->h3 * ctx->r1) +
-         ((uint64_t)ctx->h4 * ctx->r0);
+    d0 = SSF_CT_MUL32(ctx->h0, ctx->r0) + SSF_CT_MUL32(ctx->h1, ctx->rr3) +
+         SSF_CT_MUL32(ctx->h2, ctx->rr2) + SSF_CT_MUL32(ctx->h3, ctx->rr1) +
+         SSF_CT_MUL32(ctx->h4, ctx->rr0);
+    d1 = SSF_CT_MUL32(ctx->h0, ctx->r1) + SSF_CT_MUL32(ctx->h1, ctx->r0) +
+         SSF_CT_MUL32(ctx->h2, ctx->rr3) + SSF_CT_MUL32(ctx->h3, ctx->rr2) +
+         SSF_CT_MUL32(ctx->h4, ctx->rr1);
+    d2 = SSF_CT_MUL32(ctx->h0, ctx->r2) + SSF_CT_MUL32(ctx->h1, ctx->r1) +
+         SSF_CT_MUL32(ctx->h2, ctx->r0) + SSF_CT_MUL32(ctx->h3, ctx->rr3) +
+         SSF_CT_MUL32(ctx->h4, ctx->rr2);
+    d3 = SSF_CT_MUL32(ctx->h0, ctx->r3) + SSF_CT_MUL32(ctx->h1, ctx->r2) +
+         SSF_CT_MUL32(ctx->h2, ctx->r1) + SSF_CT_MUL32(ctx->h3, ctx->r0) +
+         SSF_CT_MUL32(ctx->h4, ctx->rr3);
+    d4 = SSF_CT_MUL32(ctx->h0, ctx->r4) + SSF_CT_MUL32(ctx->h1, ctx->r3) +
+         SSF_CT_MUL32(ctx->h2, ctx->r2) + SSF_CT_MUL32(ctx->h3, ctx->r1) +
+         SSF_CT_MUL32(ctx->h4, ctx->r0);
 
     /* Carry propagation */
     c = (uint32_t)(d0 >> 26); ctx->h0 = (uint32_t)d0 & 0x3FFFFFFu;

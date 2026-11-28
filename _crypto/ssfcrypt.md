@@ -44,6 +44,15 @@ compiler when the target buffer is never read again.
   idioms (it turns `(x | -x) >> 31` back into `x != 0`). So each helper passes its
   intermediate and its result through
   [`SSF_CT_VALUE_BARRIER`](../ssfport.md#notes), which leaves it nothing to recognize.
+- `SSF_CT_MUL32(a, b)` (`uint64_t`) and `SSF_CT_SMUL32(a, b)` (`int64_t`) give the full
+  64-bit product of two 32-bit values for constant-time code. Cortex-M0 / M0+ / M23
+  (ARMv6-M, ARMv8-M Baseline) have no 32 x 32 -> 64 multiply instruction, so a plain
+  `(uint64_t)a * b` there calls libgcc's `__aeabi_lmul` / `__muldi3`, which branches on the
+  operands. On those cores the macros call `SSFCryptCTMul32()` / `SSFCryptCTSMul32()`: four
+  32-bit multiplies of 16-bit halves, combined with no carry compare, with value barriers on
+  the halves (clang would otherwise rebuild the libgcc call). Elsewhere they are the plain C
+  product, the native `UMULL` / `SMULL`. Operands are converted to 32 bits, so pass only
+  values that fit. The helpers are faster than the libgcc call on Cortex-M0+.
 - Use `SSFCryptSecureZero()` to clear secret keying material, intermediate scalars, hash
   contexts, and any other sensitive buffer that is about to leave scope. The implementation
   writes through a `volatile` pointer so the compiler cannot eliminate the clear via

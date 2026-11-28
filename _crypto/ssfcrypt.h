@@ -84,6 +84,71 @@ static inline uint32_t SSFCryptCTLt(uint32_t a, uint32_t b)
     SSF_CT_VALUE_BARRIER(t);
     return t;
 }
+
+/* Unsigned 32 x 32 -> 64 multiply from four 32-bit products of 16-bit halves. The middle     */
+/* terms are summed in 16-bit pieces (t < 3 * 2^16), so no carry ever needs a compare: there  */
+/* is nothing for a compiler to branch on. For cores whose only multiply is 32 x 32 -> 32.    */
+/* The 16-bit halves pass through value barriers: clang otherwise recognizes the whole as a  */
+/* 64-bit multiply and calls __aeabi_lmul again. (Barriers on the four partial products also */
+/* stop that, but cost clang spills on ARMv6-M: P-256 sign +4% instead of -0.2% here.)        */
+static inline uint64_t SSFCryptCTMul32(uint32_t a, uint32_t b)
+{
+    uint32_t al = a & 0xFFFFu;
+    uint32_t ah = a >> 16;
+    uint32_t bl = b & 0xFFFFu;
+    uint32_t bh = b >> 16;
+    uint32_t lo;
+    uint32_t m1;
+    uint32_t m2;
+    uint32_t hi;
+    uint32_t t;
+
+    SSF_CT_VALUE_BARRIER(al);
+    SSF_CT_VALUE_BARRIER(ah);
+    SSF_CT_VALUE_BARRIER(bl);
+    SSF_CT_VALUE_BARRIER(bh);
+    lo = al * bl;
+    m1 = al * bh;
+    m2 = ah * bl;
+    hi = ah * bh;
+
+    t = ((lo >> 16) + (m1 & 0xFFFFu)) + (m2 & 0xFFFFu);
+
+    hi += ((m1 >> 16) + (m2 >> 16)) + (t >> 16);
+    lo = (lo & 0xFFFFu) | (t << 16);
+    return ((uint64_t)hi << 32) | (uint64_t)lo;
+}
+
+/* Signed 32 x 32 -> 64 multiply: the unsigned product of the two's-complement bit patterns,  */
+/* minus b * 2^32 when a < 0 and minus a * 2^32 when b < 0, with the sign masks barriered.    */
+static inline int64_t SSFCryptCTSMul32(int32_t a, int32_t b)
+{
+    uint32_t ua = (uint32_t)a;
+    uint32_t ub = (uint32_t)b;
+    uint64_t p = SSFCryptCTMul32(ua, ub);
+    uint32_t ma = 0u - (ua >> 31);
+    uint32_t mb = 0u - (ub >> 31);
+    uint32_t hi;
+
+    SSF_CT_VALUE_BARRIER(ma);
+    SSF_CT_VALUE_BARRIER(mb);
+    hi = ((uint32_t)(p >> 32) - (ub & ma)) - (ua & mb);
+    /* uint64_t -> int64_t of a value above INT64_MAX is two's complement on every target */
+    return (int64_t)(((uint64_t)hi << 32) | (p & 0xFFFFFFFFu));
+}
+
+/* SSF_CT_MUL32(a, b) / SSF_CT_SMUL32(a, b): the full 64-bit product of two 32-bit values for */
+/* constant-time code. Cores with no 32 x 32 -> 64 multiply instruction (ARMv6-M: Cortex-M0 / */
+/* M0+; ARMv8-M Baseline: M23) would otherwise call libgcc's __aeabi_lmul / __muldi3, which   */
+/* branches on the operands; there the branch-free helpers above are used. Everywhere else    */
+/* the plain C product is kept, which compiles to the native widening multiply.               */
+#if defined(__ARM_ARCH_6M__) || defined(__ARM_ARCH_8M_BASE__)
+#define SSF_CT_MUL32(a, b) SSFCryptCTMul32((uint32_t)(a), (uint32_t)(b))
+#define SSF_CT_SMUL32(a, b) SSFCryptCTSMul32((int32_t)(a), (int32_t)(b))
+#else
+#define SSF_CT_MUL32(a, b) ((uint64_t)(uint32_t)(a) * (uint64_t)(uint32_t)(b))
+#define SSF_CT_SMUL32(a, b) ((int64_t)(int32_t)(a) * (int64_t)(int32_t)(b))
+#endif
 void SSFCryptSecureZero(void *p, size_t n);
 
 /* --------------------------------------------------------------------------------------------- */

@@ -59,7 +59,7 @@ static void _SSFEd25519FeAdd(SSFFE25519_t *r, const SSFFE25519_t *a, const SSFFE
     }
     /* Fold the overflow past 2^256 back in unconditionally (constant time) */
     {
-        uint64_t c = (uint64_t)carry * 38u;
+        uint64_t c = SSF_CT_MUL32(carry, 38u);
         for (i = 0; i < 8u; i++)
         {
             c += (uint64_t)r->v[i];
@@ -559,6 +559,16 @@ static void _SSFEd25519GeDoubleScalarMult(_ge_t *r, const uint8_t a[32], const _
 /* Scalar arithmetic modulo L (group order, SUPERCOP ref10 24-limb signed representation).       */
 /* --------------------------------------------------------------------------------------------- */
 
+/* Multiply operands in the scalar arithmetic are int64 but fit int32 (checked under unit test). */
+/* Interval bound over the code below, from inputs of at most 32 * 255^2 + 255 per limb          */
+/* (ScMulAdd; ScReduce's bytes are smaller): |16 * x[i]| <= 33,427,456 (2^25), q <= 9, the final  */
+/* carry is 0 or -1. Products are formed in full 64 bits by SSF_CT_SMUL32.                       */
+#if SSF_CONFIG_ED25519_UNIT_TEST == 1
+#define _SSF_ED_FITS32(v) SSF_ASSERT(((v) >= (int64_t)INT32_MIN) && ((v) <= (int64_t)INT32_MAX))
+#else
+#define _SSF_ED_FITS32(v) do { } while (0)
+#endif
+
 /* --------------------------------------------------------------------------------------------- */
 /* Writes x mod L to r (32 bytes LE) and wipes x; x is 64 signed byte limbs.                     */
 /* --------------------------------------------------------------------------------------------- */
@@ -578,7 +588,8 @@ static void _SSFEd25519ScModL(uint8_t r[32], int64_t x[64])
         carry = 0;
         for (j = (uint16_t)(i - 32u); j < (uint16_t)(i - 12u); j++)
         {
-            x[j] += carry - ((16 * x[i]) * (int64_t)_ed_L[j - (i - 32u)]);
+            _SSF_ED_FITS32(16 * x[i]);
+            x[j] += carry - SSF_CT_SMUL32(16 * x[i], _ed_L[j - (i - 32u)]);
             carry = (x[j] + 128) >> 8;
             x[j] -= carry * 256;
         }
@@ -591,13 +602,15 @@ static void _SSFEd25519ScModL(uint8_t r[32], int64_t x[64])
     carry = 0;
     for (j = 0u; j < 32u; j++)
     {
-        x[j] += carry - (q * (int64_t)_ed_L[j]);
+        _SSF_ED_FITS32(q);
+        x[j] += carry - SSF_CT_SMUL32(q, _ed_L[j]);
         carry = x[j] >> 8;
         x[j] &= 255;
     }
 
     /* The final carry is 0 or -1: subtracting it times L adds L back if x went negative */
-    for (j = 0u; j < 32u; j++) x[j] -= carry * (int64_t)_ed_L[j];
+    _SSF_ED_FITS32(carry);
+    for (j = 0u; j < 32u; j++) x[j] -= SSF_CT_SMUL32(carry, _ed_L[j]);
     for (i = 0u; i < 32u; i++)
     {
         x[i + 1u] += x[i] >> 8;
@@ -703,7 +716,7 @@ static void _SSFEd25519ScMulAdd(uint8_t s[32], const uint8_t a[32], const uint8_
     for (i = 0u; i < 64u; i++) x[i] = (i < 32u) ? (int64_t)c[i] : 0;
     for (i = 0u; i < 32u; i++)
     {
-        for (j = 0u; j < 32u; j++) x[i + j] += (int64_t)a[i] * (int64_t)b[j];
+        for (j = 0u; j < 32u; j++) x[i + j] += SSF_CT_SMUL32(a[i], b[j]);
     }
     _SSFEd25519ScModL(s, x);
 }

@@ -367,5 +367,46 @@ void SSFCryptUnitTest(void)
             }
         }
     }
+
+    /* ---- CT-C2: SSFCryptCTMul32 / SSFCryptCTSMul32 and the SSF_CT_MUL32 / SMUL32 macros ---- */
+    /* The branch-free helpers (always built, whichever the macros pick on this target) must   */
+    /* equal the native 64-bit product on edge values and on pseudo-random pairs.              */
+    {
+        static const uint32_t edges[] = { 0u, 1u, 2u, 0xFFFFu, 0x10000u, 0x10001u, 0x7FFFFFFFu,
+                                          0x80000000u, 0x80000001u, 0xFFFFFFFEu, 0xFFFFFFFFu };
+        uint32_t seed = 0x9E3779B9u;
+        uint32_t ai;
+        uint32_t bi;
+        uint32_t k;
+
+        for (ai = 0u; ai < (sizeof(edges) / sizeof(edges[0])); ai++)
+        {
+            for (bi = 0u; bi < (sizeof(edges) / sizeof(edges[0])); bi++)
+            {
+                uint32_t a = edges[ai];
+                uint32_t b = edges[bi];
+                int32_t sa = (int32_t)a;
+                int32_t sb = (int32_t)b;
+
+                SSF_ASSERT(SSFCryptCTMul32(a, b) == ((uint64_t)a * (uint64_t)b));
+                SSF_ASSERT(SSF_CT_MUL32(a, b) == ((uint64_t)a * (uint64_t)b));
+                SSF_ASSERT(SSFCryptCTSMul32(sa, sb) == ((int64_t)sa * (int64_t)sb));
+                SSF_ASSERT(SSF_CT_SMUL32(sa, sb) == ((int64_t)sa * (int64_t)sb));
+            }
+        }
+        for (k = 0u; k < 100000u; k++)
+        {
+            uint32_t a;
+            uint32_t b;
+
+            seed = (seed * 1664525u) + 1013904223u;
+            a = seed;
+            seed = (seed * 1664525u) + 1013904223u;
+            b = seed;
+            SSF_ASSERT(SSFCryptCTMul32(a, b) == ((uint64_t)a * (uint64_t)b));
+            SSF_ASSERT(SSFCryptCTSMul32((int32_t)a, (int32_t)b) ==
+                       ((int64_t)(int32_t)a * (int64_t)(int32_t)b));
+        }
+    }
 }
 #endif /* SSF_CONFIG_CRYPT_UNIT_TEST */

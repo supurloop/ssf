@@ -42,16 +42,21 @@ into branches on cores with no conditional move.
 This is checked as compiled, not just as written. Each constant-time function runs under
 qemu with different secrets and must give an identical instruction trace. That covers ssfbn
 (conditional copy, swap and compare, modular and Montgomery arithmetic, ModExp, the safegcd
-inverse), ssffe25519, Poly1305, `SSFCryptCTMemEq`, X25519, Ed25519 and P-256 ECDH / ECDSA.
-It was run with GCC 15.2 and clang 23 at `-Os` and `-O2`, for Cortex-M0+, M23, M3, M4 and
-M33 (2026-11). Results:
+inverse), ssffe25519, Poly1305, AES-GCM, `SSFCryptCTMemEq`, X25519, Ed25519, P-256 ECDH /
+ECDSA and RSA key generation's 65537^-1 mod lambda. It was run with GCC 15.2 and clang 23 at
+`-Os` and `-O2`, for Cortex-M0+, M23, M3, M4 and M33 (2026-11). Results:
 
 - **Cortex-M3 / M4 / M33:** every case passes.
-- **Cortex-M0 / M0+ / M23 (ARMv6-M, ARMv8-M Baseline): not yet constant time.** These cores
-  have no 32 x 32 -> 64 multiply. Every 64-bit product calls libgcc's `__muldi3`, which has
-  a data-dependent branch, so the big-number and curve25519 multiplies (and RSA, ECDH,
-  ECDSA, X25519 and Ed25519 above them) are variable time there. Fix planned (a
-  constant-time multiply helper for these cores). SSF's own code passes there too.
+- **Cortex-M0 / M0+ / M23 (ARMv6-M, ARMv8-M Baseline):** every case passes except RSA key
+  generation's trial division (below). These cores have no 32 x 32 -> 64 multiply, and
+  libgcc's `__aeabi_lmul` / `__muldi3`, which a 64-bit product would otherwise call, branches
+  on its operands. So every product in the constant-time code goes through
+  [`SSF_CT_MUL32` / `SSF_CT_SMUL32`](ssfcrypt.md#notes), which use a branch-free multiply
+  there. It is also faster than the libgcc call: RSA-2048 sign 19-27% fewer instructions on
+  Cortex-M0+.
+- **Open, every core:** RSA key generation's trial division of the secret prime candidates
+  by small primes uses a divide whose time depends on the operands (libgcc on M0 / M0+;
+  the `UDIV` instruction's early termination on M3 / M4 / M23 / M33). Fix planned.
 
 What the check does not cover: memory access patterns as seen by a cache (table lookups
 indexed by secrets, such as the AES S-box); operand-dependent instruction timing (for
